@@ -1,0 +1,10 @@
+.venv/
+.hatest/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+tests/card_preview_inline.html
+model/.venv/
+model/weights/
+model/runs/
+model/data/

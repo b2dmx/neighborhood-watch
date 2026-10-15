@@ -1,0 +1,11 @@
+{
+  "services": {
+    "identify": { "service": "mdi:cat" },
+    "test_sighting": { "service": "mdi:test-tube" },
+    "mark_wrong": { "service": "mdi:undo-variant" },
+    "set_reference_photo": { "service": "mdi:image-check" },
+    "build_summary": { "service": "mdi:weather-night" },
+    "correct": { "service": "mdi:check-decagram-outline" },
+    "scan": { "service": "mdi:folder-search-outline" }
+  }
+}

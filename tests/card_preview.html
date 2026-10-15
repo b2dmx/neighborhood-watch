@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card preview</title>
+<style>
+  :root { --primary-text-color:#e1e1e1; --secondary-text-color:#9e9e9e; --secondary-background-color:#2a2a2a;
+          --divider-color:#3a3a3a; --success-color:#43a047; --error-color:#db4437; --disabled-text-color:#666; }
+  body { background:#111; color:#e1e1e1; font-family: Roboto, system-ui, sans-serif; margin:0; padding:16px; }
+  ha-card { display:block; background:#1c1c1c; border-radius:12px; max-width:900px; }
+</style>
+</head>
+<body>
+<neighborhood-watch-card id="card"></neighborhood-watch-card>
+<script src="../custom_components/neighborhood_watch/frontend/neighborhood-watch-card.js"></script>
+<script>
+  const now = Date.now();
+  const iso = (m) => new Date(now - m * 60000).toISOString();
+  const svg = (c) => "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200'><rect width='300' height='200' fill='${c}'/></svg>`);
+  const entities = {}, states = {}, devices = {};
+  function dev(id, name, model, ents) {
+    devices[id] = { name, model };
+    for (const [key, eid, state, attrs] of ents) {
+      entities[eid] = { entity_id: eid, platform: "neighborhood_watch", device_id: id, translation_key: key };
+      states[eid] = { entity_id: eid, state, attributes: attrs || {}, last_updated: iso(1) };
+    }
+  }
+  dev("hub", "Neighborhood Watch", "Neighborhood Watch", [
+    ["night_summary", "sensor.nw_summary", "x", { lines: ["Luna — 2 sightings (Front Porch, Driveway)", "Milo — 7 sightings (Front Door, Front Porch)"] }],
+    ["last_scan", "sensor.nw_last_scan", "2 visits", { folder: "trailcam/october", state: "done", tally: { Raccoon: 3, Luna: 1 }, report: "trailcam/october/neighborhood-watch-report" }],
+    ["to_review", "sensor.nw_to_review", "3", { items: [
+      { id: "r1", time: iso(300), where: "Garage", animal: "Ziggy", confidence: "low" },
+      { id: "r2", time: iso(320), where: "Front Door", animal: "Raccoon", confidence: "high" },
+      { id: "r3", time: iso(500), where: "Driveway", animal: "Luna", confidence: "high" } ] }]]);
+  dev("luna", "Luna", "Cat", [
+    ["last_photo", "image.luna_last_photo", iso(600), { entity_picture: svg("#b98") }],
+    ["last_seen", "sensor.luna_last_seen", iso(600)], ["location", "sensor.luna_location", "Driveway"],
+    ["on_camera", "binary_sensor.luna_on_camera", "off"], ["sightings_tonight", "sensor.luna_sightings_tonight", "2"],
+    ["missing_mode", "switch.luna_missing_mode", "off"]]);
+  dev("milo", "Milo", "Cat", [
+    ["last_photo", "image.milo_last_photo", iso(5), { entity_picture: svg("#334") }],
+    ["last_seen", "sensor.milo_last_seen", iso(5)], ["location", "sensor.milo_location", "Front Door"],
+    ["on_camera", "binary_sensor.milo_on_camera", "on", { camera: "Front Door" }], ["sightings_tonight", "sensor.milo_sightings_tonight", "7"],
+    ["recently_absent", "binary_sensor.milo_recently_absent", "off"]]);
+  dev("ziggy", "Ziggy", "Cat", [
+    ["last_photo", "image.ziggy_last_photo", "unknown"], ["last_seen", "sensor.ziggy_last_seen", "unknown"],
+    ["location", "sensor.ziggy_location", "Not seen"], ["on_camera", "binary_sensor.ziggy_on_camera", "off"],
+    ["sightings_tonight", "sensor.ziggy_sightings_tonight", "0"], ["recently_absent", "binary_sensor.ziggy_recently_absent", "on"]]);
+  dev("racc", "Raccoon", "Wildlife", [
+    ["last_seen", "sensor.raccoon_last_seen", iso(40)], ["location", "sensor.raccoon_location", "Front Door"],
+    ["on_camera", "binary_sensor.raccoon_on_camera", "off"], ["sightings_tonight", "sensor.raccoon_sightings_tonight", "1"],
+    ["critical_alerts", "switch.raccoon_critical_alerts", "on"], ["last_photo", "image.raccoon_last_photo", iso(40)]]);
+  dev("garage", "Garage", "Camera", [
+    ["last_detection", "sensor.garage_last_detection", "Ziggy (low)", { time: iso(30), id: "abc123", animal: "Ziggy" }],
+    ["critical_alerts", "switch.garage_critical_alerts", "off"], ["last_frame", "image.garage_last_frame", iso(30)]]);
+  dev("yard", "Yard", "Camera", [
+    ["last_detection", "sensor.yard_last_detection", "Nothing (high)", { time: iso(3), id: "def456", animal: "Nothing" }],
+    ["critical_alerts", "switch.yard_critical_alerts", "on"]]);
+  window.calls = [];
+  const hass = { entities, states, devices, callService: (d, s, data) => window.calls.push([d, s, data]),
+    callWS: (msg) => Promise.resolve({ path: svg(msg.path.endsWith("r2") ? "#555" : "#777") }) };
+  const card = document.getElementById("card");
+  card.setConfig({});
+  card.hass = hass;
+</script>
+</body>
+</html>

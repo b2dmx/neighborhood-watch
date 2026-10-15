@@ -1,0 +1,98 @@
+identify:
+  fields:
+    camera:
+      required: true
+      example: Garage
+      selector:
+        text:
+
+test_sighting:
+  fields:
+    camera:
+      required: true
+      example: Garage
+      selector:
+        text:
+    animal:
+      required: true
+      example: Luna
+      selector:
+        text:
+    confidence:
+      default: medium
+      selector:
+        select:
+          options:
+            - high
+            - medium
+            - low
+    priority_candidate:
+      default: auto
+      selector:
+        select:
+          translation_key: priority_candidate
+          options:
+            - auto
+            - "yes"
+            - "no"
+
+mark_wrong:
+  fields:
+    animal:
+      required: true
+      example: Pepper
+      selector:
+        text:
+    camera:
+      example: Yard
+      selector:
+        text:
+
+set_reference_photo:
+  fields:
+    animal:
+      required: true
+      example: Luna
+      selector:
+        text:
+    camera:
+      example: Garage
+      selector:
+        text:
+
+correct:
+  fields:
+    answer:
+      required: true
+      example: Luna
+      selector:
+        text:
+    sighting_id:
+      example: 3fa2c1d9e0
+      selector:
+        text:
+    camera:
+      example: Garage
+      selector:
+        text:
+
+scan:
+  fields:
+    folder:
+      required: true
+      example: trailcam/2026-10
+      selector:
+        text:
+    identify:
+      default: true
+      selector:
+        boolean:
+    limit:
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          mode: box
+
+build_summary:

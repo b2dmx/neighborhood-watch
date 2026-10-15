@@ -1,0 +1,5 @@
+pytest-homeassistant-custom-component==0.13.372
+hassil
+home-assistant-intents
+gazetteer-matcher
+PyTurboJPEG

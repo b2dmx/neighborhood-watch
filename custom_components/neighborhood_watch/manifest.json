@@ -1,0 +1,15 @@
+{
+  "domain": "neighborhood_watch",
+  "name": "Neighborhood Watch",
+  "after_dependencies": ["frontend", "sun"],
+  "codeowners": ["@b2dmx"],
+  "config_flow": true,
+  "dependencies": ["ai_task", "camera", "file_upload", "http", "image", "media_source"],
+  "documentation": "https://github.com/b2dmx/neighborhood-watch",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/b2dmx/neighborhood-watch/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.6.1"
+}

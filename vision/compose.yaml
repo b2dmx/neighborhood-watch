@@ -1,0 +1,20 @@
+# Neighborhood Watch vision service (MegaDetector on OpenVINO).
+# Put the model folder next to this file as ./models/megadetector (the .xml and .bin files).
+services:
+  vision:
+    image: ghcr.io/b2dmx/neighborhood-watch-vision:latest
+    container_name: neighborhood-watch-vision
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./models:/models:ro
+      - ./work:/work
+      # The folder you bulk-scan (photos and videos); reports are written back into it.
+      # Change the left side to your share's path on the NAS.
+      - /volume1/neighborhood-watch/scan:/scan
+    devices:
+      - /dev/dri:/dev/dri   # Intel GPU; remove this line on machines without one (it then runs on the CPU)
+    environment:
+      NW_DEVICE: AUTO
+      NW_SIZE: "640"

@@ -1,0 +1,757 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AI models",
+        "description": "Which AI Task entities look at each camera frame, in order. Each model is tried only when the one before gives no answer (busy, error or out of quota).",
+        "data": {
+          "first_look": "First look",
+          "second_opinion": "Second opinion",
+          "paid_models": "Paid models",
+          "main_start": "Main model from",
+          "main_end": "Main model until"
+        },
+        "data_description": {
+          "first_look": "Runs on every sighting. Put the main model first and backups after it.",
+          "second_opinion": "Double-checks priority animals, strict animals, unknown cats and unsure answers. Use different models from the first look.",
+          "paid_models": "Models that cost money. They are labelled \"last resort\" and are never used in independent shadow mode. Put them last in each list.",
+          "main_start": "Optional: use the first model in the first-look list only between these times, to save its daily quota for the busiest hours. Backups cover the rest of the night.",
+          "main_end": "Leave both empty to use it all night."
+        }
+      },
+      "schedule": {
+        "title": "When to watch",
+        "description": "Cameras are watched between these times, and also whenever the sun is down if you turn that on (whichever is wider).",
+        "data": {
+          "night_start": "Start",
+          "night_end": "End",
+          "use_dark": "Also watch whenever it is dark",
+          "summary_time": "Night summary time",
+          "on_camera_minutes": "On camera for",
+          "watch_always": "Watch all day"
+        },
+        "data_description": {
+          "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
+          "on_camera_minutes": "How long an animal shows as on camera after a sighting.",
+          "watch_always": "For daytime visitors too. Every check uses AI quota, so this uses more."
+        }
+      },
+      "cameras": {
+        "title": "Cameras",
+        "description": "Pick the cameras to watch. Each one is set up on the next pages, filled in from its own device. You can add more later with Add camera.",
+        "data": {
+          "cameras": "Cameras"
+        }
+      },
+      "camera": {
+        "title": "Camera: {camera}",
+        "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.",
+        "data": {
+          "name": "Name",
+          "triggers": "Start a check when any of these turn on",
+          "skip_when": "Skip the check while any of these are on",
+          "cooldown": "Cooldown",
+          "priority_cooldown": "Cooldown after a priority animal",
+          "missing_cooldown": "Cooldown in missing mode",
+          "reopened_by": "A check on these cameras ends the cooldown",
+          "house": "Close to the house",
+          "unsure_alerts": "Alert on motion the AI couldn't identify",
+          "deterrent_lights": "Lights that scare pests off",
+          "deterrent_minutes": "Leave them on for",
+          "deterrent_sound": "Sound that scares pests off",
+          "check_every": "Also check every"
+        },
+        "data_description": {
+          "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
+          "cooldown": "Minimum time between checks of this camera.",
+          "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
+          "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
+          "reopened_by": "For a camera an animal passes on its way here.",
+          "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
+          "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
+          "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+          "deterrent_sound": "Played when a pest is seen here.",
+          "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+        }
+      },
+      "animal": {
+        "title": "Animals",
+        "description": "Describe each animal the AI should recognise. {count} added so far. Leave the name empty to finish; you can add more later with Add animal.",
+        "data": {
+          "name": "Name",
+          "species": "Species",
+          "description": "What it looks like",
+          "tips": "Identification tips",
+          "pattern": "Coat pattern",
+          "base": "Main colour",
+          "priority": "Priority animal",
+          "always_strict": "Always strict",
+          "reference_upload": "Reference photo",
+          "add_another": "Add another animal after this one",
+          "known_last_seen": "Last seen",
+          "known_location": "Last seen at",
+          "alert": "Alert when seen"
+        },
+        "data_description": {
+          "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
+          "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+          "pattern": "For a priority animal, both AI models must report this pattern.",
+          "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+          "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
+          "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
+          "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+          "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
+          "known_location": "Optional: where it was last seen.",
+          "alert": "Send an alert when this animal is seen."
+        }
+      },
+      "wildlife": {
+        "title": "Wildlife",
+        "description": "Tick the wildlife that visits. Each one is recognised by kind and gets sensible alert and scare-off settings, which you can change later (or add more with Add wildlife).",
+        "data": {
+          "wildlife": "Wildlife"
+        }
+      },
+      "people": {
+        "title": "Who gets alerts",
+        "description": "These phones get Neighborhood Watch alerts. Quiet zones (like work), sounds and missing-mode alerts can be set per person afterwards.",
+        "data": {
+          "phones": "Phones"
+        }
+      }
+    },
+    "error": {
+      "first_look_required": "Pick at least one model for the first look.",
+      "name_required": "Enter a name.",
+      "name_taken": "That name is already used.",
+      "name_reserved": "That name is reserved.",
+      "name_pipe": "Names cannot contain |.",
+      "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict."
+    },
+    "abort": {
+      "no_ai_task": "Set up an AI Task integration first (for example Google Generative AI).",
+      "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Neighborhood Watch",
+        "menu_options": {
+          "mode": "Mode (live or shadow)",
+          "models": "AI models",
+          "schedule": "When to watch",
+          "identification": "Identification",
+          "notifications": "Notification pictures",
+          "alerts": "Alerts",
+          "training": "Training data",
+          "detector": "Local detector"
+        }
+      },
+      "mode": {
+        "title": "Mode",
+        "description": "Shadow modes never fire the sighting event, so nothing alerts or feeds. Compare results with the Shadow mismatches sensor.",
+        "data": {
+          "mode": "Mode"
+        }
+      },
+      "models": {
+        "title": "AI models",
+        "description": "Each model is tried only when the one before gives no answer.",
+        "data": {
+          "first_look": "First look",
+          "second_opinion": "Second opinion",
+          "paid_models": "Paid models",
+          "main_start": "Main model from",
+          "main_end": "Main model until"
+        },
+        "data_description": {
+          "first_look": "Runs on every sighting. Main model first, backups after it.",
+          "second_opinion": "Double-checks priority animals, strict animals, unknown cats and unsure answers.",
+          "paid_models": "Labelled \"last resort\"; never used in independent shadow mode.",
+          "main_start": "Optional: use the first model in the first-look list only between these times, to save its daily quota for the busiest hours. Backups cover the rest of the night.",
+          "main_end": "Leave both empty to use it all night."
+        }
+      },
+      "schedule": {
+        "title": "When to watch",
+        "data": {
+          "night_start": "Start",
+          "night_end": "End",
+          "use_dark": "Also watch whenever it is dark",
+          "summary_time": "Night summary time",
+          "on_camera_minutes": "On camera for",
+          "watch_always": "Watch all day"
+        },
+        "data_description": {
+          "watch_always": "For daytime visitors too. Every check uses AI quota, so this uses more."
+        }
+      },
+      "identification": {
+        "title": "Identification",
+        "description": "The AI instructions. {animals} is replaced with each animal's description, {location} with the camera name, {absent} with the recently-absent line, {extra_rules} with the extra rules and {wildlife} with the wildlife list.",
+        "data": {
+          "instructions": "Instructions",
+          "reset_instructions": "Restore the default instructions",
+          "extra_rules": "Extra rules",
+          "wildlife": "Wildlife",
+          "absent_days": "Recently absent after",
+          "reference_photos": "Send reference photos"
+        },
+        "data_description": {
+          "extra_rules": "Rules that involve several animals, e.g. how to tell the dark cats apart.",
+          "wildlife": "Animals the AI may name besides yours. They show as a camera's current animal.",
+          "absent_days": "An animal not seen this long is named only when both AI models are sure.",
+          "reference_photos": "Each animal's reference photo goes to the AI beside the frame. More accurate; uses more tokens."
+        }
+      },
+      "notifications": {
+        "title": "Notification pictures",
+        "description": "Each sighting event carries a picture link that phones can open. Leave empty to use this Home Assistant's external URL.",
+        "data": {
+          "public_url": "Public address"
+        }
+      },
+      "alerts": {
+        "title": "Alerts",
+        "description": "Who gets alerts is set per person (Add person). Cameras, animals and wildlife each decide when they alert.",
+        "data": {
+          "alerts": "Send alerts",
+          "unknown_alerts": "Alert on unknown animals (an Unknown Cat or Dog)",
+          "correction_buttons": "Right / Wrong buttons on alerts"
+        },
+        "data_description": {
+          "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
+          "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data."
+        }
+      },
+      "training": {
+        "title": "Training data",
+        "description": "Every checked frame is saved, downscaled, with what the AI said and what you confirmed or corrected. It is what a custom model is trained on.",
+        "data": {
+          "dataset": "Save training data",
+          "dataset_dir": "Folder",
+          "dataset_gb": "Keep at most"
+        },
+        "data_description": {
+          "dataset_dir": "Leave empty for the media folder. A network share (e.g. a NAS added under Settings → System → Storage) keeps it off this device.",
+          "dataset_gb": "When full, the oldest unlabelled frames go first; labelled ones are kept longest."
+        }
+      },
+      "detector": {
+        "title": "Local detector",
+        "description": "An optional MegaDetector service on your own machine (see the vision folder in the repository). It looks at every frame before the AI. Start with Shadow and watch the Detector agreement sensor; switch to Skip empty frames once it has no misses.",
+        "data": {
+          "detector_url": "Address",
+          "detector_mode": "Use",
+          "detector_min": "Animal threshold"
+        },
+        "data_description": {
+          "detector_url": "e.g. http://nas.local:8765. Leave empty to turn it off.",
+          "detector_min": "Below this confidence the frame counts as empty."
+        }
+      }
+    },
+    "error": {
+      "first_look_required": "Pick at least one model for the first look.",
+      "missing_animals": "The instructions must contain {animals}."
+    }
+  },
+  "config_subentries": {
+    "camera": {
+      "initiate_flow": {
+        "user": "Add camera",
+        "reconfigure": "Edit camera"
+      },
+      "entry_type": "Camera",
+      "step": {
+        "user": {
+          "title": "Add camera",
+          "data": {
+            "camera": "Camera"
+          }
+        },
+        "details": {
+          "title": "Camera: {camera}",
+          "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.",
+          "data": {
+            "name": "Name",
+            "triggers": "Start a check when any of these turn on",
+            "skip_when": "Skip the check while any of these are on",
+            "cooldown": "Cooldown",
+            "priority_cooldown": "Cooldown after a priority animal",
+            "missing_cooldown": "Cooldown in missing mode",
+            "reopened_by": "A check on these cameras ends the cooldown",
+            "house": "Close to the house",
+            "unsure_alerts": "Alert on motion the AI couldn't identify",
+            "deterrent_lights": "Lights that scare pests off",
+            "deterrent_minutes": "Leave them on for",
+            "deterrent_sound": "Sound that scares pests off",
+            "check_every": "Also check every"
+          },
+          "data_description": {
+            "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
+            "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
+            "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
+            "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
+            "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+            "deterrent_sound": "Played when a pest is seen here.",
+            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit camera",
+          "data": {
+            "camera": "Camera",
+            "name": "Name",
+            "triggers": "Start a check when any of these turn on",
+            "skip_when": "Skip the check while any of these are on",
+            "cooldown": "Cooldown",
+            "priority_cooldown": "Cooldown after a priority animal",
+            "missing_cooldown": "Cooldown in missing mode",
+            "reopened_by": "A check on these cameras ends the cooldown",
+            "house": "Close to the house",
+            "unsure_alerts": "Alert on motion the AI couldn't identify",
+            "deterrent_lights": "Lights that scare pests off",
+            "deterrent_minutes": "Leave them on for",
+            "deterrent_sound": "Sound that scares pests off",
+            "check_every": "Also check every"
+          },
+          "data_description": {
+            "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
+            "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
+            "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+            "deterrent_sound": "Played when a pest is seen here.",
+            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Enter a name.",
+        "name_taken": "That name is already used."
+      },
+      "abort": {
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      }
+    },
+    "animal": {
+      "initiate_flow": {
+        "user": "Add animal",
+        "reconfigure": "Edit animal"
+      },
+      "entry_type": "Animal",
+      "step": {
+        "user": {
+          "title": "Add animal",
+          "data": {
+            "name": "Name",
+            "species": "Species",
+            "description": "What it looks like",
+            "tips": "Identification tips",
+            "pattern": "Coat pattern",
+            "base": "Main colour",
+            "priority": "Priority animal",
+            "always_strict": "Always strict",
+            "reference_upload": "Reference photo",
+            "known_last_seen": "Last seen",
+            "known_location": "Last seen at",
+            "alert": "Alert when seen"
+          },
+          "data_description": {
+            "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
+            "tips": "Extra rules for telling this animal apart.",
+            "priority": "Never missed, never falsely confirmed. Adds missing mode and a confirmed-on-camera signal.",
+            "always_strict": "Counts only when both AI models name it at high confidence.",
+            "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+            "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
+            "known_location": "Optional: where it was last seen.",
+            "alert": "Send an alert when this animal is seen."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit animal",
+          "data": {
+            "name": "Name",
+            "species": "Species",
+            "description": "What it looks like",
+            "tips": "Identification tips",
+            "pattern": "Coat pattern",
+            "base": "Main colour",
+            "priority": "Priority animal",
+            "always_strict": "Always strict",
+            "reference_upload": "New reference photo",
+            "remove_reference": "Remove the reference photo",
+            "known_last_seen": "Last seen",
+            "known_location": "Last seen at",
+            "alert": "Alert when seen"
+          },
+          "data_description": {
+            "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
+            "known_location": "Optional: where it was last seen.",
+            "alert": "Send an alert when this animal is seen."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Enter a name.",
+        "name_taken": "That name is already used.",
+        "name_reserved": "That name is reserved.",
+        "name_pipe": "Names cannot contain |.",
+        "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict."
+      },
+      "abort": {
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      }
+    },
+    "species": {
+      "initiate_flow": {
+        "user": "Add wildlife",
+        "reconfigure": "Edit wildlife"
+      },
+      "entry_type": "Wildlife",
+      "step": {
+        "user": {
+          "title": "Add wildlife",
+          "description": "Wildlife is recognised by kind only: a raccoon is a raccoon. Use Add animal for animals told apart by name.",
+          "data": {
+            "name": "Name",
+            "description": "What it looks like (optional)",
+            "alert_scope": "Alert",
+            "alert_cameras": "Cameras (when alerting at chosen cameras)",
+            "critical_switch": "Add a critical-alerts switch",
+            "pest": "Scare it off",
+            "in_summary": "Count it in the night summary"
+          },
+          "data_description": {
+            "name": "What the AI calls it, e.g. Raccoon.",
+            "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
+            "critical_switch": "A switch that makes its alerts break through silent mode.",
+            "pest": "Turns on the camera's deterrent lights and sound when it is seen."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit wildlife",
+          "data": {
+            "name": "Name",
+            "description": "What it looks like (optional)",
+            "alert_scope": "Alert",
+            "alert_cameras": "Cameras (when alerting at chosen cameras)",
+            "critical_switch": "Add a critical-alerts switch",
+            "pest": "Scare it off",
+            "in_summary": "Count it in the night summary"
+          },
+          "data_description": {
+            "name": "What the AI calls it, e.g. Raccoon.",
+            "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
+            "critical_switch": "A switch that makes its alerts break through silent mode.",
+            "pest": "Turns on the camera's deterrent lights and sound when it is seen."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Enter a name.",
+        "name_taken": "That name is already used.",
+        "name_reserved": "That name is reserved."
+      },
+      "abort": {
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      }
+    },
+    "recipient": {
+      "initiate_flow": {
+        "user": "Add person",
+        "reconfigure": "Edit person"
+      },
+      "entry_type": "Person",
+      "step": {
+        "user": {
+          "title": "Add person",
+          "description": "Someone who gets Neighborhood Watch alerts on their phone.",
+          "data": {
+            "name": "Name",
+            "person": "Person",
+            "notify_service": "Phone",
+            "quiet_zones": "No critical alerts while in",
+            "missing_alerts": "Gets missing-mode alerts",
+            "critical_sound": "Critical sound",
+            "critical_volume": "Critical volume"
+          },
+          "data_description": {
+            "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
+            "quiet_zones": "Zones (like work) where critical alerts arrive as normal ones.",
+            "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
+            "critical_sound": "The sound file name on the phone, or default."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit person",
+          "data": {
+            "name": "Name",
+            "person": "Person",
+            "notify_service": "Phone",
+            "quiet_zones": "No critical alerts while in",
+            "missing_alerts": "Gets missing-mode alerts",
+            "critical_sound": "Critical sound",
+            "critical_volume": "Critical volume"
+          },
+          "data_description": {
+            "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
+            "quiet_zones": "Zones (like work) where critical alerts arrive as normal ones.",
+            "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
+            "critical_sound": "The sound file name on the phone, or default."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Enter a name."
+      },
+      "abort": {
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      }
+    }
+  },
+  "selector": {
+    "pattern": {
+      "options": {
+        "blotchy": "Blotchy (calico-like)",
+        "uniform": "Uniform",
+        "striped": "Striped (tabby)",
+        "na": "Not checked"
+      }
+    },
+    "base": {
+      "options": {
+        "white": "White",
+        "grey": "Grey",
+        "black": "Black",
+        "na": "Not checked"
+      }
+    },
+    "mode": {
+      "options": {
+        "live": "Live: fire the sighting event",
+        "shadow_reuse": "Shadow, reuse answers: re-run the rules on another system's sighting events (no AI calls)",
+        "shadow_independent": "Shadow, independent: check cameras itself without paid models"
+      }
+    },
+    "priority_candidate": {
+      "options": {
+        "auto": "Auto",
+        "yes": "Yes",
+        "no": "No"
+      }
+    },
+    "alert_scope": {
+      "options": {
+        "never": "Never",
+        "house": "Cameras close to the house",
+        "cameras": "Chosen cameras",
+        "any": "Any camera"
+      }
+    },
+    "detector_mode": {
+      "options": {
+        "shadow": "Shadow: ask it and compare, change nothing",
+        "skip_empty": "Skip empty frames: no AI call when it finds no animal (never in missing mode)"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "night_summary": {
+        "name": "Night summary"
+      },
+      "last_sighting": {
+        "name": "Last sighting"
+      },
+      "ai_calls": {
+        "name": "AI calls today"
+      },
+      "shadow_mismatches": {
+        "name": "Shadow mismatches"
+      },
+      "current_animal": {
+        "name": "Animal"
+      },
+      "last_detection": {
+        "name": "Last detection"
+      },
+      "last_seen": {
+        "name": "Last seen"
+      },
+      "location": {
+        "name": "Location"
+      },
+      "sightings_tonight": {
+        "name": "Sightings tonight"
+      },
+      "sightings_week": {
+        "name": "Sightings this week"
+      },
+      "last_confirmed": {
+        "name": "Last confirmed"
+      },
+      "to_review": {
+        "name": "To review"
+      },
+      "detector_agreement": {
+        "name": "Detector agreement"
+      },
+      "last_scan": {
+        "name": "Last scan"
+      }
+    },
+    "binary_sensor": {
+      "on_camera": {
+        "name": "On camera"
+      },
+      "confirmed_on_camera": {
+        "name": "Confirmed on camera"
+      },
+      "confirmed_today": {
+        "name": "Confirmed today"
+      },
+      "recently_absent": {
+        "name": "Recently absent"
+      }
+    },
+    "switch": {
+      "missing_mode": {
+        "name": "Missing mode"
+      },
+      "critical_alerts": {
+        "name": "Critical alerts"
+      }
+    },
+    "image": {
+      "last_frame": {
+        "name": "Last frame"
+      },
+      "last_photo": {
+        "name": "Last photo"
+      },
+      "reference_photo": {
+        "name": "Reference photo"
+      }
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "Neighborhood Watch is not loaded."
+    },
+    "unknown_camera": {
+      "message": "No camera named {camera}."
+    },
+    "unknown_animal": {
+      "message": "No animal named {animal}."
+    },
+    "no_photo": {
+      "message": "There is no photo of that animal yet; name a camera to take one now."
+    },
+    "scan_failed": {
+      "message": "The scan could not start: {error}"
+    }
+  },
+  "services": {
+    "identify": {
+      "name": "Identify",
+      "description": "Checks a camera now, ignoring its cooldown, and returns what the AI found.",
+      "fields": {
+        "camera": {
+          "name": "Camera",
+          "description": "Camera name, e.g. Garage."
+        }
+      }
+    },
+    "test_sighting": {
+      "name": "Test sighting",
+      "description": "Fires a fake sighting event marked test, so you can check your alerts. Tracking is never changed.",
+      "fields": {
+        "camera": {
+          "name": "Camera",
+          "description": "Camera name, e.g. Garage."
+        },
+        "animal": {
+          "name": "Animal",
+          "description": "What the fake sighting saw."
+        },
+        "confidence": {
+          "name": "Confidence",
+          "description": "high, medium or low."
+        },
+        "priority_candidate": {
+          "name": "Priority candidate",
+          "description": "Whether either AI named a priority animal. Auto = yes only when the animal is one."
+        }
+      }
+    },
+    "mark_wrong": {
+      "name": "Mark wrong",
+      "description": "Removes the latest counted sighting of an animal from tracking, e.g. that wasn't Pepper.",
+      "fields": {
+        "animal": {
+          "name": "Animal",
+          "description": "The animal that was named wrongly."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "Only the latest sighting at this camera."
+        }
+      }
+    },
+    "set_reference_photo": {
+      "name": "Set reference photo",
+      "description": "Uses the animal's last photo as its reference photo, or takes one from a camera now.",
+      "fields": {
+        "animal": {
+          "name": "Animal",
+          "description": "The animal."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "Take a fresh snapshot from this camera instead."
+        }
+      }
+    },
+    "build_summary": {
+      "name": "Build night summary",
+      "description": "Builds the night summary now and starts a new night."
+    },
+    "correct": {
+      "name": "Correct a sighting",
+      "description": "Confirms or corrects what a camera saw. Tracking and the photo move to the right animal, and the training frame is labelled.",
+      "fields": {
+        "answer": {
+          "name": "Answer",
+          "description": "right, wrong, unsure (looked at, no verdict), or what it really was (an animal's name, a wildlife kind, or nothing)."
+        },
+        "sighting_id": {
+          "name": "Sighting",
+          "description": "The sighting's id (from an alert or Last detection). Empty = the latest one."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "Without an id: the latest sighting at this camera."
+        }
+      }
+    },
+    "scan": {
+      "name": "Scan a folder",
+      "description": "Bulk-scans photos and videos in a folder on the local detector's machine. The detector finds each animal visit, the AI names it, and a report is written into the folder. Visits also join the review queue.",
+      "fields": {
+        "folder": {
+          "name": "Folder",
+          "description": "A folder inside the detector's scan folder, e.g. trailcam/2026-10."
+        },
+        "identify": {
+          "name": "Name the animals",
+          "description": "Ask the AI what each visit is (uses AI quota: one or two calls per visit)."
+        },
+        "limit": {
+          "name": "At most",
+          "description": "How many visits to name; the rest are listed as \"animal\"."
+        }
+      }
+    }
+  }
+}
