@@ -127,6 +127,8 @@ Wildlife needs no device per animal. The Neighborhood Watch device has:
 
 ### Per camera
 
+These join the camera's own device (from its integration, e.g. UniFi Protect), so each camera is listed once.
+
 | Entity | What it is |
 |---|---|
 | Animal | What it is seeing now (clears after the on-camera window), or "None" |

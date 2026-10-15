@@ -197,7 +197,11 @@ class LastDetection(WatchEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         state = self.watch.camera_state(self.camera.slug)
-        return {**(state.get("last") or {}), "last_check": state.get("last_check")}
+        return {
+            **(state.get("last") or {}),
+            "last_check": state.get("last_check"),
+            "camera_name": self.camera.name,  # the camera's device may be named differently
+        }
 
 
 # --- animals --------------------------------------------------------------------------

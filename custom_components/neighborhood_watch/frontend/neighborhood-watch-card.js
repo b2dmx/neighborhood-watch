@@ -118,7 +118,11 @@ class NeighborhoodWatchCard extends HTMLElement {
       const item = { id, name: device.name_by_user || device.name, keys };
       if (keys.night_summary) out.hub = item;
       else if (hidden.has(id)) continue;
-      else if (device.model === "Camera") out.cameras.push(item);
+      else if (keys.last_detection) {
+        // A camera's entities live on the camera's own device; use our name for it.
+        item.name = this._state(keys.last_detection)?.attributes?.camera_name || item.name;
+        out.cameras.push(item);
+      }
       else if (device.model === "Wildlife") out.wildlife.push(item);
       else out.animals.push(item);
     }

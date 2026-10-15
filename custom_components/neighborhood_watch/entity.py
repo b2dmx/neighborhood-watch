@@ -1,13 +1,23 @@
-"""Shared entity base: one hub device, a device per camera and a device per animal."""
+"""Shared entity base: one hub device and a device per animal. A camera's entities join
+the camera's own device (from its integration), so cameras aren't listed twice."""
 from __future__ import annotations
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN, NAME
 from .engine import AnimalConfig, CameraConfig, SpeciesConfig, WatchEngine
+
+
+def camera_device(hass: HomeAssistant, camera_entity: str) -> dr.DeviceEntry | None:
+    """The device the camera entity already belongs to, if any."""
+    entry = er.async_get(hass).async_get(camera_entity)
+    if entry is None or entry.device_id is None:
+        return None
+    return dr.async_get(hass).async_get(entry.device_id)
 
 
 class WatchEntity(Entity):
@@ -29,14 +39,19 @@ class WatchEntity(Entity):
         self._attr_translation_key = key
         if camera is not None:
             owner = camera.subentry_id
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, f"camera_{owner}")},
-                name=camera.name,
-                model="Camera",
-                manufacturer=NAME,
-                via_device_id=watch.hub_device_id,
-                entry_type=DeviceEntryType.SERVICE,
-            )
+            existing = camera_device(watch.hass, camera.camera)
+            if existing is not None:
+                # Shown on the camera's own device (HA links it like a helper's entity).
+                self.device_entry = existing
+            else:  # a camera without a device of its own
+                self._attr_device_info = DeviceInfo(
+                    identifiers={(DOMAIN, f"camera_{owner}")},
+                    name=camera.name,
+                    model="Camera",
+                    manufacturer=NAME,
+                    via_device_id=watch.hub_device_id,
+                    entry_type=DeviceEntryType.SERVICE,
+                )
         elif animal is not None:
             owner = animal.subentry_id
             self._attr_device_info = DeviceInfo(

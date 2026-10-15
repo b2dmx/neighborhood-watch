@@ -257,8 +257,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> boo
     await watch.async_start()
     entry.runtime_data = watch
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _drop_duplicate_camera_devices(hass, watch)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
+
+
+def _drop_duplicate_camera_devices(hass: HomeAssistant, watch: WatchEngine) -> None:
+    """Before 0.11 each camera had a device of ours; its entities now live on the camera's
+    own device, so ours goes."""
+    from .entity import camera_device  # noqa: PLC0415
+
+    registry = dr.async_get(hass)
+    for cam in watch.cameras.values():
+        ours = registry.async_get_device_by_identifier(
+            (DOMAIN, f"camera_{cam.subentry_id}"), watch.entry.entry_id
+        )
+        if ours is not None and camera_device(hass, cam.camera) is not None:
+            registry.async_remove_device(ours.id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> bool:
