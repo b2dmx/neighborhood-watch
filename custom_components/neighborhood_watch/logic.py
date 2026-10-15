@@ -512,15 +512,24 @@ class Summary:
     places: dict[str, list[str]] = field(default_factory=dict)
 
 
-def summarize(entries: Iterable[tuple[str, str]], order: Sequence[str], limit: int = 255) -> Summary:
-    """`entries` = (animal, camera name) for each logged cat sighting, any order.
+def summarize(
+    entries: Iterable[tuple[str, str] | tuple[str, str, bool]],
+    order: Sequence[str],
+    limit: int = 255,
+) -> Summary:
+    """`entries` = (animal, camera name[, possible]) for each logged sighting, any order.
 
     Known animals in roster order, each with its count and the cameras (first seen first);
-    Unknown Cat last as a count only.
+    Unknown Cat last as a count only. Wildlife seen at low confidence still counts, as
+    "possible": "Raccoon — 3 sightings (1 confirmed, 2 possible) (Yard)".
     """
     counts: dict[str, int] = {}
+    possible: dict[str, int] = {}
     places: dict[str, list[str]] = {}
-    for animal, where in entries:
+    for entry in entries:
+        animal, where = entry[0], entry[1]
+        if len(entry) > 2 and entry[2]:
+            possible[animal] = possible.get(animal, 0) + 1
         counts[animal] = counts.get(animal, 0) + 1
         seen = places.setdefault(animal, [])
         if where and where not in seen:
@@ -529,7 +538,12 @@ def summarize(entries: Iterable[tuple[str, str]], order: Sequence[str], limit: i
     for name in order:
         if counts.get(name):
             n = counts[name]
-            lines.append(f"{name} — {n} sighting{'s' if n > 1 else ''} ({', '.join(places[name])})")
+            maybe = possible.get(name, 0)
+            split = ""
+            if maybe:
+                sure = f"{n - maybe} confirmed, " if n > maybe else ""
+                split = f" ({sure}{maybe} possible)"
+            lines.append(f"{name} — {n} sighting{'s' if n > 1 else ''}{split} ({', '.join(places[name])})")
     for name in sorted(k for k in counts if is_unknown(k)):
         n = counts[name]
         lines.append(f"{n} {name} sighting{'s' if n > 1 else ''}")

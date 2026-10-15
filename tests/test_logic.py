@@ -494,3 +494,8 @@ def test_same_visit_window_follows_the_camera_cooldown():
     assert logic.same_visit(now - timedelta(minutes=31), now, 30)  # a 30-min cooldown: still the same visit
     assert not logic.same_visit(now - timedelta(minutes=41), now, 30)
     assert not logic.same_visit(None, now, 30)
+
+
+def test_summary_marks_possible_wildlife():
+    s = logic.summarize([("Raccoon", "Yard", True), ("Raccoon", "Yard", False), ("Opossum", "Bins", True)], ["Raccoon", "Opossum"])
+    assert s.lines == ["Raccoon — 2 sightings (1 confirmed, 1 possible) (Yard)", "Opossum — 1 sighting (1 possible) (Bins)"]

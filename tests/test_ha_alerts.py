@@ -224,3 +224,13 @@ async def test_catch_all_critical_switch(hass, watch):
     watch["ai"].say(SECOND, "Unknown Cat|medium|uniform|black|small black cat")
     await trigger(hass, "yard")
     assert level(to(watch["sent"], "bo")[-1]) == "critical"
+
+
+async def test_person_critical_switch_turns_their_critical_alerts_normal(hass, watch):
+    await switch(hass, "switch.neighborhood_watch_bo_gets_critical_alerts", False)
+    await switch(hass, "switch.garage_critical_alerts", True)
+    watch["ai"].say(FIRST, "Milo|high|na|na|")
+    await trigger(hass, "garage")
+    assert level(to(watch["sent"], "bo")[-1]) == "active"
+    assert level(to(watch["sent"], "dee")[-1]) == "critical"
+

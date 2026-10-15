@@ -3,7 +3,8 @@
 Each animal and wildlife kind: Alerts, Critical alerts (rings through silent mode at its
 critical cameras), and Missing mode for named animals. Each camera: Critical alerts
 (anything there rings, except the animals its page lists). The hub: Critical alerts for
-unknown animals, other wildlife and unsure motion."""
+unknown animals, other wildlife and unsure motion, and one per person: gets critical alerts
+(starts on)."""
 from __future__ import annotations
 
 from typing import Any
@@ -14,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import WatchConfigEntry
 from .const import BUILTIN_KEYS
-from .engine import builtin_switch_key
+from .engine import RecipientConfig, WatchEngine, builtin_switch_key
 from .entity import WatchEntity
 
 
@@ -39,6 +40,8 @@ async def async_setup_entry(
         )
     # The catch-alls (unknown animals, other wildlife, unsure motion) live on the hub.
     async_add_entities([CatchAllCritical(watch, f"{key}_critical") for key in BUILTIN_KEYS.values()])
+    for person in watch.recipients:
+        async_add_entities([PersonCritical(watch, person)])  # on the hub device, like the catch-alls
 
 
 class MissingMode(WatchEntity, SwitchEntity):
@@ -93,3 +96,25 @@ class CatchAllCritical(CriticalAlerts):
     @property
     def _key(self) -> str:
         return builtin_switch_key(self._attr_translation_key.removesuffix("_critical"))
+
+
+class PersonCritical(WatchEntity, SwitchEntity):
+    """Off: this person's critical alerts arrive as normal notifications."""
+
+    _attr_icon = "mdi:bell-ring"
+
+    def __init__(self, watch: WatchEngine, person: RecipientConfig) -> None:
+        super().__init__(watch, "person_critical")
+        self.person = person
+        self._attr_translation_placeholders = {"person": person.name}
+        self._attr_unique_id = f"{watch.entry.entry_id}_{person.subentry_id}_person_critical"
+
+    @property
+    def is_on(self) -> bool:
+        return self.watch.person_critical_on(self.person)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.watch.async_set_critical(self.person.switch_key, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.watch.async_set_critical(self.person.switch_key, False)

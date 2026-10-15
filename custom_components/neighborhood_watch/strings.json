@@ -57,7 +57,8 @@
           "deterrent_lights": "Lights that scare pests off",
           "deterrent_minutes": "Leave them on for",
           "deterrent_sound": "Sound that scares pests off",
-          "check_every": "Also check every"
+          "check_every": "Also check every",
+          "ai_notes": "What the AI should know about this view"
         },
         "data_description": {
           "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
@@ -67,7 +68,8 @@
           "reopened_by": "For a camera an animal passes on its way here.",
           "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
           "deterrent_sound": "Played when a pest is seen here.",
-          "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+          "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
+          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
         }
       },
       "animal": {
@@ -192,13 +194,13 @@
         "data": {
           "instructions": "Instructions",
           "reset_instructions": "Restore the default instructions",
-          "extra_rules": "Extra rules",
+          "extra_rules": "Notes for the AI (all cameras)",
           "wildlife": "Wildlife",
           "absent_days": "Recently absent after",
           "reference_photos": "Send reference photos"
         },
         "data_description": {
-          "extra_rules": "Rules that involve several animals, e.g. how to tell the dark cats apart.",
+          "extra_rules": "Rules for every camera. Notes about one camera go on that camera's page.",
           "wildlife": "Animals the AI may name besides yours. They show as a camera's current animal.",
           "absent_days": "An animal not seen this long is named only when both AI models are sure.",
           "reference_photos": "Each animal's reference photo goes to the AI beside the frame. More accurate; uses more tokens."
@@ -301,7 +303,8 @@
             "deterrent_minutes": "Leave them on for",
             "deterrent_sound": "Sound that scares pests off",
             "check_every": "Also check every",
-            "critical_except": "Critical alerts here, except"
+            "critical_except": "Critical alerts here, except",
+            "ai_notes": "What the AI should know about this view"
           },
           "data_description": {
             "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
@@ -309,7 +312,8 @@
             "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
             "deterrent_sound": "Played when a pest is seen here.",
             "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
-            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here)."
+            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
+            "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
           }
         },
         "reconfigure": {
@@ -327,13 +331,15 @@
             "deterrent_minutes": "Leave them on for",
             "deterrent_sound": "Sound that scares pests off",
             "check_every": "Also check every",
-            "critical_except": "Critical alerts here, except"
+            "critical_except": "Critical alerts here, except",
+            "ai_notes": "What the AI should know about this view"
           },
           "data_description": {
             "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
             "deterrent_sound": "Played when a pest is seen here.",
             "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
-            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here)."
+            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
+            "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
           }
         }
       },
@@ -669,6 +675,9 @@
       },
       "motion_critical": {
         "name": "Unsure motion critical alerts"
+      },
+      "person_critical": {
+        "name": "{person} gets critical alerts"
       }
     },
     "image": {

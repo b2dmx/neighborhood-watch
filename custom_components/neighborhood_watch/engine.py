@@ -57,6 +57,7 @@ from .const import (
     CONF_DETER_LIGHTS,
     CONF_DETER_MINUTES,
     CONF_DETER_SOUND,
+    CONF_AI_NOTES,
     CONF_ALWAYS,
     CONF_INTERVAL,
     CONF_IN_SUMMARY,
@@ -155,6 +156,7 @@ class CameraConfig:
     cooldown: logic.Cooldown
     reopened_by: list[str]
     critical_except: frozenset[str] = frozenset()  # lower-case names that never ring here
+    ai_notes: str = ""
     interval: float = 0  # minutes; 0 = only when a sensor triggers
     deter_lights: list[str] = field(default_factory=list)
     deter_minutes: float = 2
@@ -202,6 +204,10 @@ class RecipientConfig:
     quiet_mode: str = QUIET_NORMAL
     quiet_start: str | None = None
     quiet_end: str | None = None
+
+    @property
+    def switch_key(self) -> str:
+        return f"person:{self.subentry_id}"
 
 
 @dataclass
@@ -372,6 +378,7 @@ class WatchEngine:
                     reopened_by=list(d.get(CONF_REOPENED_BY) or []),
                     critical_except=frozenset(n.lower() for n in d.get(CONF_CRITICAL_EXCEPT) or []),
                     interval=float(d.get(CONF_INTERVAL) or 0),
+                    ai_notes=(d.get(CONF_AI_NOTES) or "").strip(),
                     deter_lights=list(d.get(CONF_DETER_LIGHTS) or []),
                     deter_minutes=float(d.get(CONF_DETER_MINUTES, 2)),
                     deter_sound=d.get(CONF_DETER_SOUND) or None,
@@ -461,6 +468,10 @@ class WatchEngine:
         self.data.setdefault("critical", {})[key] = on
         self._save()
         self._notify()
+
+    def person_critical_on(self, person: RecipientConfig) -> bool:
+        """A person's "gets critical alerts" switch; starts on."""
+        return bool(self.data.setdefault("critical", {}).get(person.switch_key, True))
 
     def alerts_on(self, key: str) -> bool:
         """An animal's Alerts switch: off pauses its alerts without losing its cameras."""
@@ -885,6 +896,7 @@ class WatchEngine:
             unknown_kinds=sorted({a.species.lower() for a in self.animals.values()}) or ["cat", "dog"],
             extra_rules=" ".join(
                 [self.options.get(CONF_EXTRA_RULES, "")]
+                + ([f"ABOUT THIS CAMERA'S VIEW: {cam.ai_notes}"] if cam.ai_notes else [])
                 + [f"{s.name}: {s.description}" for s in self.species.values() if s.description]
             ).strip(),
             references=references,
@@ -1055,6 +1067,7 @@ class WatchEngine:
                 "confidence": v.confidence,
                 "counted": counted,
                 "log": logic.is_cat_for_log(v, rules) or bool(kind and kind.in_summary),
+                "possible": bool(kind) and v.confidence == logic.LOW,
             }
         )
         self._prune(now)
@@ -1274,7 +1287,7 @@ class WatchEngine:
         now = now or dt_util.utcnow()
         since = self.night_start()
         entries = [
-            (s["animal"], s.get("where", ""))
+            (s["animal"], s.get("where", ""), bool(s.get("possible")) and not s.get("user"))
             for s in self.sightings()
             if s.get("log") and not s.get("wrong") and (since is None or (_dt(s.get("time")) or now) > since)
         ]
@@ -1376,6 +1389,8 @@ class WatchEngine:
                 name = logic.NOTHING
             elif logic.is_unknown(answer):
                 name = answer.strip().title()
+            elif new is None and answer.lower() in {w.lower() for w in self.wildlife}:
+                name = next(w for w in self.wildlife if w.lower() == answer.lower())  # labelled, not tracked
             elif new is None:
                 return {"corrected": None, "error": f"unknown animal {answer}"}
             else:
@@ -1578,8 +1593,14 @@ class WatchEngine:
         quiet = self._quiet(person)
         if quiet and person.quiet_mode == QUIET_NONE and alert.kind != "missing":
             return  # missing-mode alerts always arrive, at most as normal ones
-        # A repeat in the same visit replaces the earlier notification without a sound.
-        critical = alert.urgency == logic.CRITICAL and not quiet and not alert.quiet
+        # A repeat in the same visit replaces the earlier notification without a sound;
+        # a person whose "gets critical alerts" switch is off gets a normal one.
+        critical = (
+            alert.urgency == logic.CRITICAL
+            and not quiet
+            and not alert.quiet
+            and self.person_critical_on(person)
+        )
         payload: dict[str, Any] = {"title": alert.title, "message": alert.message}
         if person.notify.startswith("mobile_app_"):
             # One payload for both Companion apps: iOS reads "push", Android reads

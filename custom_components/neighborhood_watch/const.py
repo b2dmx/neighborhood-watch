@@ -118,6 +118,7 @@ CONF_REOPENED_BY = "reopened_by"
 CONF_HOUSE = "house"  # before 0.7
 CONF_INTERVAL = "check_every"
 CONF_UNSURE_ALERTS = "unsure_alerts"  # before 0.7
+CONF_AI_NOTES = "ai_notes"  # what the AI should know about this camera's view
 CONF_CRITICAL_EXCEPT = "critical_except"  # lower-case names that never ring here
 CONF_DETER_LIGHTS = "deterrent_lights"
 CONF_DETER_MINUTES = "deterrent_minutes"

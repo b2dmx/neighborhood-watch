@@ -100,6 +100,7 @@ async def watch(hass: HomeAssistant, tmp_path: Path, freezer):
         },
         subentries_data=[
             camera_sub("Garage", "garage", "binary_sensor.garage_motion", house=True, unsure_alerts=True,
+                       ai_notes="The bins are at the left edge.",
                        deterrent_lights=["light.garage_flood", "light.porch"], deterrent_minutes=2),
             camera_sub("Yard", "yard", "binary_sensor.yard_motion"),
             animal_sub("Luna", priority=True, pattern="blotchy", base="white", known_last_seen=None),
@@ -472,3 +473,29 @@ async def test_scan_needs_a_detector(hass, watch):
 
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(DOMAIN, "scan", {"folder": "x"}, blocking=True, return_response=True)
+
+
+async def test_low_wildlife_counts_as_possible(hass, watch, freezer):
+    watch["ai"].say(FIRST, "Raccoon|low|na|na|", "Raccoon|high|na|na|")
+    watch["ai"].say(SECOND, "Raccoon|low|na|na|")
+    await trigger(hass, "yard")
+    freezer.tick(timedelta(minutes=4))
+    await trigger(hass, "yard")
+    result = await hass.services.async_call(DOMAIN, "build_summary", {}, blocking=True, return_response=True)
+    assert result["lines"] == ["Raccoon — 2 sightings (1 confirmed, 1 possible) (Yard)"]
+
+
+async def test_correct_to_listed_wildlife_that_is_not_set_up(hass, watch):
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    result = await hass.services.async_call(DOMAIN, "correct", {"answer": "squirrel"}, blocking=True, return_response=True)
+    assert result["corrected"]["animal"] == "Squirrel" and result["was"] == "Raccoon"
+    assert state(hass, "sensor.raccoon_location").state in ("unknown", "Not seen")
+
+
+async def test_camera_notes_reach_only_that_camera(hass, watch):
+    w = watch["watch"]
+    garage, _ = w._prompt(w.cameras["garage"])
+    yard, _ = w._prompt(w.cameras["yard"])
+    assert "ABOUT THIS CAMERA'S VIEW: The bins are at the left edge." in garage
+    assert "bins" not in yard

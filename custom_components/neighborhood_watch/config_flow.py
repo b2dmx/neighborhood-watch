@@ -68,6 +68,7 @@ from .const import (
     CONF_DETER_LIGHTS,
     CONF_DETER_MINUTES,
     CONF_DETER_SOUND,
+    CONF_AI_NOTES,
     CONF_ALWAYS,
     COMMON_WILDLIFE,
     DEFAULT_WILDLIFE_PICKS,
@@ -336,6 +337,9 @@ def _camera_schema(
     fields.update(
         {
             vol.Required(CONF_INTERVAL, default=values.get(CONF_INTERVAL, 0)): _minutes(240),
+            vol.Optional(
+                CONF_AI_NOTES, description={"suggested_value": values.get(CONF_AI_NOTES) or None}
+            ): LONG_TEXT,
         }
     )
     if subjects:
@@ -370,6 +374,7 @@ def _camera_data(user_input: Mapping[str, Any], slug: str, camera: str) -> dict[
         CONF_REOPENED_BY: user_input.get(CONF_REOPENED_BY, []),
         CONF_INTERVAL: user_input.get(CONF_INTERVAL, 0),
         CONF_CRITICAL_EXCEPT: [n.lower() for n in user_input.get(CONF_CRITICAL_EXCEPT) or []],
+        CONF_AI_NOTES: (user_input.get(CONF_AI_NOTES) or "").strip(),
         CONF_DETER_LIGHTS: user_input.get(CONF_DETER_LIGHTS, []),
         CONF_DETER_MINUTES: user_input.get(CONF_DETER_MINUTES, 2),
         CONF_DETER_SOUND: user_input.get(CONF_DETER_SOUND) or None,

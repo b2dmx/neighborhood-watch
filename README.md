@@ -65,6 +65,7 @@ Afterwards, the integration page has four Add buttons. Each camera, animal, wild
 
 - **Add camera**. Besides its sensors and cooldowns, a camera has:
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
+  - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
 - **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
 - **Add wildlife**: animals recognised by kind only, like a raccoon or an opossum. Each has these settings:
@@ -77,6 +78,8 @@ Afterwards, the integration page has four Add buttons. Each camera, animal, wild
   - **quiet zones** (like work) and **quiet hours**, and what happens there: critical alerts arrive as normal ones, or no alerts at all;
   - whether they get missing-mode alerts.
 
+  Each person also has a **"<name> gets critical alerts"** switch on the Neighborhood Watch device. Off: their critical alerts arrive as normal notifications.
+
 **Configure** holds:
 
 | Page | Settings (defaults) |
@@ -86,7 +89,7 @@ Afterwards, the integration page has four Add buttons. Each camera, animal, wild
 | Unknown animals, other wildlife and motion | Alert at / Critical alerts only at for each catch-all (unknown animals and other wildlife: every camera; unsure motion: none) |
 | AI models | First look, second opinion, paid models; optional hours for the main model |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
-| Identification | The AI instructions (with placeholders), extra rules, wildlife list, recently absent after 14 days, reference photos (on) |
+| Identification | The AI instructions (with placeholders), notes for the AI (all cameras), wildlife list, recently absent after 14 days, reference photos (on) |
 | Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
 | Notification pictures | Public address for picture links (defaults to the external URL) |
 
@@ -132,7 +135,7 @@ Last seen, location, on camera (with the camera as an attribute), sightings toni
 
 | Entity | What it is |
 |---|---|
-| Night summary | Each animal's sightings last night, with places; full detail in attributes (no 255-character limit) |
+| Night summary | Each animal's sightings last night, with places; low-confidence wildlife counts as possible, e.g. "Raccoon — 3 sightings (1 confirmed, 2 possible)"; full detail in attributes |
 | Last sighting | The latest result from any camera |
 | AI calls today | Calls per model today (quota day, midnight Pacific), answers, errors and the last error |
 | Shadow mismatches | In shadow mode: tonight's disagreements with the live system; recent comparisons in attributes |
@@ -199,7 +202,7 @@ Each kind also has an **On camera** sensor, for your own automations.
 
 ## Corrections and training data
 
-**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ✗ Wrong, ? Not sure and "It was…". The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it.
+**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ✗ Wrong, ? Not sure and "It was…". The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. "It was…" accepts any of your animals or wildlife kinds, and any name on the wildlife list (a groundhog you never set up is labelled, just not tracked).
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
