@@ -195,13 +195,13 @@
           "instructions": "Instructions",
           "reset_instructions": "Restore the default instructions",
           "extra_rules": "Notes for the AI (all cameras)",
-          "wildlife": "Wildlife",
+          "wildlife": "Common visitors (hints for the AI)",
           "absent_days": "Recently absent after",
           "reference_photos": "Send reference photos"
         },
         "data_description": {
           "extra_rules": "Rules for every camera. Notes about one camera go on that camera's page.",
-          "wildlife": "Animals the AI may name besides yours. They show as a camera's current animal.",
+          "wildlife": "Animals you often see, as hints. Not a limit: the AI names whatever it sees, and corrections accept any animal.",
           "absent_days": "An animal not seen this long is named only when both AI models are sure.",
           "reference_photos": "Each animal's reference photo goes to the AI beside the frame. More accurate; uses more tokens."
         }

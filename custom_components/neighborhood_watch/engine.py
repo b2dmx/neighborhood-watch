@@ -1389,10 +1389,10 @@ class WatchEngine:
                 name = logic.NOTHING
             elif logic.is_unknown(answer):
                 name = answer.strip().title()
-            elif new is None and answer.lower() in {w.lower() for w in self.wildlife}:
-                name = next(w for w in self.wildlife if w.lower() == answer.lower())  # labelled, not tracked
             elif new is None:
-                return {"corrected": None, "error": f"unknown animal {answer}"}
+                # Any other animal (a groundhog, a heron): labelled for training, not tracked.
+                listed = {w.lower(): w for w in self.wildlife}
+                name = listed.get(answer.lower()) or answer.strip().title()
             else:
                 name = new.name
             row.update(animal=name, label=name, user="corrected", counted=True, wrong=False)

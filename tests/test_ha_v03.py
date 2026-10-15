@@ -290,13 +290,11 @@ async def test_correct_service_wrong_and_nothing(hass, watch):
     assert state(hass, "binary_sensor.raccoon_on_camera").state == "off"
 
 
-async def test_correct_rejects_unknown_names(hass, watch):
+async def test_correct_accepts_any_animal_name(hass, watch):
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")
-    from homeassistant.exceptions import ServiceValidationError
-
-    with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(DOMAIN, "correct", {"answer": "Dragon"}, blocking=True, return_response=True)
+    result = await hass.services.async_call(DOMAIN, "correct", {"answer": "great blue heron"}, blocking=True, return_response=True)
+    assert result["corrected"]["animal"] == "Great Blue Heron"
 
 
 async def test_night_summary_counts_wildlife(hass, watch):
