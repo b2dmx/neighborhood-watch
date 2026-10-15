@@ -1,6 +1,9 @@
-"""Switches on each animal and wildlife kind (Alerts, Critical alerts, Missing mode for
-named animals) and on each camera (Critical alerts: anything there rings, except the
-animals its page lists)."""
+"""Quick on/off switches, all starting off except Alerts.
+
+Each animal and wildlife kind: Alerts, Critical alerts (rings through silent mode at its
+critical cameras), and Missing mode for named animals. Each camera: Critical alerts
+(anything there rings, except the animals its page lists). The hub: Critical alerts for
+unknown animals, other wildlife and unsure motion."""
 from __future__ import annotations
 
 from typing import Any
@@ -10,6 +13,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import WatchConfigEntry
+from .const import BUILTIN_KEYS
+from .engine import builtin_switch_key
 from .entity import WatchEntity
 
 
@@ -20,9 +25,10 @@ async def async_setup_entry(
 ) -> None:
     watch = entry.runtime_data
     for subject in [*watch.animals.values(), *watch.species.values()]:
-        entities: list[SwitchEntity] = [Alerts(watch, "alerts", animal=subject)]
-        if subject.critical_at:
-            entities.append(CriticalAlerts(watch, "critical_alerts", animal=subject))
+        entities: list[SwitchEntity] = [
+            Alerts(watch, "alerts", animal=subject),
+            CriticalAlerts(watch, "critical_alerts", animal=subject),
+        ]
         if subject.kind == "animal":
             entities.append(MissingMode(watch, "missing_mode", animal=subject))
         async_add_entities(entities, config_subentry_id=subject.subentry_id)
@@ -31,6 +37,8 @@ async def async_setup_entry(
             [CriticalAlerts(watch, "critical_alerts", camera=cam)],
             config_subentry_id=cam.subentry_id,
         )
+    # The catch-alls (unknown animals, other wildlife, unsure motion) live on the hub.
+    async_add_entities([CatchAllCritical(watch, f"{key}_critical") for key in BUILTIN_KEYS.values()])
 
 
 class MissingMode(WatchEntity, SwitchEntity):
@@ -71,15 +79,17 @@ class CriticalAlerts(WatchEntity, SwitchEntity):
         return (self.camera or self.animal).switch_key
 
     @property
-    def _default(self) -> bool:
-        return self.camera is None  # an animal's starts on; a camera's starts off
-
-    @property
     def is_on(self) -> bool:
-        return self.watch.critical_on(self._key, self._default)
+        return self.watch.critical_on(self._key)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.watch.async_set_critical(self._key, True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.watch.async_set_critical(self._key, False)
+
+
+class CatchAllCritical(CriticalAlerts):
+    @property
+    def _key(self) -> str:
+        return builtin_switch_key(self._attr_translation_key.removesuffix("_critical"))

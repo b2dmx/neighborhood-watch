@@ -83,7 +83,7 @@ Afterwards, the integration page has four Add buttons. Each camera, animal, wild
 |---|---|
 | Mode | Live; shadow (reuse another system's answers); shadow (independent, no paid models) |
 | Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
-| Unknown animals, other wildlife and motion | Alert at / Critical alerts at for each catch-all (unknown animals and other wildlife: every camera; unsure motion: none) |
+| Unknown animals, other wildlife and motion | Alert at / Critical alerts only at for each catch-all (unknown animals and other wildlife: every camera; unsure motion: none) |
 | AI models | First look, second opinion, paid models; optional hours for the main model |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | Identification | The AI instructions (with placeholders), extra rules, wildlife list, recently absent after 14 days, reference photos (on) |
@@ -113,11 +113,11 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 | Sightings tonight / this week | Counted sightings since the last summary, and over 7 days |
 | Recently absent | On after the absent window without a sighting; while on, the AI must be sure |
 
-Every animal has **Alerts** and **Missing mode** switches, plus **Critical alerts** when it has critical cameras. Priority animals also get **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
+Every animal has **Alerts**, **Critical alerts** and **Missing mode** switches. Priority animals also get **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
 
 ### Per wildlife kind
 
-Last seen, location, on camera (with the camera as an attribute), sightings tonight and this week, and last photo. An **Alerts** switch, plus **Critical alerts** when it has critical cameras.
+Last seen, location, on camera (with the camera as an attribute), sightings tonight and this week, and last photo. **Alerts** and **Critical alerts** switches.
 
 ### Per camera
 
@@ -156,7 +156,9 @@ Last seen, location, on camera (with the camera as an attribute), sightings toni
 The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, a wildlife kind, or one of three catch-alls (**unknown animals**, **other wildlife** you haven't added, and **unsure motion**). Each has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
-- **Critical alerts at:** the cameras where it rings through silent mode, while its Critical alerts switch is on.
+- **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.
+
+Every critical setting is a switch that starts off, so you can put it on a dashboard and flip it at short notice: one per camera, animal and wildlife kind, and one per catch-all on the Neighborhood Watch device.
 
 Then:
 

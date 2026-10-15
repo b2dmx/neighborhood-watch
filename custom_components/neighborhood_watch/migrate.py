@@ -57,10 +57,10 @@ def alert_rules_v2(
         elif kind == SUBENTRY_SPECIES:
             scope = data.pop(CONF_ALERT_SCOPE, "never")
             chosen = list(data.pop(CONF_ALERT_CAMERAS, None) or [])
-            critical = data.pop(CONF_CRITICAL_SWITCH, False)
+            data.pop(CONF_CRITICAL_SWITCH, None)  # every kind has the switch now
             where = {"any": [logic.EVERY], "house": house, "cameras": chosen}.get(scope, [])
             data.setdefault(CONF_ALERT_AT, list(where))
-            data.setdefault(CONF_CRITICAL_AT, list(where) if critical else [])
+            data.setdefault(CONF_CRITICAL_AT, [])  # empty: rings wherever it alerts
         else:
             continue
         if data != dict(d):

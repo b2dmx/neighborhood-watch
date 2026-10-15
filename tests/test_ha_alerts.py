@@ -109,16 +109,23 @@ async def test_switches_exist_where_they_should(hass, watch):
     for entity_id in ("switch.luna_alerts", "switch.milo_alerts", "switch.raccoon_alerts",
                       "switch.luna_missing_mode", "switch.milo_missing_mode"):
         assert hass.states.get(entity_id) is not None, entity_id
-    assert hass.states.get("switch.raccoon_critical_alerts").state == "on"  # it has critical cameras
-    assert hass.states.get("switch.milo_critical_alerts") is None  # it has none
+    for entity_id in ("switch.raccoon_critical_alerts", "switch.milo_critical_alerts",
+                      "switch.garage_critical_alerts", "switch.neighborhood_watch_unknown_animals_critical_alerts",
+                      "switch.neighborhood_watch_unsure_motion_critical_alerts"):
+        assert hass.states.get(entity_id).state == "off", entity_id  # every critical switch starts off
     assert hass.states.get("switch.raccoon_missing_mode") is None  # wildlife has no missing mode
-    assert hass.states.get("switch.garage_critical_alerts").state == "off"
 
 
-async def test_critical_at_chosen_cameras_only(hass, watch, freezer):
+async def test_critical_switch_rings_only_at_its_cameras(hass, watch, freezer):
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "garage")
+    assert level(to(watch["sent"], "bo")[-1]) == "active"  # switch off: a normal alert
+    await later(freezer, 4)
+    await switch(hass, "switch.raccoon_critical_alerts", True)
     watch["ai"].say(FIRST, "Raccoon|high|na|na|", "Raccoon|high|na|na|")
     await trigger(hass, "yard")
-    assert level(to(watch["sent"], "bo")[-1]) == "active"
+    assert level(to(watch["sent"], "bo")[-1]) == "active"  # not one of its critical cameras
+    await later(freezer, 4)
     await trigger(hass, "garage")
     assert level(to(watch["sent"], "bo")[-1]) == "critical"
     assert level(to(watch["sent"], "ann")[-1]) == "active"  # at work: toned down
@@ -202,3 +209,18 @@ async def test_catch_alls(hass, watch, freezer):
     await later(freezer, 4)
     await trigger(hass, "yard")
     assert {m["title"] for m in watch["sent"]} == {"Possible Unknown Cat — Yard"}
+
+
+async def test_critical_switch_without_cameras_rings_wherever_it_alerts(hass, watch):
+    await switch(hass, "switch.milo_critical_alerts", True)
+    watch["ai"].say(FIRST, "Milo|high|na|na|")
+    await trigger(hass, "yard")
+    assert level(to(watch["sent"], "bo")[-1]) == "critical"
+
+
+async def test_catch_all_critical_switch(hass, watch):
+    await switch(hass, "switch.neighborhood_watch_unknown_animals_critical_alerts", True)
+    watch["ai"].say(FIRST, "Unknown Cat|medium|uniform|black|small black cat")
+    watch["ai"].say(SECOND, "Unknown Cat|medium|uniform|black|small black cat")
+    await trigger(hass, "yard")
+    assert level(to(watch["sent"], "bo")[-1]) == "critical"

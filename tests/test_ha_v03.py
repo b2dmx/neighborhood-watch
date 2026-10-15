@@ -157,7 +157,7 @@ async def test_wildlife_is_tracked_with_its_own_entities(hass, watch):
     assert state(hass, "binary_sensor.raccoon_on_camera").state == "on"
     assert state(hass, "sensor.raccoon_sightings_tonight").state == "1"
     assert state(hass, "image.raccoon_last_photo").state != "unknown"
-    assert state(hass, "switch.raccoon_critical_alerts").state == "on"
+    assert state(hass, "switch.raccoon_critical_alerts").state == "off"
     assert state(hass, "switch.garage_critical_alerts").state == "off"
     (event,) = watch["events"]
     assert event.data["sighting_id"]
@@ -170,7 +170,7 @@ async def test_older_setup_is_moved_to_alert_at(hass, watch):
     data = {s.title: s.data for s in entry.subentries.values()}
     assert data["Garage"]["critical_except"] == ["luna"] and "house" not in data["Garage"]
     assert data["Yard"]["critical_except"] == ["luna"]
-    assert (data["Raccoon"]["alert_at"], data["Raccoon"]["critical_at"]) == (["*"], ["*"])
+    assert (data["Raccoon"]["alert_at"], data["Raccoon"]["critical_at"]) == (["*"], [])
     assert (data["Opossum"]["alert_at"], data["Opossum"]["critical_at"]) == (["garage"], [])
     assert data["Milo"]["alert_at"] == ["*"] and data["Milo"]["critical_at"] == []
     assert "alert_scope" not in data["Raccoon"]

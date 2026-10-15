@@ -87,7 +87,7 @@
           "known_last_seen": "Last seen",
           "known_location": "Last seen at",
           "alert_at": "Alert at",
-          "critical_at": "Critical alerts at"
+          "critical_at": "Critical alerts only at"
         },
         "data_description": {
           "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
@@ -100,7 +100,7 @@
           "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
           "known_location": "Optional: where it was last seen.",
           "alert_at": "Cameras where it sends an alert. Empty: never.",
-          "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
+          "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
         }
       },
       "wildlife": {
@@ -256,14 +256,14 @@
         "description": "Where the catch-alls alert. Unknown animals: a cat or dog that isn't one of yours. Other wildlife: any kind you haven't added. Unsure motion: the AI saw movement but couldn't say what.",
         "data": {
           "unknown_alert_at": "Unknown animals: alert at",
-          "unknown_critical_at": "Unknown animals: critical alerts at",
+          "unknown_critical_at": "Unknown animals: critical alerts only at",
           "other_alert_at": "Other wildlife: alert at",
-          "other_critical_at": "Other wildlife: critical alerts at",
+          "other_critical_at": "Other wildlife: critical alerts only at",
           "motion_alert_at": "Unsure motion: alert at",
-          "motion_critical_at": "Unsure motion: critical alerts at"
+          "motion_critical_at": "Unsure motion: critical alerts only at"
         },
         "data_description": {
-          "motion_critical_at": "A camera's own Critical alerts switch also covers all three."
+          "motion_critical_at": "Each has a Critical alerts switch on the Neighborhood Watch device; these limit where it rings. Empty: wherever it alerts."
         }
       }
     },
@@ -367,7 +367,7 @@
             "known_last_seen": "Last seen",
             "known_location": "Last seen at",
             "alert_at": "Alert at",
-            "critical_at": "Critical alerts at"
+            "critical_at": "Critical alerts only at"
           },
           "data_description": {
             "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
@@ -378,7 +378,7 @@
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
+            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
           }
         },
         "reconfigure": {
@@ -397,13 +397,13 @@
             "known_last_seen": "Last seen",
             "known_location": "Last seen at",
             "alert_at": "Alert at",
-            "critical_at": "Critical alerts at"
+            "critical_at": "Critical alerts only at"
           },
           "data_description": {
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
+            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
           }
         }
       },
@@ -434,14 +434,14 @@
             "pest": "Pest",
             "in_summary": "Count it in the night summary",
             "alert_at": "Alert at",
-            "critical_at": "Critical alerts at"
+            "critical_at": "Critical alerts only at"
           },
           "data_description": {
             "name": "What the AI calls it, e.g. Raccoon.",
             "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
             "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
+            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
           }
         },
         "reconfigure": {
@@ -452,14 +452,14 @@
             "pest": "Pest",
             "in_summary": "Count it in the night summary",
             "alert_at": "Alert at",
-            "critical_at": "Critical alerts at"
+            "critical_at": "Critical alerts only at"
           },
           "data_description": {
             "name": "What the AI calls it, e.g. Raccoon.",
             "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
             "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
+            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
           }
         }
       },
@@ -660,6 +660,15 @@
       },
       "alerts": {
         "name": "Alerts"
+      },
+      "unknown_critical": {
+        "name": "Unknown animals critical alerts"
+      },
+      "other_critical": {
+        "name": "Other wildlife critical alerts"
+      },
+      "motion_critical": {
+        "name": "Unsure motion critical alerts"
       }
     },
     "image": {

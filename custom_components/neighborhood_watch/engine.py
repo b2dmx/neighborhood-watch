@@ -453,10 +453,9 @@ class WatchEngine:
         extra = self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE)
         return names + [w for w in extra if w.lower() not in {n.lower() for n in names}]
 
-    def critical_on(self, key: str, default: bool = False) -> bool:
-        """A Critical alerts switch. Cameras start off; an animal's starts on, so the
-        cameras chosen in its "Critical at" work without a second step."""
-        return bool(self.data.setdefault("critical", {}).get(key, default))
+    def critical_on(self, key: str) -> bool:
+        """A Critical alerts switch (camera, animal, wildlife or catch-all). All start off."""
+        return bool(self.data.setdefault("critical", {}).get(key))
 
     async def async_set_critical(self, key: str, on: bool) -> None:
         self.data.setdefault("critical", {})[key] = on
@@ -581,13 +580,7 @@ class WatchEngine:
     # --- lifecycle ----------------------------------------------------------------------
 
     async def async_start(self) -> None:
-        self.data = await self._store.async_load() or {"rules_version": 2}
-        if self.data.get("rules_version", 1) < 2:
-            # Before 0.7 a wildlife critical switch started off; keep that for the ones
-            # nobody touched (new ones now start on).
-            for kind in self.species.values():
-                self.data.setdefault("critical", {}).setdefault(kind.switch_key, False)
-            self.data["rules_version"] = 2
+        self.data = await self._store.async_load() or {}
         self.data.setdefault("animals", {})
         self.data.setdefault("cameras", {})
         self.data.setdefault("sightings", [])
@@ -1474,9 +1467,9 @@ class WatchEngine:
                 s.name,
                 alert_at=s.alert_at,
                 min_confidence=floor,
-                critical_at=s.critical_at,
+                critical_at=s.critical_at or s.alert_at,  # empty: wherever it alerts
                 alerts_on=self.alerts_on(s.switch_key),
-                critical_on=self.critical_on(s.switch_key, True),
+                critical_on=self.critical_on(s.switch_key),
                 repeat_every=s.pest,  # a pest that was scared off and came back: tell again
             )
         for a in self.animals.values():
@@ -1484,25 +1477,26 @@ class WatchEngine:
                 a.name,
                 alert_at=a.alert_at,
                 min_confidence=floor,
-                critical_at=a.critical_at,
+                critical_at=a.critical_at or a.alert_at,
                 alerts_on=self.alerts_on(a.switch_key),
-                critical_on=self.critical_on(a.switch_key, True),
+                critical_on=self.critical_on(a.switch_key),
                 priority=a.priority,
             )
         return rules
 
     def builtin_rules(self) -> dict[str, logic.AlertRule]:
         floor = self.options.get(CONF_MIN_CONFIDENCE, logic.MEDIUM)
-        return {
-            name: logic.AlertRule(
+        rules = {}
+        for name, key in BUILTIN_KEYS.items():
+            alert_at = logic.cameras(self.options.get(f"{key}_{CONF_ALERT_AT}", []))
+            rules[name] = logic.AlertRule(
                 name,
-                alert_at=logic.cameras(self.options.get(f"{key}_{CONF_ALERT_AT}", [])),
+                alert_at=alert_at,
                 min_confidence=floor,
-                critical_at=logic.cameras(self.options.get(f"{key}_{CONF_CRITICAL_AT}", [])),
-                critical_on=True,
+                critical_at=logic.cameras(self.options.get(f"{key}_{CONF_CRITICAL_AT}", [])) or alert_at,
+                critical_on=self.critical_on(builtin_switch_key(key)),
             )
-            for name, key in BUILTIN_KEYS.items()
-        }
+        return rules
 
     def _repeat(self, cam: CameraConfig, v: logic.Verdict, now: datetime) -> tuple[bool, str | None]:
         """Is this the same visit as the subject's last sighting at this camera?"""
@@ -1856,6 +1850,10 @@ class WatchEngine:
         self.hass.bus.async_fire(EVENT_SIGHTING, data)
         self.hass.async_create_task(self._alert(cam, verdict, now, None, test=True))
         return data
+
+
+def builtin_switch_key(key: str) -> str:
+    return f"builtin:{key}"
 
 
 def media_root(hass: HomeAssistant) -> tuple[str, Path]:

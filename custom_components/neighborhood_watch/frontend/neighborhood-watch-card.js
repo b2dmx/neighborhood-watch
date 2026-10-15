@@ -367,6 +367,11 @@ class NeighborhoodWatchCard extends HTMLElement {
         const s = this._state(c.keys.critical_alerts);
         return `<button class="chip ${s?.state === "on" ? "alarm" : ""}" data-toggle="${esc(c.keys.critical_alerts)}">${esc(c.name)}</button>`;
       });
+    const hub = d.hub?.keys || {};
+    for (const [key, label] of [["unknown_critical", "Unknown animals"], ["other_critical", "Other wildlife"], ["motion_critical", "Unsure motion"]]) {
+      const s = hub[key] && this._state(hub[key]);
+      if (s) chips.push(`<button class="chip ${s.state === "on" ? "alarm" : ""}" data-toggle="${esc(hub[key])}">${label}</button>`);
+    }
     if (!chips.length) return "";
     return `<div class="section"><h2>Critical alerts</h2><div class="chips">${chips.join("")}</div></div>`;
   }
