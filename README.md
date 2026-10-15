@@ -75,7 +75,7 @@ Afterwards, the integration page has Add buttons for cameras, animals and people
   - **quiet zones** (like work) and **quiet hours**, and what happens there: critical alerts arrive as normal ones, or no alerts at all;
   - whether they get missing-mode alerts.
 
-  Each person also has a **"<name> gets critical alerts"** switch on the Neighborhood Watch device. Off: their critical alerts arrive as normal notifications.
+  Each person also has a **"<name> gets critical alerts"** switch, shown on their phone's device (or the Neighborhood Watch device if no phone is found). Off: their critical alerts arrive as normal notifications.
 
 **Configure** holds:
 

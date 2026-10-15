@@ -16,7 +16,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import WatchConfigEntry
 from .const import BUILTIN_KEYS
 from .engine import RecipientConfig, WatchEngine, builtin_switch_key
-from .entity import WatchEntity
+from .entity import WatchEntity, phone_device
 
 
 async def async_setup_entry(
@@ -41,7 +41,11 @@ async def async_setup_entry(
     # The catch-alls (unknown animals, other wildlife, unsure motion) live on the hub.
     async_add_entities([CatchAllCritical(watch, f"{key}_critical") for key in BUILTIN_KEYS.values()])
     for person in watch.recipients:
-        async_add_entities([PersonCritical(watch, person)])  # on the hub device, like the catch-alls
+        switch = PersonCritical(watch, person)
+        if switch.device_entry is not None:  # on their phone: listed under their page
+            async_add_entities([switch], config_subentry_id=person.subentry_id)
+        else:  # on the hub, which belongs to no single page
+            async_add_entities([switch])
 
 
 class MissingMode(WatchEntity, SwitchEntity):
@@ -106,6 +110,10 @@ class PersonCritical(WatchEntity, SwitchEntity):
     def __init__(self, watch: WatchEngine, person: RecipientConfig) -> None:
         super().__init__(watch, "person_critical")
         self.person = person
+        # Shown on the person's phone (no device of ours); the hub if no phone is found.
+        if (phone := phone_device(watch.hass, person.notify, person.person)) is not None:
+            self._attr_device_info = None
+            self.device_entry = phone
         self._attr_translation_placeholders = {"person": person.name}
         self._attr_unique_id = f"{watch.entry.entry_id}_{person.subentry_id}_person_critical"
 

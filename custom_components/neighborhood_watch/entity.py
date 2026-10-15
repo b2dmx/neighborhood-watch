@@ -7,6 +7,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
+from homeassistant.util import slugify
 
 from .const import DOMAIN, NAME
 from .engine import AnimalConfig, CameraConfig, SpeciesConfig, WatchEngine
@@ -18,6 +19,23 @@ def camera_device(hass: HomeAssistant, camera_entity: str) -> dr.DeviceEntry | N
     if entry is None or entry.device_id is None:
         return None
     return dr.async_get(hass).async_get(entry.device_id)
+
+
+def phone_device(hass: HomeAssistant, notify_service: str, person: str | None) -> dr.DeviceEntry | None:
+    """The phone behind a person's notify service (mobile_app_<device>), else a device
+    tracker of theirs."""
+    devices = dr.async_get(hass)
+    if notify_service.startswith("mobile_app_"):
+        wanted = notify_service.removeprefix("mobile_app_")
+        for app in hass.config_entries.async_entries("mobile_app"):
+            for device in dr.async_entries_for_config_entry(devices, app.entry_id):
+                if slugify(device.name or "") == wanted:
+                    return device
+    state = hass.states.get(person) if person else None
+    for tracker in (state.attributes.get("device_trackers") or []) if state else []:
+        if (device := camera_device(hass, tracker)) is not None:
+            return device
+    return None
 
 
 class WatchEntity(Entity):
