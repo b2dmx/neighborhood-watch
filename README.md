@@ -57,21 +57,18 @@ Onboarding walks through:
 1. **AI models.** The first look, the second opinion and any paid models, each in order.
 2. **When to watch.** Start and end times, whether darkness also counts, and when the night summary is built.
 3. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
-4. **Wildlife.** Tick the common visitors (raccoon, opossum, skunk, rat, fox, coyote, bear, deer…). Each starts out alerting at every camera (deer, rabbits and groundhogs never), and pests are marked to be scared off.
+4. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
 6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Skip this step if you only care about pests.
 
-Afterwards, the integration page has four Add buttons. Each camera, animal, wildlife kind and person also gets its own page, where you can edit or delete it:
+Afterwards, the integration page has Add buttons for cameras, animals and people. Each also gets its own page, where you can edit or delete it:
 
 - **Add camera**. Besides its sensors and cooldowns, a camera has:
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
 - **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
-- **Add wildlife**: animals recognised by kind only, like a raccoon or an opossum. Each has these settings:
-  - **Alert at** and **Critical alerts at**;
-  - **Pest**: scare it off with the camera's lights and sound, and alert every time it comes back;
-  - whether it counts in the night summary.
+- **Add wildlife rules** (optional, rarely needed): gives one wildlife kind rules of its own instead of the shared Pests / Other wildlife ones, with its own device and switches.
 - **Add person**: someone who gets alerts. Each has these settings:
   - their phone, and their critical sound and volume;
   - **Don't notify me about**: animals this person never hears about;
@@ -86,10 +83,10 @@ Afterwards, the integration page has four Add buttons. Each camera, animal, wild
 |---|---|
 | Mode | Live; shadow (reuse another system's answers); shadow (independent, no paid models) |
 | Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
-| Unknown animals, other wildlife and motion | Alert at / Critical alerts only at for each catch-all (unknown animals and other wildlife: every camera; unsure motion: none) |
+| Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | AI models | First look, second opinion, paid models; optional hours for the main model |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
-| Identification | The AI instructions (with placeholders), notes for the AI (all cameras), wildlife list, recently absent after 14 days, reference photos (on) |
+| Identification | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
 | Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
 | Notification pictures | Public address for picture links (defaults to the external URL) |
 
@@ -118,9 +115,15 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 
 Every animal has **Alerts**, **Critical alerts** and **Missing mode** switches. Priority animals also get **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
 
-### Per wildlife kind
+### Wildlife
 
-Last seen, location, on camera (with the camera as an attribute), sightings tonight and this week, and last photo. **Alerts** and **Critical alerts** switches.
+Wildlife needs no device per animal. The Neighborhood Watch device has:
+
+| Entity | What it is |
+|---|---|
+| Wildlife | The latest wildlife sighting; attribute `kinds` lists every kind seen, each with last seen, where, tonight and this-week counts, whether it's a pest, and its last sighting id (its photo) |
+| Wildlife on camera / Pest on camera | On for the on-camera window after a sure sighting; attributes `animal` and `camera`. Use them for lights or sounds |
+| Pests / Other wildlife / Unknown animals / Unsure motion critical alerts | Switches |
 
 ### Per camera
 
@@ -193,7 +196,7 @@ actions:
 
 ## Scaring pests off
 
-When wildlife marked as a **Pest** is seen at a camera with deterrent lights or a sound:
+When a pest is seen at a camera with deterrent lights or a sound:
 
 - The lights that were off turn on for the set time, then turn back off. Lights that were already on are left on.
 - The sound plays on the chosen speaker.

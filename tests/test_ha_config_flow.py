@@ -103,7 +103,7 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
         },
     )
     assert result["step_id"] == "wildlife"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"wildlife": ["Raccoon", "Skunk"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon", "skunk"]})
     assert result["step_id"] == "animal"  # no phones to choose from: the people step is skipped
     luna = {
         "name": "Luna",
@@ -133,9 +133,9 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     assert entry.options["first_look"] == ["ai_task.gemini"]
     assert entry.options["instructions"] == DEFAULT_INSTRUCTIONS
     subs = sorted((s.subentry_type, s.title) for s in entry.subentries.values())
-    assert subs == [("animal", "Luna"), ("animal", "Pepper"), ("camera", "Garage"), ("species", "Raccoon"), ("species", "Skunk")]
-    raccoon = next(s for s in entry.subentries.values() if s.title == "Raccoon")
-    assert raccoon.data["pest"] is True and raccoon.data["alert_at"] == ["*"] and raccoon.data["critical_at"] == []
+    # Pests are a list, not a page per animal; every other animal is tracked as wildlife.
+    assert subs == [("animal", "Luna"), ("animal", "Pepper"), ("camera", "Garage")]
+    assert entry.options["pests"] == ["Raccoon", "Skunk"]
     garage = next(s for s in entry.subentries.values() if s.title == "Garage")
     assert garage.data["slug"] == "garage"
     assert garage.data["camera"] == "camera.backyard_cam_high_resolution_channel"
@@ -159,7 +159,7 @@ async def test_onboarding_can_skip_cameras_and_animals(hass: HomeAssistant, read
     )
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     assert result["step_id"] == "wildlife"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"wildlife": []})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
     assert result["step_id"] == "animal"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"species": "cat"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -339,11 +339,13 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "catch_alls"})
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"unknown_alert_at": ["*"], "unknown_critical_at": [], "other_alert_at": ["garage"],
+        {"pests": ["Raccoon"], "pest_alert_at": ["garage"], "pest_critical_at": [],
+         "unknown_alert_at": ["*"], "unknown_critical_at": [], "other_alert_at": ["garage"],
          "other_critical_at": ["*"], "motion_alert_at": [], "motion_critical_at": []},
     )
     assert entry.options["other_alert_at"] == ["*"] and entry.options["other_critical_at"] == ["*"]
     assert entry.options["motion_alert_at"] == []
+    assert entry.options["pests"] == ["Raccoon"] and entry.options["pest_alert_at"] == ["garage"]
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "training"})
     result = await hass.config_entries.options.async_configure(
@@ -363,7 +365,7 @@ async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
          "summary_time": "08:05:00", "on_camera_minutes": 10},
     )
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"wildlife": ["Raccoon"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon"]})
     assert result["step_id"] == "people"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_sams_phone"]})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"species": "cat"})

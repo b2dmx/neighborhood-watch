@@ -67,6 +67,8 @@ from .const import (
     CONF_NOTIFY,
     CONF_PERSON,
     CONF_PEST,
+    CONF_PESTS,
+    COMMON_WILDLIFE,
     CONF_QUIET_END,
     CONF_QUIET_MODE,
     CONF_QUIET_START,
@@ -457,8 +459,67 @@ class WatchEngine:
     @property
     def wildlife(self) -> list[str]:
         names = [s.name for s in self.species.values()]
-        extra = self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE)
-        return names + [w for w in extra if w.lower() not in {n.lower() for n in names}]
+        extra = [*(self.options.get(CONF_PESTS) or []), *(self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE))]
+        for w in extra:
+            if w.lower() not in {n.lower() for n in names}:
+                names.append(w)
+        return names
+
+    @property
+    def pests(self) -> frozenset[str]:
+        """Lower-case wildlife kinds on the pest list (a wildlife page marked Pest counts too)."""
+        return frozenset(
+            [p.lower() for p in self.options.get(CONF_PESTS) or []]
+            + [s.key for s in self.species.values() if s.pest]
+        )
+
+    def is_wildlife(self, name: str) -> bool:
+        """Any animal that isn't one of yours and has no wildlife page of its own."""
+        named = {a.key for a in self.animals.values()} | {s.key for s in self.species.values()}
+        return name != logic.NOTHING and logic.is_wildlife(name, named)
+
+    def wildlife_now(self, pests_only: bool = False) -> dict[str, Any] | None:
+        """The wildlife on camera right now (a sure sighting within the on-camera window)."""
+        now = dt_util.utcnow()
+        since = now - timedelta(minutes=float(self.options.get(CONF_ON_CAMERA_MINUTES, 10)))
+        for s in reversed(self.sightings()):
+            at = _dt(s.get("time")) or now
+            if at < since:
+                return None
+            name = s.get("animal") or ""
+            if (
+                s.get("wrong")
+                or s.get("scan")
+                or s.get("confidence") == logic.LOW
+                or not self.is_wildlife(name)
+                or name.lower() in logic.HARMLESS
+                or (pests_only and name.lower() not in self.pests)
+            ):
+                continue
+            return {"animal": name, "camera": s.get("where"), "time": s.get("time")}
+        return None
+
+    def wildlife_seen(self, now: datetime | None = None) -> dict[str, dict[str, Any]]:
+        """Every wildlife kind seen (last 30 days), tracked without a page of its own."""
+        now = now or dt_util.utcnow()
+        night = self.night_start()
+        week = now - timedelta(days=7)
+        kinds: dict[str, dict[str, Any]] = {}
+        for s in self.sightings():
+            name = s.get("animal") or ""
+            if s.get("wrong") or s.get("scan") or not self.is_wildlife(name):
+                continue
+            at = _dt(s.get("time")) or now
+            k = kinds.setdefault(
+                name, {"tonight": 0, "week": 0, "pest": name.lower() in self.pests}
+            )
+            k.update(last_seen=_iso(at), where=s.get("where"), sighting_id=s.get("id"))
+            k["possible"] = s.get("confidence") == logic.LOW and not s.get("user")
+            if night is None or at > night:
+                k["tonight"] += 1
+            if at > week:
+                k["week"] += 1
+        return dict(sorted(kinds.items(), key=lambda kv: kv[1]["last_seen"], reverse=True))
 
     def critical_on(self, key: str) -> bool:
         """A Critical alerts switch (camera, animal, wildlife or catch-all). All start off."""
@@ -897,6 +958,12 @@ class WatchEngine:
             extra_rules=" ".join(
                 [self.options.get(CONF_EXTRA_RULES, "")]
                 + ([f"ABOUT THIS CAMERA'S VIEW: {cam.ai_notes}"] if cam.ai_notes else [])
+                + [
+                    f"{name}: {COMMON_WILDLIFE[name][2]}"
+                    for name in COMMON_WILDLIFE
+                    if name.lower() in self.pests and COMMON_WILDLIFE[name][2]
+                    and name.lower() not in {s.key for s in self.species.values()}
+                ]
                 + [f"{s.name}: {s.description}" for s in self.species.values() if s.description]
             ).strip(),
             references=references,
@@ -1066,8 +1133,10 @@ class WatchEngine:
                 "animal": v.animal,
                 "confidence": v.confidence,
                 "counted": counted,
-                "log": logic.is_cat_for_log(v, rules) or bool(kind and kind.in_summary),
-                "possible": bool(kind) and v.confidence == logic.LOW,
+                "log": logic.is_cat_for_log(v, rules)
+                or bool(kind and kind.in_summary)
+                or (not kind and self.is_wildlife(v.animal) and v.animal.lower() not in logic.HARMLESS),
+                "possible": (bool(kind) or self.is_wildlife(v.animal)) and v.confidence == logic.LOW,
             }
         )
         self._prune(now)
@@ -1134,7 +1203,7 @@ class WatchEngine:
             data["sighting_id"] = sid
             self.hass.bus.async_fire(EVENT_SIGHTING, data)
             await self._alert(cam, v, now, sid)
-            if kind and kind.pest and counted:
+            if counted and v.animal.lower() in self.pests:
                 await self._deter(cam)
 
     def event_data(
@@ -1294,6 +1363,7 @@ class WatchEngine:
         order = [a.name for a in self.animals.values()] + [
             s.name for s in self.species.values() if s.in_summary
         ]
+        order += [n for n in dict.fromkeys(e[0] for e in entries) if n not in order and self.is_wildlife(n)]
         summary = logic.summarize(entries, order)
         if self.options.get(CONF_DATASET, True):
             limit = int(float(self.options.get(CONF_DATASET_GB, 5)) * 1024**3)
@@ -1510,12 +1580,13 @@ class WatchEngine:
                 min_confidence=floor,
                 critical_at=logic.cameras(self.options.get(f"{key}_{CONF_CRITICAL_AT}", [])) or alert_at,
                 critical_on=self.critical_on(builtin_switch_key(key)),
+                repeat_every=name == logic.BUILTIN_PEST,  # scared off and back: tell again
             )
         return rules
 
     def _repeat(self, cam: CameraConfig, v: logic.Verdict, now: datetime) -> tuple[bool, str | None]:
         """Is this the same visit as the subject's last sighting at this camera?"""
-        rule = logic.subject_of(v, self.alert_rules(), self.builtin_rules())
+        rule = logic.subject_of(v, self.alert_rules(), self.builtin_rules(), self.pests)
         if rule is None:
             return False, None
         visits = self.camera_state(cam.slug).setdefault("visits", {})
@@ -1539,6 +1610,7 @@ class WatchEngine:
             logic.clock(dt_util.as_local(now)),
             test=test,
             repeat=repeat,
+            pests=self.pests,
         )
         if visit_key and any(a.kind != "missing" for a in alerts):
             self.camera_state(cam.slug).setdefault("visits", {})[visit_key] = _iso(now)

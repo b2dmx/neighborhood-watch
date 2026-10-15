@@ -32,6 +32,7 @@ async def async_setup_entry(
             ToReview(watch),
             DetectorAgreement(watch),
             LastScan(watch),
+            Wildlife(watch),
         ]
     )
     for cam in watch.cameras.values():
@@ -79,6 +80,27 @@ class NightSummary(WatchEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         summary = self.watch.data.get("summary") or {}
         return {k: summary.get(k) for k in ("lines", "counts", "places", "built_at", "night_started")}
+
+
+class Wildlife(WatchEntity, SensorEntity):
+    """Every wildlife kind seen, tracked here instead of a device per animal."""
+
+    _attr_icon = "mdi:paw-outline"
+
+    def __init__(self, watch: WatchEngine) -> None:
+        super().__init__(watch, "wildlife")
+
+    @property
+    def native_value(self) -> str | None:
+        kinds = self.watch.wildlife_seen()
+        if not kinds:
+            return None
+        name, k = next(iter(kinds.items()))
+        return f"{name} · {k.get('where')}"[:STATE_LIMIT]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"kinds": self.watch.wildlife_seen()}
 
 
 class LastSighting(WatchEntity, SensorEntity):

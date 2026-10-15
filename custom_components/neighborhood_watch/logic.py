@@ -74,6 +74,15 @@ NOT_VISITORS = frozenset(
         "chicken",
     }
 )
+# Real animals that never alert or count as visitors (they still show as wildlife).
+HARMLESS = frozenset({"groundhog", "bird", "deer", "squirrel", "chipmunk", "chicken"})
+NOT_ANIMALS = NOT_VISITORS - HARMLESS
+
+
+def is_wildlife(animal: str, named: Iterable[str]) -> bool:
+    """An animal that isn't one of yours: a raccoon, a groundhog, a heron."""
+    key = animal.strip().lower()
+    return bool(key) and key not in named and key not in NOT_ANIMALS and not is_unknown(animal)
 
 # --- answers ----------------------------------------------------------------------
 
@@ -570,10 +579,11 @@ NORMAL = "normal"
 CRITICAL = "critical"
 EVERY = "*"  # every camera
 
+BUILTIN_PEST = "Pests"
 BUILTIN_UNKNOWN = "Unknown animals"
 BUILTIN_OTHER = "Other wildlife"
 BUILTIN_MOTION = "Unsure motion"
-BUILTINS = (BUILTIN_UNKNOWN, BUILTIN_OTHER, BUILTIN_MOTION)
+BUILTINS = (BUILTIN_PEST, BUILTIN_OTHER, BUILTIN_UNKNOWN, BUILTIN_MOTION)
 
 AUDIENCE_ALL = "all"
 AUDIENCE_MISSING = "missing"  # people who get missing-mode alerts
@@ -634,13 +644,18 @@ class Alert:
 
 
 def subject_of(
-    v: Verdict, rules: Mapping[str, AlertRule], builtins: Mapping[str, AlertRule]
+    v: Verdict,
+    rules: Mapping[str, AlertRule],
+    builtins: Mapping[str, AlertRule],
+    pests: Iterable[str] = (),
 ) -> AlertRule | None:
     """Which rule a verdict falls under; None for things that never alert (a confident
-    "nothing", bugs, leaves, shadows)."""
+    "nothing", bugs, leaves, shadows). `pests` = lower-case kinds on the pest list."""
     key = v.animal.lower()
     if key in rules:
         return rules[key]
+    if key in pests:
+        return builtins.get(BUILTIN_PEST)
     if is_unknown(v.animal):
         return builtins.get(BUILTIN_UNKNOWN)
     if v.animal == NOTHING:
@@ -659,6 +674,7 @@ def plan_alerts(
     when: str,
     test: bool = False,
     repeat: bool = False,
+    pests: Iterable[str] = (),
 ) -> list[Alert]:
     """Who hears about a sighting and how loudly.
 
@@ -689,7 +705,7 @@ def plan_alerts(
             )
         )
 
-    rule = subject_of(v, rules, builtins)
+    rule = subject_of(v, rules, builtins, frozenset(pests))
     if rule is None:
         return alerts
     is_motion = rule.name == BUILTIN_MOTION

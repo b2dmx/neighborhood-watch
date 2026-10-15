@@ -33,6 +33,29 @@ async def async_setup_entry(
         async_add_entities(
             [OnCamera(watch, "on_camera", animal=kind)], config_subentry_id=kind.subentry_id
         )
+    async_add_entities(
+        [WildlifeOnCamera(watch, "wildlife_on_camera"), WildlifeOnCamera(watch, "pest_on_camera")]
+    )
+
+
+class WildlifeOnCamera(WatchEntity, BinarySensorEntity):
+    """Any wildlife (or a pest) seen for sure within the on-camera window; for automations
+    such as lights."""
+
+    _attr_icon = "mdi:paw"
+
+    @property
+    def _now(self) -> dict[str, Any] | None:
+        return self.watch.wildlife_now(pests_only=self._attr_translation_key == "pest_on_camera")
+
+    @property
+    def is_on(self) -> bool:
+        return self._now is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        now = self._now or {}
+        return {"animal": now.get("animal"), "camera": now.get("camera")}
 
 
 class OnCamera(WatchEntity, BinarySensorEntity):

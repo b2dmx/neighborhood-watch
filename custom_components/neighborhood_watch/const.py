@@ -6,6 +6,7 @@ from typing import Final
 from .logic import (
     BUILTIN_MOTION,
     BUILTIN_OTHER,
+    BUILTIN_PEST,
     BUILTIN_UNKNOWN,
     DEFAULT_INSTRUCTIONS,
     DEFAULT_WILDLIFE,
@@ -60,8 +61,15 @@ DETECTOR_MODES = [DETECTOR_SHADOW, DETECTOR_SKIP]
 CONF_ALERT_AT = "alert_at"  # camera slugs; "*" = every camera; empty = never
 CONF_CRITICAL_AT = "critical_at"
 # The three catch-alls live in the options: "<key>_alert_at" / "<key>_critical_at".
-BUILTIN_KEYS: dict[str, str] = {BUILTIN_UNKNOWN: "unknown", BUILTIN_OTHER: "other", BUILTIN_MOTION: "motion"}
+BUILTIN_KEYS: dict[str, str] = {
+    BUILTIN_PEST: "pest",
+    BUILTIN_OTHER: "other",
+    BUILTIN_UNKNOWN: "unknown",
+    BUILTIN_MOTION: "motion",
+}
+CONF_PESTS = "pests"  # wildlife kinds that are pests: alert every time, scared off
 BUILTIN_DEFAULTS: dict[str, tuple[list[str], list[str]]] = {
+    "pest": ([EVERY], []),
     "unknown": ([EVERY], []),
     "other": ([EVERY], []),
     "motion": ([], []),
@@ -94,6 +102,7 @@ DEFAULT_OPTIONS: dict = {
     CONF_PUBLIC_URL: "",
     CONF_ALERTS: True,
     CONF_MIN_CONFIDENCE: MEDIUM,
+    CONF_PESTS: [],
     CONF_BUTTONS: True,
     CONF_DATASET: True,
     CONF_DATASET_DIR: "",

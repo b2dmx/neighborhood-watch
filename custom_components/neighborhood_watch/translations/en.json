@@ -106,10 +106,13 @@
         }
       },
       "wildlife": {
-        "title": "Wildlife",
-        "description": "Tick the wildlife that visits. Each one is recognised by kind and gets sensible alert and scare-off settings, which you can change later (or add more with Add wildlife).",
+        "title": "Pests",
+        "description": "Which animals are pests? Pests alert every time they come back and can be scared off with a camera's lights and sound. Every other animal is still recognised and tracked as wildlife, with no setup.",
         "data": {
-          "wildlife": "Wildlife"
+          "pests": "Pests"
+        },
+        "data_description": {
+          "pests": "Pick or type any animal."
         }
       },
       "people": {
@@ -146,7 +149,7 @@
           "alerts": "Alerts",
           "training": "Training data",
           "detector": "Local detector",
-          "catch_alls": "Unknown animals, other wildlife and motion"
+          "catch_alls": "Wildlife and catch-alls"
         }
       },
       "mode": {
@@ -254,9 +257,12 @@
         }
       },
       "catch_alls": {
-        "title": "Unknown animals, other wildlife and motion",
-        "description": "Where the catch-alls alert. Unknown animals: a cat or dog that isn't one of yours. Other wildlife: any kind you haven't added. Unsure motion: the AI saw movement but couldn't say what.",
+        "title": "Wildlife and catch-alls",
+        "description": "Every animal that isn't one of yours is recognised and tracked as wildlife, without adding it. Pests are the kinds you list here; everything else is other wildlife. Unknown animals: a cat or dog that isn't one of yours. Unsure motion: the AI saw movement but couldn't say what.",
         "data": {
+          "pests": "Pests",
+          "pest_alert_at": "Pests: alert at",
+          "pest_critical_at": "Pests: critical alerts only at",
           "unknown_alert_at": "Unknown animals: alert at",
           "unknown_critical_at": "Unknown animals: critical alerts only at",
           "other_alert_at": "Other wildlife: alert at",
@@ -265,6 +271,7 @@
           "motion_critical_at": "Unsure motion: critical alerts only at"
         },
         "data_description": {
+          "pests": "Alert every time they come back, and are scared off with a camera's lights and sound.",
           "motion_critical_at": "Each has a Critical alerts switch on the Neighborhood Watch device; these limit where it rings. Empty: wherever it alerts."
         }
       }
@@ -426,14 +433,14 @@
     },
     "species": {
       "initiate_flow": {
-        "user": "Add wildlife",
-        "reconfigure": "Edit wildlife"
+        "user": "Add wildlife rules",
+        "reconfigure": "Edit wildlife rules"
       },
-      "entry_type": "Wildlife",
+      "entry_type": "Wildlife rules",
       "step": {
         "user": {
-          "title": "Add wildlife",
-          "description": "Wildlife is recognised by kind only: a raccoon is a raccoon. Use Add animal for animals told apart by name.",
+          "title": "Wildlife with its own rules",
+          "description": "Optional. Every animal is already tracked as wildlife without this. Add a kind here only when it needs rules of its own (different cameras, its own switches).",
           "data": {
             "name": "Name",
             "description": "What it looks like (optional)",
@@ -641,6 +648,9 @@
       },
       "last_scan": {
         "name": "Last scan"
+      },
+      "wildlife": {
+        "name": "Wildlife"
       }
     },
     "binary_sensor": {
@@ -655,6 +665,12 @@
       },
       "recently_absent": {
         "name": "Recently absent"
+      },
+      "wildlife_on_camera": {
+        "name": "Wildlife on camera"
+      },
+      "pest_on_camera": {
+        "name": "Pest on camera"
       }
     },
     "switch": {
@@ -678,6 +694,9 @@
       },
       "person_critical": {
         "name": "{person} gets critical alerts"
+      },
+      "pest_critical": {
+        "name": "Pests critical alerts"
       }
     },
     "image": {

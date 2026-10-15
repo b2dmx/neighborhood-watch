@@ -59,6 +59,8 @@ async def watch(hass: HomeAssistant, tmp_path: Path, freezer):
             "unknown_alert_at": EVERY,
             "other_alert_at": ["garage"],
             "motion_alert_at": [],
+            "pests": ["Opossum"],
+            "pest_alert_at": ["garage"],
         },
         subentries_data=[
             camera_sub("Garage", "garage", "binary_sensor.garage_motion", critical_except=["luna"]),
@@ -234,3 +236,26 @@ async def test_person_critical_switch_turns_their_critical_alerts_normal(hass, w
     assert level(to(watch["sent"], "bo")[-1]) == "active"
     assert level(to(watch["sent"], "dee")[-1]) == "critical"
 
+
+
+async def test_pests_and_wildlife_without_pages(hass, watch, freezer):
+    watch["ai"].say(FIRST, "Opossum|high|na|na|", "Opossum|high|na|na|", "Opossum|high|na|na|", "Groundhog|high|na|na|")
+    await trigger(hass, "yard")
+    assert watch["sent"] == []  # pests alert at the garage only
+    await later(freezer, 4)
+    await trigger(hass, "garage")
+    await later(freezer, 4)
+    await trigger(hass, "garage")
+    assert [m["title"] for m in to(watch["sent"], "bo")] == ["Opossum — Garage", "Opossum — Garage"]
+    assert [level(m) for m in to(watch["sent"], "bo")] == ["active", "active"]  # a pest alerts every time
+    assert hass.states.get("binary_sensor.neighborhood_watch_pest_on_camera").state == "on"
+    assert hass.states.get("binary_sensor.neighborhood_watch_pest_on_camera").attributes["camera"] == "Garage"
+    await later(freezer, 4)
+    await trigger(hass, "yard")
+    wildlife = hass.states.get("sensor.neighborhood_watch_wildlife")
+    kinds = wildlife.attributes["kinds"]
+    assert wildlife.state == "Groundhog · Yard"
+    assert kinds["Opossum"]["pest"] is True and kinds["Opossum"]["tonight"] == 3
+    assert kinds["Groundhog"]["pest"] is False
+    assert len(to(watch["sent"], "bo")) == 2  # a groundhog never alerts
+    assert hass.states.get("device_tracker.opossum") is None and hass.states.get("sensor.opossum_last_seen") is None

@@ -80,6 +80,7 @@ from .const import (
     CONF_NOTIFY,
     CONF_PERSON,
     CONF_PEST,
+    CONF_PESTS,
     CONF_QUIET_END,
     CONF_QUIET_MODE,
     CONF_QUIET_START,
@@ -166,6 +167,13 @@ ZONES = EntitySelector(EntitySelectorConfig(domain="zone", multiple=True))
 CONFIDENCE = SelectSelector(
     SelectSelectorConfig(options=[logic.LOW, logic.MEDIUM, logic.HIGH], translation_key="confidence")
 )
+PESTS = SelectSelector(
+    SelectSelectorConfig(
+        options=[n for n, (_, pest, _) in COMMON_WILDLIFE.items() if pest] + ["Coyote", "Bear"],
+        multiple=True,
+        custom_value=True,
+    )
+)
 QUIET_MODE = SelectSelector(
     SelectSelectorConfig(options=[QUIET_NORMAL, QUIET_NONE], translation_key="quiet_mode")
 )
@@ -240,7 +248,8 @@ def _subjects(entry: ConfigEntry) -> list[str]:
         for s in entry.subentries.values()
         if s.subentry_type in (SUBENTRY_ANIMAL, SUBENTRY_SPECIES)
     ]
-    return [*named, *BUILTIN_KEYS]
+    pests = [p for p in entry.options.get(CONF_PESTS) or [] if p.lower() not in {n.lower() for n in named}]
+    return [*named, *pests, *BUILTIN_KEYS]
 
 
 def _pick(values: list[str], names: list[str]) -> list[str]:
@@ -558,38 +567,13 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_wildlife(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Common wildlife, pre-filled: tick the ones that visit. Each can be edited later."""
+        """Which animals are pests. Every other animal is tracked as wildlife without setup."""
         if user_input is not None:
-            for name in user_input.get("wildlife", []):
-                alert, pest, hint = COMMON_WILDLIFE.get(name, (True, False, ""))
-                self._extra.append(
-                    ConfigSubentryData(
-                        data=_species_data(
-                            {
-                                CONF_NAME: name,
-                                CONF_DESCRIPTION: hint,
-                                CONF_ALERT_AT: [logic.EVERY] if alert else [],
-                                CONF_CRITICAL_AT: [],
-                                CONF_PEST: pest,
-                                CONF_IN_SUMMARY: True,
-                            },
-                            slugify(name),
-                        ),
-                        subentry_type=SUBENTRY_SPECIES,
-                        title=name,
-                        unique_id=f"species_{name.lower()}",
-                    )
-                )
+            self._options[CONF_PESTS] = [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()]
             return await self.async_step_people()
         return self.async_show_form(
             step_id="wildlife",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("wildlife", default=DEFAULT_WILDLIFE_PICKS): SelectSelector(
-                        SelectSelectorConfig(options=list(COMMON_WILDLIFE), multiple=True, custom_value=True)
-                    )
-                }
-            ),
+            data_schema=vol.Schema({vol.Optional(CONF_PESTS, default=DEFAULT_WILDLIFE_PICKS): PESTS}),
         )
 
     async def async_step_people(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -769,12 +753,16 @@ class WatchOptionsFlow(OptionsFlow):
     async def async_step_catch_alls(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Unknown animals, other wildlife and unsure motion: where each alerts."""
         if user_input is not None:
-            data: dict[str, Any] = {}
+            data: dict[str, Any] = {
+                CONF_PESTS: [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()]
+            }
             for key in BUILTIN_KEYS.values():
                 data.update(_alert_data(user_input, f"{key}_"))
             return self._save(data)
         cameras = _camera_options(self.config_entry)
-        fields: dict[Any, Any] = {}
+        fields: dict[Any, Any] = {
+            vol.Optional(CONF_PESTS, default=list(self._values.get(CONF_PESTS) or [])): PESTS
+        }
         for key in BUILTIN_KEYS.values():
             fields.update(_alert_fields(self._values, cameras, f"{key}_"))
         return self.async_show_form(step_id="catch_alls", data_schema=vol.Schema(fields))

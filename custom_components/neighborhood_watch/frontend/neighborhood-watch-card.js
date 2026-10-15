@@ -150,7 +150,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     const parts = [];
     if (show.has("review") && d.hub?.keys.to_review) parts.push(this._review(d));
     if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
-    if (show.has("wildlife") && d.wildlife.length) parts.push(this._wildlife(d.wildlife));
+    if (show.has("wildlife") && (d.wildlife.length || d.hub?.keys.wildlife)) parts.push(this._wildlife(d.wildlife, d.hub));
     if (show.has("summary") && d.hub) parts.push(this._summary(d.hub));
     if (show.has("recent") && d.cameras.length) parts.push(this._recent(d.cameras));
     if (show.has("switches")) parts.push(this._switches(d));
@@ -367,7 +367,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     return `<div class="section"><div class="grid">${tiles.join("")}</div></div>`;
   }
 
-  _wildlife(list) {
+  _wildlife(list, hub) {
     const rows = list.map((w) => {
       const k = w.keys;
       const seen = this._state(k.last_seen);
@@ -383,6 +383,20 @@ class NeighborhoodWatchCard extends HTMLElement {
           ${this._ruleChips(k).join("")}
         </div>`;
     });
+    // Every other kind lives on the hub's Wildlife sensor: no device per animal.
+    const seen = hub?.keys.wildlife ? this._state(hub.keys.wildlife)?.attributes?.kinds || {} : {};
+    const own = new Set(list.map((w) => w.name));
+    for (const [name, k] of Object.entries(seen)) {
+      if (own.has(name)) continue;
+      const tag = k.pest ? `<span class="chip alarm">pest</span>` : "";
+      const maybe = k.possible ? ` <span class="muted">(possible)</span>` : "";
+      rows.push(`<div class="row" data-more="${esc(hub.keys.wildlife)}">
+          <span class="rname">${esc(name)}${maybe}</span>
+          <span class="rinfo">${esc(k.where || "")} · ${ago(k.last_seen)}</span>
+          <span class="rcount">${k.tonight ? `${esc(k.tonight)} tonight` : ""}</span>${tag}
+        </div>`);
+    }
+    if (!rows.length) return "";
     return `<div class="section"><h2>Wildlife</h2>${rows.join("")}</div>`;
   }
 
@@ -419,7 +433,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         return `<button class="chip ${s?.state === "on" ? "alarm" : ""}" data-toggle="${esc(c.keys.critical_alerts)}">${esc(c.name)}</button>`;
       });
     const hub = d.hub?.keys || {};
-    for (const [key, label] of [["unknown_critical", "Unknown animals"], ["other_critical", "Other wildlife"], ["motion_critical", "Unsure motion"]]) {
+    for (const [key, label] of [["pest_critical", "Pests"], ["other_critical", "Other wildlife"], ["unknown_critical", "Unknown animals"], ["motion_critical", "Unsure motion"]]) {
       const s = hub[key] && this._state(hub[key]);
       if (s) chips.push(`<button class="chip ${s.state === "on" ? "alarm" : ""}" data-toggle="${esc(hub[key])}">${label}</button>`);
     }
