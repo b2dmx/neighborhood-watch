@@ -247,7 +247,7 @@
           "detector_min": "Animal threshold"
         },
         "data_description": {
-          "detector_url": "e.g. http://nas.local:8765. Leave empty to turn it off.",
+          "detector_url": "e.g. {example}. Leave empty to turn it off.",
           "detector_min": "Below this confidence the frame counts as empty."
         }
       },

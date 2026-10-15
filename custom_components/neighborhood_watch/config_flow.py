@@ -799,6 +799,7 @@ class WatchOptionsFlow(OptionsFlow):
         values = self._values
         return self.async_show_form(
             step_id="detector",
+            description_placeholders={"example": "http://nas.local:8765"},
             data_schema=vol.Schema(
                 {
                     vol.Optional(
