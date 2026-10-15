@@ -1,5 +1,6 @@
-"""Switches: missing mode for each priority animal, and critical alerts per camera and per
-wildlife kind (they break through silent mode, except where a person has a quiet zone)."""
+"""Switches on each animal and wildlife kind (Alerts, Critical alerts, Missing mode for
+named animals) and on each camera (Critical alerts: anything there rings, except the
+animals its page lists)."""
 from __future__ import annotations
 
 from typing import Any
@@ -18,23 +19,18 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     watch = entry.runtime_data
-    for animal in watch.animals.values():
-        if animal.priority:
-            async_add_entities(
-                [MissingMode(watch, "missing_mode", animal=animal)],
-                config_subentry_id=animal.subentry_id,
-            )
+    for subject in [*watch.animals.values(), *watch.species.values()]:
+        entities: list[SwitchEntity] = [Alerts(watch, "alerts", animal=subject)]
+        if subject.critical_at:
+            entities.append(CriticalAlerts(watch, "critical_alerts", animal=subject))
+        if subject.kind == "animal":
+            entities.append(MissingMode(watch, "missing_mode", animal=subject))
+        async_add_entities(entities, config_subentry_id=subject.subentry_id)
     for cam in watch.cameras.values():
         async_add_entities(
             [CriticalAlerts(watch, "critical_alerts", camera=cam)],
             config_subentry_id=cam.subentry_id,
         )
-    for kind in watch.species.values():
-        if kind.critical_switch:
-            async_add_entities(
-                [CriticalAlerts(watch, "critical_alerts", animal=kind)],
-                config_subentry_id=kind.subentry_id,
-            )
 
 
 class MissingMode(WatchEntity, SwitchEntity):
@@ -51,6 +47,22 @@ class MissingMode(WatchEntity, SwitchEntity):
         await self.watch.async_set_missing_mode(self.animal, False)
 
 
+class Alerts(WatchEntity, SwitchEntity):
+    """Pauses an animal's alerts without losing where they're set to go."""
+
+    _attr_icon = "mdi:bell"
+
+    @property
+    def is_on(self) -> bool:
+        return self.watch.alerts_on(self.animal.switch_key)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.watch.async_set_alerts(self.animal.switch_key, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.watch.async_set_alerts(self.animal.switch_key, False)
+
+
 class CriticalAlerts(WatchEntity, SwitchEntity):
     _attr_icon = "mdi:bell-alert"
 
@@ -59,8 +71,12 @@ class CriticalAlerts(WatchEntity, SwitchEntity):
         return (self.camera or self.animal).switch_key
 
     @property
+    def _default(self) -> bool:
+        return self.camera is None  # an animal's starts on; a camera's starts off
+
+    @property
     def is_on(self) -> bool:
-        return self.watch.critical_on(self._key)
+        return self.watch.critical_on(self._key, self._default)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.watch.async_set_critical(self._key, True)

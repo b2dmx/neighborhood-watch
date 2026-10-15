@@ -157,10 +157,26 @@ async def test_wildlife_is_tracked_with_its_own_entities(hass, watch):
     assert state(hass, "binary_sensor.raccoon_on_camera").state == "on"
     assert state(hass, "sensor.raccoon_sightings_tonight").state == "1"
     assert state(hass, "image.raccoon_last_photo").state != "unknown"
-    assert state(hass, "switch.raccoon_critical_alerts").state == "off"
+    assert state(hass, "switch.raccoon_critical_alerts").state == "on"
     assert state(hass, "switch.garage_critical_alerts").state == "off"
     (event,) = watch["events"]
     assert event.data["sighting_id"]
+
+
+async def test_older_setup_is_moved_to_alert_at(hass, watch):
+    """0.6 settings (house cameras, alert scopes, critical switches) become the 0.7 rules."""
+    entry = watch["entry"]
+    assert entry.minor_version == 2
+    data = {s.title: s.data for s in entry.subentries.values()}
+    assert data["Garage"]["critical_except"] == ["luna"] and "house" not in data["Garage"]
+    assert data["Yard"]["critical_except"] == ["luna"]
+    assert (data["Raccoon"]["alert_at"], data["Raccoon"]["critical_at"]) == (["*"], ["*"])
+    assert (data["Opossum"]["alert_at"], data["Opossum"]["critical_at"]) == (["garage"], [])
+    assert data["Milo"]["alert_at"] == ["*"] and data["Milo"]["critical_at"] == []
+    assert "alert_scope" not in data["Raccoon"]
+    opts = entry.options
+    assert opts["unknown_alert_at"] == ["*"] and "unknown_alerts" not in opts
+    assert opts["other_alert_at"] == ["garage"] and opts["motion_alert_at"] == ["garage"]
 
 
 async def test_alerts_reach_everyone_with_buttons(hass, watch):

@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from typing import Final
 
-from .logic import DEFAULT_INSTRUCTIONS, DEFAULT_WILDLIFE
+from .logic import (
+    BUILTIN_MOTION,
+    BUILTIN_OTHER,
+    BUILTIN_UNKNOWN,
+    DEFAULT_INSTRUCTIONS,
+    DEFAULT_WILDLIFE,
+    EVERY,
+    MEDIUM,
+)
 
 DOMAIN: Final = "neighborhood_watch"
 NAME: Final = "Neighborhood Watch"
@@ -35,7 +43,8 @@ CONF_REFERENCE_PHOTOS = "reference_photos"
 CONF_MODE = "mode"
 CONF_PUBLIC_URL = "public_url"
 CONF_ALERTS = "alerts"
-CONF_UNKNOWN_ALERTS = "unknown_alerts"
+CONF_UNKNOWN_ALERTS = "unknown_alerts"  # before 0.7: migrated into the built-ins
+CONF_MIN_CONFIDENCE = "min_confidence"
 CONF_BUTTONS = "correction_buttons"
 CONF_DATASET = "dataset"
 CONF_DATASET_DIR = "dataset_dir"
@@ -46,6 +55,18 @@ CONF_DETECTOR_MIN = "detector_min"
 DETECTOR_SHADOW = "shadow"  # ask it, record the answer, change nothing
 DETECTOR_SKIP = "skip_empty"  # no animal found: no AI call
 DETECTOR_MODES = [DETECTOR_SHADOW, DETECTOR_SKIP]
+
+# --- alert rules (animal, wildlife and built-in) ---
+CONF_ALERT_AT = "alert_at"  # camera slugs; "*" = every camera; empty = never
+CONF_CRITICAL_AT = "critical_at"
+# The three catch-alls live in the options: "<key>_alert_at" / "<key>_critical_at".
+BUILTIN_KEYS: dict[str, str] = {BUILTIN_UNKNOWN: "unknown", BUILTIN_OTHER: "other", BUILTIN_MOTION: "motion"}
+BUILTIN_DEFAULTS: dict[str, tuple[list[str], list[str]]] = {
+    "unknown": ([EVERY], []),
+    "other": ([EVERY], []),
+    "motion": ([], []),
+}
+VISIT_SLACK_MINUTES = 10  # same visit: seen again within the camera's cooldown + this
 
 MODE_LIVE = "live"
 MODE_SHADOW_REUSE = "shadow_reuse"
@@ -72,7 +93,7 @@ DEFAULT_OPTIONS: dict = {
     CONF_MODE: MODE_LIVE,
     CONF_PUBLIC_URL: "",
     CONF_ALERTS: True,
-    CONF_UNKNOWN_ALERTS: True,
+    CONF_MIN_CONFIDENCE: MEDIUM,
     CONF_BUTTONS: True,
     CONF_DATASET: True,
     CONF_DATASET_DIR: "",
@@ -80,6 +101,8 @@ DEFAULT_OPTIONS: dict = {
     CONF_DETECTOR_URL: "",
     CONF_DETECTOR_MODE: DETECTOR_SHADOW,
     CONF_DETECTOR_MIN: 0.2,
+    **{f"{k}_{CONF_ALERT_AT}": a for k, (a, _) in BUILTIN_DEFAULTS.items()},
+    **{f"{k}_{CONF_CRITICAL_AT}": c for k, (_, c) in BUILTIN_DEFAULTS.items()},
 }
 
 # --- camera subentry ---
@@ -92,9 +115,10 @@ CONF_COOLDOWN = "cooldown"
 CONF_PRIORITY_COOLDOWN = "priority_cooldown"
 CONF_MISSING_COOLDOWN = "missing_cooldown"
 CONF_REOPENED_BY = "reopened_by"
-CONF_HOUSE = "house"
+CONF_HOUSE = "house"  # before 0.7
 CONF_INTERVAL = "check_every"
-CONF_UNSURE_ALERTS = "unsure_alerts"
+CONF_UNSURE_ALERTS = "unsure_alerts"  # before 0.7
+CONF_CRITICAL_EXCEPT = "critical_except"  # lower-case names that never ring here
 CONF_DETER_LIGHTS = "deterrent_lights"
 CONF_DETER_MINUTES = "deterrent_minutes"
 CONF_DETER_SOUND = "deterrent_sound"
@@ -113,12 +137,12 @@ CONF_ADDED = "added"
 CONF_KNOWN_LAST_SEEN = "known_last_seen"
 CONF_KNOWN_LOCATION = "known_location"
 CONF_ADD_ANOTHER = "add_another"
-CONF_ALERT = "alert"
+CONF_ALERT = "alert"  # before 0.7
 
 # --- species (wildlife) subentry ---
-CONF_ALERT_SCOPE = "alert_scope"
-CONF_ALERT_CAMERAS = "alert_cameras"
-CONF_CRITICAL_SWITCH = "critical_switch"
+CONF_ALERT_SCOPE = "alert_scope"  # before 0.7
+CONF_ALERT_CAMERAS = "alert_cameras"  # before 0.7
+CONF_CRITICAL_SWITCH = "critical_switch"  # before 0.7
 CONF_PEST = "pest"
 CONF_IN_SUMMARY = "in_summary"
 
@@ -129,6 +153,12 @@ CONF_QUIET_ZONES = "quiet_zones"
 CONF_MISSING_ALERTS = "missing_alerts"
 CONF_CRITICAL_SOUND = "critical_sound"
 CONF_CRITICAL_VOLUME = "critical_volume"
+CONF_MUTED = "muted"  # names this person never hears about (missing mode still does)
+CONF_QUIET_MODE = "quiet_mode"  # in a quiet zone or quiet hours: critical → normal, or none
+CONF_QUIET_START = "quiet_start"
+CONF_QUIET_END = "quiet_end"
+QUIET_NORMAL = "normal"
+QUIET_NONE = "none"
 
 ACTION_PREFIX = "NW"  # phone notification buttons: NW|right|<id>, NW|wrong|<id>, NW|is|<id>|<slug>
 EVENT_ACTION = "mobile_app_notification_action"
@@ -149,17 +179,18 @@ WWW_SUBDIR = "neighborhood_watch"
 QUOTA_TZ = "America/Los_Angeles"  # Gemini free-tier quotas reset at midnight Pacific
 
 
-# Common wildlife offered during setup: (alert scope, scare off, critical switch, hint for the AI)
-COMMON_WILDLIFE: dict[str, tuple[str, bool, bool, str]] = {
-    "Raccoon": ("any", True, True, "Ringed tail, black mask across the eyes, stocky hunched body."),
-    "Opossum": ("house", True, False, "Long hairless rat-like tail, long pointed pale face, grizzled grey body."),
-    "Skunk": ("any", True, False, "Black with white stripes down the back and a bushy tail."),
-    "Rat": ("house", True, False, "Small rodent with a long thin tail, bigger than a mouse."),
-    "Fox": ("house", False, False, ""),
-    "Coyote": ("any", False, False, "Dog-like, grey-brown, bushy tail held low."),
-    "Bear": ("any", False, True, ""),
-    "Deer": ("never", False, False, ""),
-    "Rabbit": ("never", False, False, ""),
-    "Groundhog": ("never", False, False, ""),
+# Common wildlife offered during setup: (alerts, pest, hint for the AI). Each starts by
+# alerting at every camera (or never); where and how loudly is set on its page afterwards.
+COMMON_WILDLIFE: dict[str, tuple[bool, bool, str]] = {
+    "Raccoon": (True, True, "Ringed tail, black mask across the eyes, stocky hunched body."),
+    "Opossum": (True, True, "Long hairless rat-like tail, long pointed pale face, grizzled grey body."),
+    "Skunk": (True, True, "Black with white stripes down the back and a bushy tail."),
+    "Rat": (True, True, "Small rodent with a long thin tail, bigger than a mouse."),
+    "Fox": (True, False, ""),
+    "Coyote": (True, False, "Dog-like, grey-brown, bushy tail held low."),
+    "Bear": (True, False, ""),
+    "Deer": (False, False, ""),
+    "Rabbit": (False, False, ""),
+    "Groundhog": (False, False, ""),
 }
 DEFAULT_WILDLIFE_PICKS = ["Raccoon", "Opossum", "Skunk"]

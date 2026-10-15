@@ -199,6 +199,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> bool:
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:
+        from .migrate import alert_rules_v2  # noqa: PLC0415
+
+        options, changed = alert_rules_v2(
+            entry.options,
+            {sid: (s.subentry_type, s.data) for sid, s in entry.subentries.items()},
+        )
+        for sid, data in changed.items():
+            hass.config_entries.async_update_subentry(entry, entry.subentries[sid], data=data)
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> bool:
     watch = WatchEngine(hass, entry)
     # The hub device first: camera and animal devices hang off it.

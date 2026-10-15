@@ -9,7 +9,7 @@
 - **Catching pests in the act.** Something keeps getting into the garbage, the shed or the chickens. Get an alert with the photo when it's there. Turn on a floodlight or play a sound to scare it off. Get a morning summary of what came by.
 - **Without an NVR, a subscription or a recognition service.** Any camera Home Assistant can show works: a cheap RTSP or ONVIF camera, a doorbell, any brand. A camera with no motion sensor can be checked on a timer. The AI is any AI Task model; Google's free Gemini tier covers a typical night.
 - **Keeping track of animals you know.** Your outdoor cats, a neighbour's dog, a stray you're trying to catch. It records when and where each was last seen, with the exact photo the AI judged.
-- **Never missing the one that matters.** Mark an animal as priority, like a lost pet. It is double-checked by two AI models, never falsely confirmed, and its missing mode sends critical alerts on any possible sighting. A "confirmed" signal (both models sure) is safe to drive a feeder or a trap.
+- **Never missing the one that matters.** Every named animal has a missing mode: while it's on, any possible sighting, from either AI model at any confidence, sends a critical alert. Mark an animal as priority, and it's also double-checked by two AI models and never falsely confirmed. A "confirmed" signal (both models sure) is safe to drive a feeder or a trap.
 - **Getting better over time.** Every alert has ✓ / ✗ buttons. Corrections fix tracking right away, and every labelled photo is saved to train a custom model.
 
 It is all set up in the UI. A dashboard card comes with it.
@@ -57,33 +57,33 @@ Onboarding walks through:
 1. **AI models.** The first look, the second opinion and any paid models, each in order.
 2. **When to watch.** Start and end times, whether darkness also counts, and when the night summary is built.
 3. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
-4. **Wildlife.** Tick the common visitors (raccoon, opossum, skunk, rat, fox, coyote, bear, deer…). Each comes with sensible alert and scare-off settings.
+4. **Wildlife.** Tick the common visitors (raccoon, opossum, skunk, rat, fox, coyote, bear, deer…). Each starts out alerting at every camera (deer, rabbits and groundhogs never), and pests are marked to be scared off.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
 6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Skip this step if you only care about pests.
 
 Afterwards, the integration page has four Add buttons. Each camera, animal, wildlife kind and person also gets its own page, where you can edit or delete it:
 
-- **Add camera**. Besides its sensors and cooldowns, a camera can be:
-  - **close to the house**: alert on anything that isn't harmless, and on motion the AI couldn't identify;
-  - given **lights and a sound** that scare pests off.
-- **Add animal**: animals told apart by name, like your cats.
+- **Add camera**. Besides its sensors and cooldowns, a camera has:
+  - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
+  - **lights and a sound** that scare pests off.
+- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
 - **Add wildlife**: animals recognised by kind only, like a raccoon or an opossum. Each has these settings:
-  - when it alerts: never, cameras close to the house, chosen cameras, or any camera;
-  - a critical-alerts switch;
-  - **Scare it off**, which turns on the camera's deterrent lights and sound;
+  - **Alert at** and **Critical alerts at**;
+  - **Pest**: scare it off with the camera's lights and sound, and alert every time it comes back;
   - whether it counts in the night summary.
 - **Add person**: someone who gets alerts. Each has these settings:
-  - their phone;
-  - zones (like work) where critical alerts arrive as normal ones;
-  - whether they get missing-mode alerts;
-  - their critical sound and volume.
+  - their phone, and their critical sound and volume;
+  - **Don't notify me about**: animals this person never hears about;
+  - **quiet zones** (like work) and **quiet hours**, and what happens there: critical alerts arrive as normal ones, or no alerts at all;
+  - whether they get missing-mode alerts.
 
 **Configure** holds:
 
 | Page | Settings (defaults) |
 |---|---|
 | Mode | Live; shadow (reuse another system's answers); shadow (independent, no paid models) |
-| Alerts | Send alerts (on); alert on unknown animals (on); Right / Wrong buttons on alerts (on) |
+| Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
+| Unknown animals, other wildlife and motion | Alert at / Critical alerts at for each catch-all (unknown animals and other wildlife: every camera; unsure motion: none) |
 | AI models | First look, second opinion, paid models; optional hours for the main model |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | Identification | The AI instructions (with placeholders), extra rules, wildlife list, recently absent after 14 days, reference photos (on) |
@@ -113,11 +113,11 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 | Sightings tonight / this week | Counted sightings since the last summary, and over 7 days |
 | Recently absent | On after the absent window without a sighting; while on, the AI must be sure |
 
-Priority animals also get **Missing mode** (a switch) and **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
+Every animal has **Alerts** and **Missing mode** switches, plus **Critical alerts** when it has critical cameras. Priority animals also get **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
 
 ### Per wildlife kind
 
-Last seen, location, on camera (with the camera as an attribute), sightings tonight and this week, and last photo. If you turned it on, there's also a **Critical alerts** switch.
+Last seen, location, on camera (with the camera as an attribute), sightings tonight and this week, and last photo. An **Alerts** switch, plus **Critical alerts** when it has critical cameras.
 
 ### Per camera
 
@@ -126,7 +126,7 @@ Last seen, location, on camera (with the camera as an attribute), sightings toni
 | Animal | What it is seeing now (clears after the on-camera window), or "None" |
 | Last detection | The last result, with both AI answers, the models used and the time |
 | Last frame | The frame the AI last judged |
-| Critical alerts | A switch: this camera's alerts break through silent mode |
+| Critical alerts | A switch: anything seen here rings through silent mode, except the animals on the camera's page |
 
 ### Overall
 
@@ -153,14 +153,18 @@ Last seen, location, on camera (with the camera as an attribute), sightings toni
 
 ## Alerts
 
-The integration sends the alerts itself, to every person you add:
+The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, a wildlife kind, or one of three catch-alls (**unknown animals**, **other wildlife** you haven't added, and **unsure motion**). Each has two settings:
 
-- **Priority animal, medium or high confidence:** a tentative "Possible Luna" to everyone.
-- **Priority animal in missing mode:** any possible sighting, at any confidence, sends a critical alert at full volume to the people who get missing-mode alerts.
-- **Your other animals:** an alert on any camera, worded "Possible …" below high confidence. Unknown cats alert too, unless you turn that off.
-- **Wildlife:** follows its own setting: never, cameras close to the house, chosen cameras, or any camera.
-- **Close to the house:** anything not set up and not harmless (a fox, a dog) alerts. So does motion the AI couldn't identify.
-- **Critical:** when the camera's or the wildlife kind's critical switch is on. It still arrives as a normal alert for anyone in one of their quiet zones.
+- **Alert at:** all cameras, chosen cameras, or none.
+- **Critical alerts at:** the cameras where it rings through silent mode, while its Critical alerts switch is on.
+
+Then:
+
+- **Confidence.** Answers below the **Alert from** level (medium by default) don't alert; they wait in the review queue. Priority animals are always worded "Possible Luna".
+- **A camera's critical switch** makes anything seen there ring, except the animals listed on its page. Critical overrides "don't alert", so you hear about anything in the garage even if its own alerts are off. Harmless things (squirrels, birds, bugs, leaves) and a confident empty frame never alert.
+- **Visits.** The same animal seen again on the same camera within the camera's cooldown plus 10 minutes updates the earlier alert silently. Pests alert every time, so you know when one you scared off comes back.
+- **Missing mode** (any named animal) beats everything: any possible sighting, from either model at any confidence on any camera, sends a critical alert at full volume to the people who get missing-mode alerts. The AI always takes a second look.
+- **Per person.** Muted animals are skipped. In a quiet zone or quiet hours, critical alerts arrive as normal ones, or not at all; missing-mode alerts always arrive.
 
 Each alert carries the frame the AI judged and three buttons: **✓ Right**, **✗ Wrong** and **It's Luna**.
 
@@ -184,7 +188,7 @@ actions:
 
 ## Scaring pests off
 
-When wildlife set to **Scare it off** is seen at a camera with deterrent lights or a sound:
+When wildlife marked as a **Pest** is seen at a camera with deterrent lights or a sound:
 
 - The lights that were off turn on for the set time, then turn back off. Lights that were already on are left on.
 - The sound plays on the chosen speaker.
@@ -221,7 +225,7 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- each animal's photo, where and when it was last seen, whether it's on camera now, and its missing-mode switch;
+- each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches;
 - wildlife, last night's summary, and each camera's last detection with ✓ / ✗ buttons;
 - the critical-alert switches.
 

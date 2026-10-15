@@ -54,8 +54,6 @@
           "priority_cooldown": "Cooldown after a priority animal",
           "missing_cooldown": "Cooldown in missing mode",
           "reopened_by": "A check on these cameras ends the cooldown",
-          "house": "Close to the house",
-          "unsure_alerts": "Alert on motion the AI couldn't identify",
           "deterrent_lights": "Lights that scare pests off",
           "deterrent_minutes": "Leave them on for",
           "deterrent_sound": "Sound that scares pests off",
@@ -67,8 +65,6 @@
           "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
           "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
           "reopened_by": "For a camera an animal passes on its way here.",
-          "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
-          "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
           "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
           "deterrent_sound": "Played when a pest is seen here.",
           "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
@@ -90,7 +86,8 @@
           "add_another": "Add another animal after this one",
           "known_last_seen": "Last seen",
           "known_location": "Last seen at",
-          "alert": "Alert when seen"
+          "alert_at": "Alert at",
+          "critical_at": "Critical alerts at"
         },
         "data_description": {
           "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
@@ -102,7 +99,8 @@
           "reference_upload": "A clear night photo, sent to the AI beside each frame.",
           "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
           "known_location": "Optional: where it was last seen.",
-          "alert": "Send an alert when this animal is seen."
+          "alert_at": "Cameras where it sends an alert. Empty: never.",
+          "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
         }
       },
       "wildlife": {
@@ -145,7 +143,8 @@
           "notifications": "Notification pictures",
           "alerts": "Alerts",
           "training": "Training data",
-          "detector": "Local detector"
+          "detector": "Local detector",
+          "catch_alls": "Unknown animals, other wildlife and motion"
         }
       },
       "mode": {
@@ -217,12 +216,13 @@
         "description": "Who gets alerts is set per person (Add person). Cameras, animals and wildlife each decide when they alert.",
         "data": {
           "alerts": "Send alerts",
-          "unknown_alerts": "Alert on unknown animals (an Unknown Cat or Dog)",
-          "correction_buttons": "Right / Wrong buttons on alerts"
+          "correction_buttons": "Right / Wrong buttons on alerts",
+          "min_confidence": "Alert from confidence"
         },
         "data_description": {
           "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
-          "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data."
+          "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data.",
+          "min_confidence": "Less sure answers don't alert; they wait in the review queue. Critical alerts and missing mode ignore this."
         }
       },
       "training": {
@@ -249,6 +249,21 @@
         "data_description": {
           "detector_url": "e.g. http://nas.local:8765. Leave empty to turn it off.",
           "detector_min": "Below this confidence the frame counts as empty."
+        }
+      },
+      "catch_alls": {
+        "title": "Unknown animals, other wildlife and motion",
+        "description": "Where the catch-alls alert. Unknown animals: a cat or dog that isn't one of yours. Other wildlife: any kind you haven't added. Unsure motion: the AI saw movement but couldn't say what.",
+        "data": {
+          "unknown_alert_at": "Unknown animals: alert at",
+          "unknown_critical_at": "Unknown animals: critical alerts at",
+          "other_alert_at": "Other wildlife: alert at",
+          "other_critical_at": "Other wildlife: critical alerts at",
+          "motion_alert_at": "Unsure motion: alert at",
+          "motion_critical_at": "Unsure motion: critical alerts at"
+        },
+        "data_description": {
+          "motion_critical_at": "A camera's own Critical alerts switch also covers all three."
         }
       }
     },
@@ -282,21 +297,19 @@
             "priority_cooldown": "Cooldown after a priority animal",
             "missing_cooldown": "Cooldown in missing mode",
             "reopened_by": "A check on these cameras ends the cooldown",
-            "house": "Close to the house",
-            "unsure_alerts": "Alert on motion the AI couldn't identify",
             "deterrent_lights": "Lights that scare pests off",
             "deterrent_minutes": "Leave them on for",
             "deterrent_sound": "Sound that scares pests off",
-            "check_every": "Also check every"
+            "check_every": "Also check every",
+            "critical_except": "Critical alerts here, except"
           },
           "data_description": {
             "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
             "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
-            "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
-            "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
             "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
             "deterrent_sound": "Played when a pest is seen here.",
-            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
+            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here)."
           }
         },
         "reconfigure": {
@@ -310,19 +323,17 @@
             "priority_cooldown": "Cooldown after a priority animal",
             "missing_cooldown": "Cooldown in missing mode",
             "reopened_by": "A check on these cameras ends the cooldown",
-            "house": "Close to the house",
-            "unsure_alerts": "Alert on motion the AI couldn't identify",
             "deterrent_lights": "Lights that scare pests off",
             "deterrent_minutes": "Leave them on for",
             "deterrent_sound": "Sound that scares pests off",
-            "check_every": "Also check every"
+            "check_every": "Also check every",
+            "critical_except": "Critical alerts here, except"
           },
           "data_description": {
-            "house": "Alert on any animal here that isn't harmless, not just the ones you chose.",
-            "unsure_alerts": "Motion with no clear answer gets an alert, like a visitor.",
             "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
             "deterrent_sound": "Played when a pest is seen here.",
-            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
+            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here)."
           }
         }
       },
@@ -355,7 +366,8 @@
             "reference_upload": "Reference photo",
             "known_last_seen": "Last seen",
             "known_location": "Last seen at",
-            "alert": "Alert when seen"
+            "alert_at": "Alert at",
+            "critical_at": "Critical alerts at"
           },
           "data_description": {
             "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
@@ -365,7 +377,8 @@
             "reference_upload": "A clear night photo, sent to the AI beside each frame.",
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
-            "alert": "Send an alert when this animal is seen."
+            "alert_at": "Cameras where it sends an alert. Empty: never.",
+            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
           }
         },
         "reconfigure": {
@@ -383,12 +396,14 @@
             "remove_reference": "Remove the reference photo",
             "known_last_seen": "Last seen",
             "known_location": "Last seen at",
-            "alert": "Alert when seen"
+            "alert_at": "Alert at",
+            "critical_at": "Critical alerts at"
           },
           "data_description": {
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
-            "alert": "Send an alert when this animal is seen."
+            "alert_at": "Cameras where it sends an alert. Empty: never.",
+            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
           }
         }
       },
@@ -416,17 +431,17 @@
           "data": {
             "name": "Name",
             "description": "What it looks like (optional)",
-            "alert_scope": "Alert",
-            "alert_cameras": "Cameras (when alerting at chosen cameras)",
-            "critical_switch": "Add a critical-alerts switch",
-            "pest": "Scare it off",
-            "in_summary": "Count it in the night summary"
+            "pest": "Pest",
+            "in_summary": "Count it in the night summary",
+            "alert_at": "Alert at",
+            "critical_at": "Critical alerts at"
           },
           "data_description": {
             "name": "What the AI calls it, e.g. Raccoon.",
             "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
-            "critical_switch": "A switch that makes its alerts break through silent mode.",
-            "pest": "Turns on the camera's deterrent lights and sound when it is seen."
+            "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
+            "alert_at": "Cameras where it sends an alert. Empty: never.",
+            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
           }
         },
         "reconfigure": {
@@ -434,17 +449,17 @@
           "data": {
             "name": "Name",
             "description": "What it looks like (optional)",
-            "alert_scope": "Alert",
-            "alert_cameras": "Cameras (when alerting at chosen cameras)",
-            "critical_switch": "Add a critical-alerts switch",
-            "pest": "Scare it off",
-            "in_summary": "Count it in the night summary"
+            "pest": "Pest",
+            "in_summary": "Count it in the night summary",
+            "alert_at": "Alert at",
+            "critical_at": "Critical alerts at"
           },
           "data_description": {
             "name": "What the AI calls it, e.g. Raccoon.",
             "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
-            "critical_switch": "A switch that makes its alerts break through silent mode.",
-            "pest": "Turns on the camera's deterrent lights and sound when it is seen."
+            "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
+            "alert_at": "Cameras where it sends an alert. Empty: never.",
+            "critical_at": "Cameras where its alerts ring through silent mode (while its Critical alerts switch is on). Empty: none."
           }
         }
       },
@@ -471,16 +486,24 @@
             "name": "Name",
             "person": "Person",
             "notify_service": "Phone",
-            "quiet_zones": "No critical alerts while in",
+            "quiet_zones": "Quiet zones",
             "missing_alerts": "Gets missing-mode alerts",
             "critical_sound": "Critical sound",
-            "critical_volume": "Critical volume"
+            "critical_volume": "Critical volume",
+            "muted": "Don't notify me about",
+            "quiet_start": "Quiet hours start",
+            "quiet_end": "Quiet hours end",
+            "quiet_mode": "When in a quiet zone or quiet hours"
           },
           "data_description": {
             "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
-            "quiet_zones": "Zones (like work) where critical alerts arrive as normal ones.",
+            "quiet_zones": "Zones (like work) where alerts are toned down.",
             "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-            "critical_sound": "The sound file name on the phone, or default."
+            "critical_sound": "The sound file name on the phone, or default.",
+            "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
+            "quiet_start": "Optional: a daily window, like overnight.",
+            "quiet_end": "Leave both empty for no quiet hours.",
+            "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones."
           }
         },
         "reconfigure": {
@@ -489,16 +512,24 @@
             "name": "Name",
             "person": "Person",
             "notify_service": "Phone",
-            "quiet_zones": "No critical alerts while in",
+            "quiet_zones": "Quiet zones",
             "missing_alerts": "Gets missing-mode alerts",
             "critical_sound": "Critical sound",
-            "critical_volume": "Critical volume"
+            "critical_volume": "Critical volume",
+            "muted": "Don't notify me about",
+            "quiet_start": "Quiet hours start",
+            "quiet_end": "Quiet hours end",
+            "quiet_mode": "When in a quiet zone or quiet hours"
           },
           "data_description": {
             "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
-            "quiet_zones": "Zones (like work) where critical alerts arrive as normal ones.",
+            "quiet_zones": "Zones (like work) where alerts are toned down.",
             "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-            "critical_sound": "The sound file name on the phone, or default."
+            "critical_sound": "The sound file name on the phone, or default.",
+            "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
+            "quiet_start": "Optional: a daily window, like overnight.",
+            "quiet_end": "Leave both empty for no quiet hours.",
+            "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones."
           }
         }
       },
@@ -541,18 +572,23 @@
         "no": "No"
       }
     },
-    "alert_scope": {
-      "options": {
-        "never": "Never",
-        "house": "Cameras close to the house",
-        "cameras": "Chosen cameras",
-        "any": "Any camera"
-      }
-    },
     "detector_mode": {
       "options": {
         "shadow": "Shadow: ask it and compare, change nothing",
         "skip_empty": "Skip empty frames: no AI call when it finds no animal (never in missing mode)"
+      }
+    },
+    "confidence": {
+      "options": {
+        "low": "Low (everything)",
+        "medium": "Medium",
+        "high": "High only"
+      }
+    },
+    "quiet_mode": {
+      "options": {
+        "normal": "Critical alerts arrive as normal ones",
+        "none": "No alerts"
       }
     }
   },
@@ -621,6 +657,9 @@
       },
       "critical_alerts": {
         "name": "Critical alerts"
+      },
+      "alerts": {
+        "name": "Alerts"
       }
     },
     "image": {

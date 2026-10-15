@@ -265,6 +265,20 @@ class NeighborhoodWatchCard extends HTMLElement {
       <button class="chip" data-scan>Scan</button></div></div>`;
   }
 
+  _ruleChips(k) {
+    // An animal's Alerts switch, and its Critical switch when it has critical cameras.
+    const out = [];
+    const alerts = this._state(k.alerts);
+    const crit = this._state(k.critical_alerts);
+    if (alerts)
+      out.push(
+        `<button class="chip ${alerts.state === "on" ? "" : "dim"}" data-toggle="${esc(k.alerts)}">${alerts.state === "on" ? "Alerts" : "Alerts off"}</button>`
+      );
+    if (crit)
+      out.push(`<button class="chip ${crit.state === "on" ? "alarm" : ""}" data-toggle="${esc(k.critical_alerts)}">Critical</button>`);
+    return out;
+  }
+
   _more(entityId) {
     this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
   }
@@ -292,6 +306,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       const chips = [];
       if (tonight && Number(tonight.state) > 0) chips.push(`<span class="chip">${esc(tonight.state)} tonight</span>`);
       if (absent?.state === "on") chips.push(`<span class="chip dim">away lately</span>`);
+      chips.push(...this._ruleChips(k));
       if (missing)
         chips.push(
           `<button class="chip ${missing.state === "on" ? "alarm" : ""}" data-toggle="${esc(k.missing_mode)}">Missing mode ${missing.state === "on" ? "on" : "off"}</button>`
@@ -308,14 +323,13 @@ class NeighborhoodWatchCard extends HTMLElement {
       const where = this._state(k.location);
       const onCam = this._state(k.on_camera);
       const tonight = this._state(k.sightings_tonight);
-      const crit = this._state(k.critical_alerts);
       const live = onCam?.state === "on";
       const when = seen && !["unknown", "unavailable"].includes(seen.state) ? `${esc(where?.state)} · ${ago(seen.state)}` : "Not seen";
       return `<div class="row ${live ? "is-live" : ""}" data-more="${esc(k.last_photo || k.last_seen)}">
           <span class="rname">${esc(w.name)}</span>
           <span class="rinfo">${live ? `<span class="live">● ${esc(onCam.attributes.camera || "")}</span>` : when}</span>
           <span class="rcount">${tonight && Number(tonight.state) > 0 ? `${esc(tonight.state)} tonight` : ""}</span>
-          ${crit ? `<button class="chip ${crit.state === "on" ? "alarm" : ""}" data-toggle="${esc(k.critical_alerts)}">Critical</button>` : ""}
+          ${this._ruleChips(k).join("")}
         </div>`;
     });
     return `<div class="section"><h2>Wildlife</h2>${rows.join("")}</div>`;

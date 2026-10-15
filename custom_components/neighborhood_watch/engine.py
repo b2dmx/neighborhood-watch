@@ -39,13 +39,13 @@ from . import dataset, logic
 from .const import (
     ACTION_PREFIX,
     AI_TIMEOUT,
-    CONF_ALERT,
-    CONF_ALERT_CAMERAS,
-    CONF_ALERT_SCOPE,
+    BUILTIN_KEYS,
+    CONF_ALERT_AT,
     CONF_ALERTS,
     CONF_BUTTONS,
+    CONF_CRITICAL_AT,
+    CONF_CRITICAL_EXCEPT,
     CONF_CRITICAL_SOUND,
-    CONF_CRITICAL_SWITCH,
     CONF_CRITICAL_VOLUME,
     CONF_DATASET,
     CONF_DATASET_DIR,
@@ -58,17 +58,22 @@ from .const import (
     CONF_DETER_MINUTES,
     CONF_DETER_SOUND,
     CONF_ALWAYS,
-    CONF_HOUSE,
     CONF_INTERVAL,
     CONF_IN_SUMMARY,
+    CONF_MIN_CONFIDENCE,
     CONF_MISSING_ALERTS,
+    CONF_MUTED,
     CONF_NOTIFY,
     CONF_PERSON,
     CONF_PEST,
+    CONF_QUIET_END,
+    CONF_QUIET_MODE,
+    CONF_QUIET_START,
     CONF_QUIET_ZONES,
-    CONF_UNKNOWN_ALERTS,
-    CONF_UNSURE_ALERTS,
     EVENT_ACTION,
+    QUIET_NONE,
+    QUIET_NORMAL,
+    VISIT_SLACK_MINUTES,
     SUBENTRY_RECIPIENT,
     SUBENTRY_SPECIES,
     COMPARISON_MAX,
@@ -149,8 +154,7 @@ class CameraConfig:
     skip_when: list[str]
     cooldown: logic.Cooldown
     reopened_by: list[str]
-    house: bool = False
-    unsure_alerts: bool = False
+    critical_except: frozenset[str] = frozenset()  # lower-case names that never ring here
     interval: float = 0  # minutes; 0 = only when a sensor triggers
     deter_lights: list[str] = field(default_factory=list)
     deter_minutes: float = 2
@@ -169,9 +173,8 @@ class SpeciesConfig:
     name: str
     slug: str
     description: str
-    alert: str
-    alert_cameras: list[str]
-    critical_switch: bool
+    alert_at: frozenset[str] | str
+    critical_at: frozenset[str] | str
     pest: bool
     in_summary: bool
     kind: str = "species"
@@ -195,6 +198,10 @@ class RecipientConfig:
     missing_alerts: bool
     sound: str
     volume: float
+    muted: frozenset[str] = frozenset()  # lower-case names
+    quiet_mode: str = QUIET_NORMAL
+    quiet_start: str | None = None
+    quiet_end: str | None = None
 
 
 @dataclass
@@ -212,12 +219,17 @@ class AnimalConfig:
     added: datetime | None
     known_last_seen: datetime | None = None
     known_location: str | None = None
-    alert: bool = True
+    alert_at: frozenset[str] | str = logic.EVERY
+    critical_at: frozenset[str] | str = frozenset()
     kind: str = "animal"
 
     @property
     def key(self) -> str:
         return self.name.lower()
+
+    @property
+    def switch_key(self) -> str:
+        return f"animal:{self.slug}"
 
     @property
     def rule(self) -> logic.AnimalRule:
@@ -227,7 +239,6 @@ class AnimalConfig:
             always_strict=self.always_strict,
             pattern=self.pattern,
             base=self.base,
-            alert=self.alert,
             species=self.species,
         )
 
@@ -359,9 +370,8 @@ class WatchEngine:
                         missing_mode_minutes=float(d.get(CONF_MISSING_COOLDOWN, 0)),
                     ),
                     reopened_by=list(d.get(CONF_REOPENED_BY) or []),
-                    house=bool(d.get(CONF_HOUSE)),
+                    critical_except=frozenset(n.lower() for n in d.get(CONF_CRITICAL_EXCEPT) or []),
                     interval=float(d.get(CONF_INTERVAL) or 0),
-                    unsure_alerts=bool(d.get(CONF_UNSURE_ALERTS)),
                     deter_lights=list(d.get(CONF_DETER_LIGHTS) or []),
                     deter_minutes=float(d.get(CONF_DETER_MINUTES, 2)),
                     deter_sound=d.get(CONF_DETER_SOUND) or None,
@@ -383,7 +393,8 @@ class WatchEngine:
                     added=_dt(d.get(CONF_ADDED)),
                     known_last_seen=_local_dt(d.get(CONF_KNOWN_LAST_SEEN)),
                     known_location=d.get(CONF_KNOWN_LOCATION),
-                    alert=d.get(CONF_ALERT, True),
+                    alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
+                    critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
                 )
             elif subentry.subentry_type == SUBENTRY_SPECIES:
                 name = d.get(CONF_NAME) or subentry.title
@@ -393,9 +404,8 @@ class WatchEngine:
                     name=name,
                     slug=slug,
                     description=d.get(CONF_DESCRIPTION, ""),
-                    alert=d.get(CONF_ALERT_SCOPE, logic.ALERT_NEVER),
-                    alert_cameras=list(d.get(CONF_ALERT_CAMERAS) or []),
-                    critical_switch=bool(d.get(CONF_CRITICAL_SWITCH)),
+                    alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
+                    critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
                     pest=bool(d.get(CONF_PEST)),
                     in_summary=d.get(CONF_IN_SUMMARY, True),
                 )
@@ -410,6 +420,10 @@ class WatchEngine:
                         missing_alerts=bool(d.get(CONF_MISSING_ALERTS)),
                         sound=d.get(CONF_CRITICAL_SOUND) or "default",
                         volume=float(d.get(CONF_CRITICAL_VOLUME, 0.7)),
+                        muted=frozenset(n.lower() for n in d.get(CONF_MUTED) or []),
+                        quiet_mode=d.get(CONF_QUIET_MODE) or QUIET_NORMAL,
+                        quiet_start=d.get(CONF_QUIET_START) or None,
+                        quiet_end=d.get(CONF_QUIET_END) or None,
                     )
                 )
 
@@ -439,11 +453,22 @@ class WatchEngine:
         extra = self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE)
         return names + [w for w in extra if w.lower() not in {n.lower() for n in names}]
 
-    def critical_on(self, key: str) -> bool:
-        return bool(self.data.setdefault("critical", {}).get(key))
+    def critical_on(self, key: str, default: bool = False) -> bool:
+        """A Critical alerts switch. Cameras start off; an animal's starts on, so the
+        cameras chosen in its "Critical at" work without a second step."""
+        return bool(self.data.setdefault("critical", {}).get(key, default))
 
     async def async_set_critical(self, key: str, on: bool) -> None:
         self.data.setdefault("critical", {})[key] = on
+        self._save()
+        self._notify()
+
+    def alerts_on(self, key: str) -> bool:
+        """An animal's Alerts switch: off pauses its alerts without losing its cameras."""
+        return bool(self.data.setdefault("alerts", {}).get(key, True))
+
+    async def async_set_alerts(self, key: str, on: bool) -> None:
+        self.data.setdefault("alerts", {})[key] = on
         self._save()
         self._notify()
 
@@ -505,7 +530,7 @@ class WatchEngine:
         return bool(self.data.setdefault("missing", {}).get(animal.slug))
 
     def any_missing_mode(self) -> bool:
-        return any(self.missing_mode(a) for a in self.animals.values() if a.priority)
+        return any(self.missing_mode(a) for a in self.animals.values())
 
     async def async_set_missing_mode(self, animal: AnimalConfig, on: bool) -> None:
         self.data.setdefault("missing", {})[animal.slug] = on
@@ -556,7 +581,13 @@ class WatchEngine:
     # --- lifecycle ----------------------------------------------------------------------
 
     async def async_start(self) -> None:
-        self.data = await self._store.async_load() or {}
+        self.data = await self._store.async_load() or {"rules_version": 2}
+        if self.data.get("rules_version", 1) < 2:
+            # Before 0.7 a wildlife critical switch started off; keep that for the ones
+            # nobody touched (new ones now start on).
+            for kind in self.species.values():
+                self.data.setdefault("critical", {}).setdefault(kind.switch_key, False)
+            self.data["rules_version"] = 2
         self.data.setdefault("animals", {})
         self.data.setdefault("cameras", {})
         self.data.setdefault("sightings", [])
@@ -565,6 +596,7 @@ class WatchEngine:
         self.data.setdefault("ai", {"day": None, "models": {}})
         self.data.setdefault("species", {})
         self.data.setdefault("critical", {})
+        self.data.setdefault("alerts", {})
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
         await self.hass.async_add_executor_job(self._load_frames)
@@ -890,7 +922,7 @@ class WatchEngine:
 
     async def _identify(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
         prompt, attachments = self._prompt(cam)
-        priority = {a.key for a in self.animals.values() if a.priority}
+        priority = {a.key for a in self.animals.values() if a.priority or self.missing_mode(a)}
         strict = self.strict_keys()
 
         first, first_model, first_label, from_backup = "", None, "", False
@@ -1430,36 +1462,78 @@ class WatchEngine:
 
     def camera_rule(self, cam: CameraConfig) -> logic.CameraRule:
         return logic.CameraRule(
-            cam.slug, cam.name, cam.house, cam.unsure_alerts, self.critical_on(cam.switch_key)
+            cam.slug, cam.name, self.critical_on(cam.switch_key), cam.critical_except
         )
 
-    def species_rules(self) -> dict[str, logic.SpeciesRule]:
-        return {
-            s.key: logic.SpeciesRule(
+    def alert_rules(self) -> dict[str, logic.AlertRule]:
+        """Each named animal and wildlife kind, with its switches applied."""
+        floor = self.options.get(CONF_MIN_CONFIDENCE, logic.MEDIUM)
+        rules: dict[str, logic.AlertRule] = {}
+        for s in self.species.values():
+            rules[s.key] = logic.AlertRule(
                 s.name,
-                s.alert,
-                tuple(s.alert_cameras),
-                s.critical_switch and self.critical_on(s.switch_key),
+                alert_at=s.alert_at,
+                min_confidence=floor,
+                critical_at=s.critical_at,
+                alerts_on=self.alerts_on(s.switch_key),
+                critical_on=self.critical_on(s.switch_key, True),
+                repeat_every=s.pest,  # a pest that was scared off and came back: tell again
             )
-            for s in self.species.values()
+        for a in self.animals.values():
+            rules[a.key] = logic.AlertRule(
+                a.name,
+                alert_at=a.alert_at,
+                min_confidence=floor,
+                critical_at=a.critical_at,
+                alerts_on=self.alerts_on(a.switch_key),
+                critical_on=self.critical_on(a.switch_key, True),
+                priority=a.priority,
+            )
+        return rules
+
+    def builtin_rules(self) -> dict[str, logic.AlertRule]:
+        floor = self.options.get(CONF_MIN_CONFIDENCE, logic.MEDIUM)
+        return {
+            name: logic.AlertRule(
+                name,
+                alert_at=logic.cameras(self.options.get(f"{key}_{CONF_ALERT_AT}", [])),
+                min_confidence=floor,
+                critical_at=logic.cameras(self.options.get(f"{key}_{CONF_CRITICAL_AT}", [])),
+                critical_on=True,
+            )
+            for name, key in BUILTIN_KEYS.items()
         }
+
+    def _repeat(self, cam: CameraConfig, v: logic.Verdict, now: datetime) -> tuple[bool, str | None]:
+        """Is this the same visit as the subject's last sighting at this camera?"""
+        rule = logic.subject_of(v, self.alert_rules(), self.builtin_rules())
+        if rule is None:
+            return False, None
+        visits = self.camera_state(cam.slug).setdefault("visits", {})
+        gap = logic.cooldown_window(cam.cooldown, rule.priority, False).total_seconds() / 60
+        same = logic.same_visit(_dt(visits.get(rule.key)), now, gap, VISIT_SLACK_MINUTES)
+        return same, rule.key
 
     async def _alert(
         self, cam: CameraConfig, v: logic.Verdict, now: datetime, sid: str | None, test: bool = False
     ) -> list[logic.Alert]:
         if not self.options.get(CONF_ALERTS, True) or not self.recipients:
             return []
-        missing = {a.key for a in self.animals.values() if a.priority and self.missing_mode(a)}
+        missing = {a.key for a in self.animals.values() if self.missing_mode(a)}
+        repeat, visit_key = (False, None) if test else self._repeat(cam, v, now)
         alerts = logic.plan_alerts(
             v,
             self.camera_rule(cam),
-            self.rules,
-            self.species_rules(),
+            self.alert_rules(),
+            self.builtin_rules(),
             missing,
             logic.clock(dt_util.as_local(now)),
             test=test,
-            unknown_alerts=self.options.get(CONF_UNKNOWN_ALERTS, True),
+            repeat=repeat,
         )
+        if visit_key and any(a.kind != "missing" for a in alerts):
+            self.camera_state(cam.slug).setdefault("visits", {})[visit_key] = _iso(now)
+            self._save()
         if not alerts:
             return alerts
         image = self.image_url(cam.slug, now)
@@ -1470,7 +1544,7 @@ class WatchEngine:
                 {"action": f"{ACTION_PREFIX}|wrong|{sid}", "title": "✗ Wrong"},
             ]
             for a in self.animals.values():
-                if a.priority and a.name != v.animal:
+                if (a.priority or a.key in missing) and a.name != v.animal:
                     actions.append({"action": f"{ACTION_PREFIX}|is|{sid}|{a.slug}", "title": f"It's {a.name}"})
         for alert in alerts:
             for person in self.recipients:
@@ -1478,11 +1552,18 @@ class WatchEngine:
                     continue
                 if alert.audience == logic.AUDIENCE_NOT_MISSING and person.missing_alerts:
                     continue
+                if alert.kind != "missing" and alert.subject.lower() in person.muted:
+                    continue
                 await self._send(person, alert, image, actions)
         return alerts
 
     def _quiet(self, person: RecipientConfig) -> bool:
-        """At work (or another quiet zone): critical alerts arrive as normal ones."""
+        """In one of the person's quiet zones (work) or inside their quiet hours."""
+        if person.quiet_start and person.quiet_end:
+            start = dt_util.parse_time(person.quiet_start)
+            end = dt_util.parse_time(person.quiet_end)
+            if start and end and start != end and logic.in_time_window(dt_util.now().time(), start, end):
+                return True
         if not person.person or not person.quiet_zones:
             return False
         state = self.hass.states.get(person.person)
@@ -1500,13 +1581,20 @@ class WatchEngine:
     async def _send(
         self, person: RecipientConfig, alert: logic.Alert, image: str, actions: list[dict[str, str]]
     ) -> None:
-        critical = alert.urgency == logic.CRITICAL and not self._quiet(person)
+        quiet = self._quiet(person)
+        if quiet and person.quiet_mode == QUIET_NONE and alert.kind != "missing":
+            return  # missing-mode alerts always arrive, at most as normal ones
+        # A repeat in the same visit replaces the earlier notification without a sound.
+        critical = alert.urgency == logic.CRITICAL and not quiet and not alert.quiet
         payload: dict[str, Any] = {"title": alert.title, "message": alert.message}
         if person.notify.startswith("mobile_app_"):
             # One payload for both Companion apps: iOS reads "push", Android reads
             # ttl / priority / channel; each ignores the other's keys.
-            push: dict[str, Any] = {"interruption-level": "critical" if critical else "active"}
+            level = "critical" if critical else "passive" if alert.quiet else "active"
+            push: dict[str, Any] = {"interruption-level": level}
             data: dict[str, Any] = {"image": image, "tag": alert.tag, "push": push}
+            if alert.quiet:
+                data["alert_once"] = True  # Android: update in place, silently
             if critical:
                 push["sound"] = {
                     "name": person.sound,

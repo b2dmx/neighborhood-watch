@@ -135,7 +135,7 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     subs = sorted((s.subentry_type, s.title) for s in entry.subentries.values())
     assert subs == [("animal", "Luna"), ("animal", "Pepper"), ("camera", "Garage"), ("species", "Raccoon"), ("species", "Skunk")]
     raccoon = next(s for s in entry.subentries.values() if s.title == "Raccoon")
-    assert raccoon.data["pest"] is True and raccoon.data["alert_scope"] == "any"
+    assert raccoon.data["pest"] is True and raccoon.data["alert_at"] == ["*"] and raccoon.data["critical_at"] == []
     garage = next(s for s in entry.subentries.values() if s.title == "Garage")
     assert garage.data["slug"] == "garage"
     assert garage.data["camera"] == "camera.backyard_cam_high_resolution_channel"
@@ -294,17 +294,19 @@ async def test_add_wildlife(hass: HomeAssistant, ready):
         (entry.entry_id, "species"), context={"source": config_entries.SOURCE_USER}
     )
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Luna", "alert_scope": "any", "critical_switch": False, "pest": False, "in_summary": True}
+        result["flow_id"], {"name": "Luna", "alert_at": ["*"], "critical_at": [], "pest": False, "in_summary": True}
     )
     assert result["errors"] == {"name": "name_taken"}  # an animal already has that name
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
-        {"name": "Raccoon", "description": "ringed tail", "alert_scope": "cameras", "alert_cameras": ["garage"],
-         "critical_switch": True, "pest": True, "in_summary": True},
+        {"name": "Raccoon", "description": "ringed tail", "alert_at": [], "critical_at": ["garage"],
+         "pest": True, "in_summary": True},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     raccoon = next(s for s in entry.subentries.values() if s.title == "Raccoon")
-    assert raccoon.data["alert_cameras"] == ["garage"] and raccoon.data["pest"] is True
+    # Critical overrides "don't alert", so its cameras join Alert at.
+    assert raccoon.data["alert_at"] == ["garage"] and raccoon.data["critical_at"] == ["garage"]
+    assert raccoon.data["pest"] is True
 
 
 async def test_add_person(hass: HomeAssistant, ready):
@@ -330,9 +332,18 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "alerts"})
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"alerts": False, "unknown_alerts": True, "correction_buttons": True}
+        result["flow_id"], {"alerts": False, "min_confidence": "high", "correction_buttons": True}
     )
-    assert entry.options["alerts"] is False
+    assert entry.options["alerts"] is False and entry.options["min_confidence"] == "high"
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "catch_alls"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"unknown_alert_at": ["*"], "unknown_critical_at": [], "other_alert_at": ["garage"],
+         "other_critical_at": ["*"], "motion_alert_at": [], "motion_critical_at": []},
+    )
+    assert entry.options["other_alert_at"] == ["*"] and entry.options["other_critical_at"] == ["*"]
+    assert entry.options["motion_alert_at"] == []
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "training"})
     result = await hass.config_entries.options.async_configure(

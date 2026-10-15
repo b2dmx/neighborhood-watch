@@ -142,7 +142,6 @@ class AnimalRule:
     always_strict: bool = False  # counts only when both models agree at high (Pepper)
     pattern: str = "na"  # expected coat pattern; checked for priority animals
     base: str = "na"  # expected dominant tone; checked for priority animals
-    alert: bool = True  # alert when it is seen
     species: str = "cat"
 
     @property
@@ -176,6 +175,7 @@ class Verdict:
     priority_candidate: str  # the priority animal either model named, or ""
     first_look_said: str  # tidied, lower case
     second_opinion_said: str  # tidied
+    named: tuple[str, ...] = ()  # lower-case names either model said
 
     @property
     def is_nothing(self) -> bool:
@@ -299,6 +299,7 @@ def decide(
         priority_candidate=candidate,
         first_look_said=first_said,
         second_opinion_said=second,
+        named=tuple(dict.fromkeys(n for n in (first_name, name) if n and n != "none")),
     )
 
 
@@ -542,83 +543,117 @@ def clock(t: datetime) -> str:
     return f"{hour}:{t.minute:02d} {'AM' if t.hour < 12 else 'PM'}"
 
 
-# --- alerts -----------------------------------------------------------------------
+# --- alerts ---------------------------------------------------------------------
+#
+# Every alert is "what" x "where". Each animal, each wildlife kind and three built-ins
+# (unknown animals, other wildlife, unsure motion) has the same rule:
+#   alert at [cameras] from [confidence], critical at [cameras] (when its switch is on),
+#   repeat every time or once per visit.
+# A camera's critical switch makes anything there ring, except the animals it allows.
+# Critical overrides "don't alert". Missing mode overrides everything.
 
 NORMAL = "normal"
 CRITICAL = "critical"
+EVERY = "*"  # every camera
 
-ALERT_NEVER = "never"
-ALERT_HOUSE = "house"
-ALERT_CAMERAS = "cameras"
-ALERT_ANY = "any"
-ALERT_SCOPES = (ALERT_NEVER, ALERT_HOUSE, ALERT_CAMERAS, ALERT_ANY)
+BUILTIN_UNKNOWN = "Unknown animals"
+BUILTIN_OTHER = "Other wildlife"
+BUILTIN_MOTION = "Unsure motion"
+BUILTINS = (BUILTIN_UNKNOWN, BUILTIN_OTHER, BUILTIN_MOTION)
 
 AUDIENCE_ALL = "all"
 AUDIENCE_MISSING = "missing"  # people who get missing-mode alerts
-AUDIENCE_NOT_MISSING = "not_missing"  # everyone else (they already had the critical one)
+AUDIENCE_NOT_MISSING = "not_missing"  # everyone else (the missing-mode people already had theirs)
+
+_ORDER = {LOW: 0, MEDIUM: 1, HIGH: 2}
+
+
+def cameras(value: Iterable[str] | str | None) -> frozenset[str] | str:
+    """Normalise a stored camera list: '*' anywhere in it means every camera."""
+    if value == EVERY:
+        return EVERY
+    items = frozenset(value or ())
+    return EVERY if EVERY in items else items
+
+
+def covers(where: frozenset[str] | str, slug: str) -> bool:
+    return where == EVERY or slug in where
 
 
 @dataclass(frozen=True)
-class SpeciesRule:
-    """Wildlife told apart by kind only (raccoon, opossum): which alerts it gets."""
+class AlertRule:
+    """When and how loudly one animal (or a built-in) alerts."""
 
     name: str
-    alert: str = ALERT_NEVER
-    cameras: tuple[str, ...] = ()
-    critical: bool = False  # its critical-alerts switch is on
+    alert_at: frozenset[str] | str = EVERY
+    min_confidence: str = MEDIUM
+    critical_at: frozenset[str] | str = EVERY
+    alerts_on: bool = True  # its "Alerts" switch
+    critical_on: bool = False  # its "Critical alerts" switch
+    repeat_every: bool = False  # False: once per visit, then quiet updates
+    priority: bool = False  # tentative wording ("Possible ..."), never "detected"
 
     @property
     def key(self) -> str:
         return self.name.lower()
-
-    def alerts_at(self, camera: CameraRule) -> bool:
-        if self.alert == ALERT_ANY:
-            return True
-        if self.alert == ALERT_HOUSE:
-            return camera.house
-        if self.alert == ALERT_CAMERAS:
-            return camera.slug in self.cameras
-        return False
 
 
 @dataclass(frozen=True)
 class CameraRule:
     slug: str
     name: str
-    house: bool = False  # close to the house: alert on anything that isn't harmless
-    unsure_alerts: bool = False  # alert on motion the AI could not identify
-    critical: bool = False  # its critical-alerts switch is on
+    critical: bool = False  # its "Critical alerts" switch: anything here rings ...
+    allowed: frozenset[str] = frozenset()  # ... except these (lower-case names)
 
 
 @dataclass(frozen=True)
 class Alert:
-    kind: str  # missing | priority | animal | wildlife | motion
+    kind: str  # missing | priority | animal | motion
     title: str
     message: str
     tag: str
     urgency: str
     audience: str = AUDIENCE_ALL
     volume: float | None = None  # critical volume override (missing mode: full)
+    subject: str = ""  # the rule's name, for per-person mutes and repeat tracking
+    quiet: bool = False  # an update to an alert already sent: no sound
+
+
+def subject_of(
+    v: Verdict, rules: Mapping[str, AlertRule], builtins: Mapping[str, AlertRule]
+) -> AlertRule | None:
+    """Which rule a verdict falls under; None for things that never alert (a confident
+    "nothing", bugs, leaves, shadows)."""
+    key = v.animal.lower()
+    if key in rules:
+        return rules[key]
+    if is_unknown(v.animal):
+        return builtins.get(BUILTIN_UNKNOWN)
+    if v.animal == NOTHING:
+        return builtins.get(BUILTIN_MOTION) if v.confidence != HIGH else None
+    if key in NOT_VISITORS:
+        return None
+    return builtins.get(BUILTIN_OTHER)
 
 
 def plan_alerts(
     v: Verdict,
     camera: CameraRule,
-    rules: Mapping[str, AnimalRule],
-    species: Mapping[str, SpeciesRule],
+    rules: Mapping[str, AlertRule],
+    builtins: Mapping[str, AlertRule],
     missing: Iterable[str],
     when: str,
     test: bool = False,
-    unknown_alerts: bool = True,
+    repeat: bool = False,
 ) -> list[Alert]:
-    """Who hears about a sighting, and how loudly. A straight port of the Alerts
-    automation, generalised: priority animals, individuals, wildlife, unsure motion."""
+    """Who hears about a sighting and how loudly.
+
+    `missing` = lower-case names of animals in missing mode. `repeat` = this subject
+    already alerted at this camera within its repeat window.
+    """
     prefix = "TEST · " if test else ""
     where = camera.name
     conf = v.confidence
-    possible = conf != HIGH
-    camera_urgency = CRITICAL if camera.critical else NORMAL
-    missing = {m.lower() for m in missing}
     alerts: list[Alert] = []
 
     def tentative(name: str) -> tuple[str, str]:
@@ -627,78 +662,65 @@ def plan_alerts(
             f"AI thinks this might be {name} at {where}, {when}.\nConfidence: {conf}",
         )
 
-    def detected(name: str, description: str = "") -> tuple[str, str]:
-        looks = f"\nLooks like: {description}" if description else ""
-        lead = f"Possible {name}" if possible else f"{name} detected"
-        return (
-            f"{prefix}{'Possible ' if possible else ''}{name} — {where}",
-            f"{lead} at {where}, {when}.{looks}\nConfidence: {conf}",
-        )
-
-    # Missing mode: ANY possible sighting of the missing animal, at any confidence.
-    candidate = v.priority_candidate
-    missing_sent = bool(candidate and candidate.lower() in missing)
-    if missing_sent:
-        title, message = tentative(candidate)
+    # Missing mode: ANY possible sighting, either model, any confidence, any camera.
+    missing_name = next(
+        (rules[n].name for n in v.named if n in missing and n in rules), ""
+    )
+    if missing_name:
+        title, message = tentative(missing_name)
         alerts.append(
-            Alert("missing", title, message, f"priority_missing_{camera.slug}", CRITICAL, AUDIENCE_MISSING, 1.0)
+            Alert(
+                "missing", title, message, f"missing_{camera.slug}", CRITICAL,
+                AUDIENCE_MISSING, 1.0, missing_name,
+            )
         )
 
-    key = v.animal.lower()
-    rule = rules.get(key)
-    if rule and rule.priority:
-        if conf in (HIGH, MEDIUM) and rule.alert:
-            title, message = tentative(rule.name)
-            audience = AUDIENCE_NOT_MISSING if missing_sent else AUDIENCE_ALL
-            alerts.append(Alert("priority", title, message, f"priority_{camera.slug}", NORMAL, audience))
+    rule = subject_of(v, rules, builtins)
+    if rule is None:
+        return alerts
+    is_motion = rule.name == BUILTIN_MOTION
+    confident = is_motion or _ORDER[_level(conf)] >= _ORDER[_level(rule.min_confidence)]
+    wanted = rule.alerts_on and covers(rule.alert_at, camera.slug) and confident
+    critical = (rule.critical_on and covers(rule.critical_at, camera.slug)) or (
+        camera.critical and rule.key not in camera.allowed and v.animal.lower() not in camera.allowed
+    )
+    if not (wanted or critical):
         return alerts
 
-    if rule or (is_unknown(v.animal) and unknown_alerts):
-        if rule and not rule.alert:
-            return alerts
-        if camera.house:
-            title, message = detected(v.animal, v.description)
-            alerts.append(Alert("animal", title, message, f"animal_{camera.slug}", camera_urgency))
-        else:
-            kind = rule.species if rule else (unknown_kind(v.animal) or "animal")
-            coat = f"A {v.pattern}-coated {kind}" if v.pattern != "na" else f"A {kind}"
-            looks = f"\nLooks like: {v.description}" if v.description else ""
-            alerts.append(
-                Alert(
-                    "animal",
-                    f"{prefix}{kind.title()} Sighting — {where}",
-                    f"{coat} was seen at {where}, {when}.\nBest guess: {v.animal} (confidence: {conf}){looks}",
-                    f"animal_{camera.slug}",
-                    NORMAL,
-                )
-            )
-        return alerts
-
-    kind = species.get(key)
-    if kind:
-        if kind.alerts_at(camera):
-            urgency = CRITICAL if kind.critical or camera.critical else NORMAL
-            title, message = detected(kind.name)
-            alerts.append(Alert("wildlife", title, message, f"wildlife_{camera.slug}", urgency))
-        return alerts
-
-    if v.animal == NOTHING:
-        if camera.unsure_alerts and conf != HIGH:
-            alerts.append(
-                Alert(
-                    "motion",
-                    f"{prefix}Motion — {where}",
-                    f"Unidentified motion at {where}, {when}.\nConfidence: {conf}",
-                    f"motion_{camera.slug}",
-                    camera_urgency,
-                )
-            )
-        return alerts
-
-    if key in NOT_VISITORS or is_unknown(v.animal):
-        return alerts
-    # Something not set up as wildlife (a fox, a dog): close to the house it matters.
-    if camera.house:
-        title, message = detected(v.animal, v.description)
-        alerts.append(Alert("animal", title, message, f"animal_{camera.slug}", camera_urgency))
+    if is_motion:
+        title = f"{prefix}Motion — {where}"
+        message = f"Unidentified motion at {where}, {when}.\nConfidence: {conf}"
+    elif rule.priority:
+        title, message = tentative(v.animal)
+    else:
+        lead = f"{v.animal} detected" if conf == HIGH else f"Possible {v.animal}"
+        looks = f"\nLooks like: {v.description}" if v.description else ""
+        title = f"{prefix}{'' if conf == HIGH else 'Possible '}{v.animal} — {where}"
+        message = f"{lead} at {where}, {when}.{looks}\nConfidence: {conf}"
+    audience = AUDIENCE_NOT_MISSING if missing_name and missing_name == v.animal else AUDIENCE_ALL
+    alerts.append(
+        Alert(
+            "priority" if rule.priority else ("motion" if is_motion else "animal"),
+            title,
+            message,
+            f"{camera.slug}_{slugish(rule.name)}",
+            CRITICAL if critical else NORMAL,
+            audience,
+            None,
+            rule.name,
+            quiet=repeat and not rule.repeat_every,
+        )
+    )
     return alerts
+
+
+def slugish(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def same_visit(last: datetime | None, now: datetime, check_gap_minutes: float, slack_minutes: float = 10) -> bool:
+    """Seen again at the same camera before the visit could have ended: the gap since the
+    last sighting is within the camera's cooldown (checks can't come sooner) plus slack."""
+    if last is None:
+        return False
+    return now - last <= timedelta(minutes=check_gap_minutes + slack_minutes)

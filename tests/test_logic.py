@@ -207,13 +207,13 @@ def test_recently_absent_window():
 
 # --- cooldowns and night --------------------------------------------------------------
 
-GARAGE = logic.Cooldown(minutes=15, after_priority_minutes=30, missing_mode_minutes=2)
+GARAGE_COOLDOWN = logic.Cooldown(minutes=15, after_priority_minutes=30, missing_mode_minutes=2)
 
 
 def test_garage_cooldown_windows():
-    assert logic.cooldown_window(GARAGE, False, False) == timedelta(minutes=15)
-    assert logic.cooldown_window(GARAGE, True, False) == timedelta(minutes=30)
-    assert logic.cooldown_window(GARAGE, True, True) == timedelta(minutes=2)
+    assert logic.cooldown_window(GARAGE_COOLDOWN, False, False) == timedelta(minutes=15)
+    assert logic.cooldown_window(GARAGE_COOLDOWN, True, False) == timedelta(minutes=30)
+    assert logic.cooldown_window(GARAGE_COOLDOWN, True, True) == timedelta(minutes=2)
     assert logic.cooldown_window(logic.Cooldown(3), True, True) == timedelta(minutes=3)
 
 
@@ -330,108 +330,146 @@ def test_names_animal():
 
 # --- alerts -------------------------------------------------------------------------
 
-GARAGE_CAM = logic.CameraRule("garage", "Garage", house=True, unsure_alerts=True)
-YARD_CAM = logic.CameraRule("yard", "Yard")
-PORCH_CAM = logic.CameraRule("front_porch", "Front Porch")
-SPECIES = {
-    s.key: s
-    for s in (
-        logic.SpeciesRule("Raccoon", alert=logic.ALERT_ANY),
-        logic.SpeciesRule("Opossum", alert=logic.ALERT_CAMERAS, cameras=("garage", "front_porch")),
-        logic.SpeciesRule("Fox", alert=logic.ALERT_HOUSE),
-        logic.SpeciesRule("Squirrel"),
+E = logic.EVERY
+GARAGE = logic.CameraRule("garage", "Garage")
+PORCH = logic.CameraRule("patio", "Patio")
+YARD = logic.CameraRule("yard", "Yard")
+HOUSE = frozenset({"garage", "driveway", "side_gate"})
+ALERTS = {
+    r.key: r
+    for r in (
+        logic.AlertRule("Luna", priority=True),  # medium+ alerts, tentative wording
+        logic.AlertRule("Milo"),
+        logic.AlertRule("Ziggy"),
+        logic.AlertRule("Raccoon", min_confidence="low", repeat_every=True),
+        logic.AlertRule("Opossum", alert_at=frozenset({"garage", "patio"}), min_confidence="low",
+                        critical_at=frozenset({"garage"})),
+        logic.AlertRule("Squirrel", alert_at=frozenset()),
     )
+}
+BUILT = {
+    logic.BUILTIN_UNKNOWN: logic.AlertRule(logic.BUILTIN_UNKNOWN),
+    logic.BUILTIN_OTHER: logic.AlertRule(logic.BUILTIN_OTHER, alert_at=HOUSE, min_confidence="low"),
+    logic.BUILTIN_MOTION: logic.AlertRule(logic.BUILTIN_MOTION, alert_at=HOUSE),
 }
 
 
-def verdict(animal, confidence="high", candidate="", pattern="na", description=""):
-    return logic.Verdict(animal, confidence, pattern, description, candidate, "", "")
+def verdict(animal, confidence="high", named=(), description=""):
+    return logic.Verdict(animal, confidence, "na", description, "", "", "", tuple(named or [animal.lower()]))
 
 
-def plan(v, cam, missing=(), **kw):
-    return logic.plan_alerts(v, cam, RULES, SPECIES, missing, "9:05 PM", **kw)
+def plan(v, cam, rules=None, missing=(), **kw):
+    return logic.plan_alerts(v, cam, rules or ALERTS, BUILT, missing, "9:05 PM", **kw)
 
 
-def test_priority_medium_alerts_everyone_tentatively():
-    (a,) = plan(verdict("Luna", "medium", "Luna"), YARD_CAM)
-    assert (a.kind, a.urgency, a.audience) == ("priority", "normal", "all")
-    assert a.title == "Possible Luna — Yard"
+def switched(name, **changes):
+    from dataclasses import replace
+
+    return {**ALERTS, name.lower(): replace(ALERTS[name.lower()], **changes)}
+
+
+def test_priority_medium_alerts_tentatively_low_is_silent():
+    (a,) = plan(verdict("Luna", "medium"), YARD)
+    assert (a.title, a.urgency) == ("Possible Luna — Yard", "normal")
     assert a.message == "AI thinks this might be Luna at Yard, 9:05 PM.\nConfidence: medium"
+    assert plan(verdict("Luna", "low"), YARD) == []
 
 
-def test_priority_low_is_silent_unless_missing():
-    assert plan(verdict("Luna", "low", "Luna"), GARAGE_CAM) == []
-    (a,) = plan(verdict("Luna", "low", "Luna"), GARAGE_CAM, missing={"luna"})
-    assert (a.kind, a.urgency, a.audience, a.volume) == ("missing", "critical", "missing", 1.0)
+def test_min_confidence_keeps_low_guesses_off_phones():
+    assert plan(verdict("Ziggy", "low"), GARAGE) == []
+    (a,) = plan(verdict("Ziggy", "medium"), GARAGE)
+    assert a.title == "Possible Ziggy — Garage"
+    (a,) = plan(verdict("Milo"), YARD)
+    assert a.message == "Milo detected at Yard, 9:05 PM.\nConfidence: high"
 
 
-def test_missing_mode_high_luna_critical_plus_normal_for_the_rest():
-    missing, normal = plan(verdict("Luna", "high", "Luna"), YARD_CAM, missing={"luna"})
-    assert missing.audience == "missing" and missing.urgency == "critical"
-    assert normal.audience == "not_missing" and normal.urgency == "normal"
+def test_alert_at_limits_where():
+    assert plan(verdict("Opossum"), YARD) == []
+    assert plan(verdict("Opossum"), PORCH)[0].urgency == "normal"
+    assert plan(verdict("Squirrel"), GARAGE) == []
 
 
-def test_split_vote_candidate_on_another_cat_in_missing_mode():
-    alerts = plan(verdict("Oscar", "low", "Luna"), GARAGE_CAM, missing={"luna"})
-    assert [a.kind for a in alerts] == ["missing", "animal"]
+def test_animal_critical_at_its_cameras_only_when_switched_on():
+    assert plan(verdict("Opossum"), GARAGE)[0].urgency == "normal"
+    rules = switched("Opossum", critical_on=True)
+    assert plan(verdict("Opossum"), GARAGE, rules)[0].urgency == "critical"
+    assert plan(verdict("Opossum"), PORCH, rules)[0].urgency == "normal"
 
 
-def test_cat_on_house_camera_uses_camera_urgency():
-    cam = logic.CameraRule("garage", "Garage", house=True, critical=True)
-    (a,) = plan(verdict("Milo", "medium"), cam)
-    assert a.title == "Possible Milo — Garage" and a.urgency == "critical"
-    (a,) = plan(verdict("Milo"), GARAGE_CAM)
-    assert a.message == "Milo detected at Garage, 9:05 PM.\nConfidence: high"
+def test_garage_critical_rings_for_anything_except_allowed():
+    garage = logic.CameraRule("garage", "Garage", critical=True, allowed=frozenset({"luna"}))
+    assert plan(verdict("Milo"), garage)[0].urgency == "critical"
+    assert plan(verdict("Raccoon", "low"), garage)[0].urgency == "critical"
+    assert plan(verdict("Unknown Cat", "medium"), garage)[0].urgency == "critical"
+    assert plan(verdict("Nothing", "low"), garage)[0].urgency == "critical"
+    (a,) = plan(verdict("Luna", "high"), garage)
+    assert a.urgency == "normal"  # Luna is allowed in the garage
+    assert plan(verdict("Nothing", "high"), garage) == []  # a confident empty frame never alerts
+    assert plan(verdict("Spider Web"), garage) == []
 
 
-def test_cat_on_other_camera():
-    (a,) = plan(verdict("Milo", "low", pattern="uniform"), YARD_CAM)
-    assert a.title == "Cat Sighting — Yard"
-    assert a.message == "A uniform-coated cat was seen at Yard, 9:05 PM.\nBest guess: Milo (confidence: low)"
+def test_critical_overrides_dont_alert():
+    garage = logic.CameraRule("garage", "Garage", critical=True)
+    assert plan(verdict("Squirrel"), garage)[0].urgency == "critical"
+    off = switched("Milo", alerts_on=False)
+    assert plan(verdict("Milo"), YARD, off) == []
+    assert plan(verdict("Milo"), garage, off)[0].urgency == "critical"
+    assert plan(verdict("Ziggy", "low"), garage)[0].urgency == "critical"
 
 
-def test_unknown_cat_alert_can_be_turned_off():
-    v = verdict("Unknown Cat", "medium", description="ginger tabby")
-    (a,) = plan(v, YARD_CAM)
-    assert "Looks like: ginger tabby" in a.message
-    assert plan(v, YARD_CAM, unknown_alerts=False) == []
+def test_missing_mode_any_model_any_confidence_any_camera():
+    # One model said Luna, the other Ziggy: the missing alert for Luna still goes out.
+    v = verdict("Ziggy", "low", named=["luna", "ziggy"])
+    alerts = plan(v, YARD, missing={"luna"})
+    assert alerts[0].kind == "missing" and alerts[0].urgency == "critical" and alerts[0].volume == 1.0
+    assert alerts[0].audience == "missing" and alerts[0].title == "Possible Luna — Yard"
+    # Even where Luna is allowed and her own alerts are off.
+    garage = logic.CameraRule("garage", "Garage", critical=True, allowed=frozenset({"luna"}))
+    rules = switched("Luna", alerts_on=False, alert_at=frozenset())
+    assert plan(verdict("Luna", "low"), garage, rules, missing={"luna"})[0].kind == "missing"
 
 
-def test_wildlife_scopes():
-    assert plan(verdict("Raccoon"), YARD_CAM)[0].title == "Raccoon — Yard"
-    assert plan(verdict("Opossum"), PORCH_CAM)[0].urgency == "normal"
-    assert plan(verdict("Opossum"), YARD_CAM) == []
-    assert plan(verdict("Fox"), YARD_CAM) == []
-    assert plan(verdict("Fox", "medium"), GARAGE_CAM)[0].title == "Possible Fox — Garage"
-    assert plan(verdict("Squirrel"), GARAGE_CAM) == []
+def test_missing_mode_high_also_tells_everyone_else():
+    missing, normal = plan(verdict("Luna", "high"), YARD, missing={"luna"})
+    assert (missing.audience, normal.audience) == ("missing", "not_missing")
 
 
-def test_wildlife_critical_from_its_switch_or_the_camera():
-    racc = {"raccoon": logic.SpeciesRule("Raccoon", alert=logic.ALERT_ANY, critical=True)}
-    a = logic.plan_alerts(verdict("Raccoon"), YARD_CAM, RULES, racc, (), "now")[0]
-    assert a.urgency == "critical"
-    cam = logic.CameraRule("garage", "Garage", house=True, critical=True)
-    assert plan(verdict("Opossum"), cam)[0].urgency == "critical"
+def test_missing_mode_for_any_named_animal():
+    a, b = plan(verdict("Milo", "medium"), YARD, missing={"milo"})
+    assert a.kind == "missing" and a.title == "Possible Milo — Yard"
+    assert b.audience == "not_missing"
+    (a,) = plan(verdict("Milo", "low"), YARD, missing={"milo"})
+    assert a.kind == "missing"
 
 
-def test_unsure_motion_only_where_asked():
-    (a,) = plan(verdict("Nothing", "low"), GARAGE_CAM)
-    assert a.title == "Motion — Garage"
-    assert plan(verdict("Nothing", "high"), GARAGE_CAM) == []
-    assert plan(verdict("Nothing", "low"), YARD_CAM) == []
+def test_repeat_once_per_visit_vs_every_time():
+    (a,) = plan(verdict("Milo"), GARAGE, repeat=True)
+    assert a.quiet
+    (a,) = plan(verdict("Raccoon"), PORCH, repeat=True)
+    assert not a.quiet
+    (a,) = plan(verdict("Milo"), GARAGE, repeat=False)
+    assert not a.quiet
+    assert plan(verdict("Milo"), GARAGE)[0].tag == "garage_milo"
 
 
-def test_unlisted_animal_near_the_house_and_harmless_things():
-    assert plan(verdict("Rabbit"), GARAGE_CAM)[0].title == "Rabbit — Garage"
-    assert plan(verdict("Rabbit"), YARD_CAM) == []
-    assert plan(verdict("Spider Web"), GARAGE_CAM) == []
+def test_builtins():
+    (a,) = plan(verdict("Unknown Dog", "medium", description="big shaggy dog"), YARD)
+    assert "Looks like: big shaggy dog" in a.message and a.subject == logic.BUILTIN_UNKNOWN
+    assert plan(verdict("Rabbit"), YARD) == []
+    assert plan(verdict("Rabbit", "low"), GARAGE)[0].title == "Possible Rabbit — Garage"
+    (a,) = plan(verdict("Nothing", "low"), GARAGE)
+    assert (a.title, a.kind) == ("Motion — Garage", "motion")
+    assert plan(verdict("Nothing", "medium"), YARD) == []
 
 
-def test_individual_alerts_can_be_off_and_test_prefix():
-    quiet = {**RULES, "milo": logic.AnimalRule("Milo", alert=False)}
-    assert logic.plan_alerts(verdict("Milo"), GARAGE_CAM, quiet, SPECIES, (), "now") == []
-    (a,) = plan(verdict("Raccoon"), YARD_CAM, test=True)
+def test_test_prefix():
+    (a,) = plan(verdict("Raccoon"), YARD, test=True)
     assert a.title.startswith("TEST · ")
+
+
+def test_verdict_remembers_both_names():
+    v = decide("Luna|high|blotchy|white|", "Ziggy|medium|uniform|black|", strict={"ziggy"})
+    assert set(v.named) == {"luna", "ziggy"}
 
 
 def test_unknown_animals_of_any_kind():
@@ -439,9 +477,6 @@ def test_unknown_animals_of_any_kind():
     assert not logic.is_unknown("Unknown") and not logic.is_unknown("Milo")
     v = decide("Unknown Dog|medium|uniform|black|big shaggy dog", "Unknown Dog|medium|uniform|black|big shaggy dog")
     assert (v.animal, v.description) == ("Unknown Dog", "big shaggy dog")
-    assert logic.counts(v, RULES) and logic.is_cat_for_log(v, RULES)
-    (a,) = plan(v, YARD_CAM)
-    assert a.title == "Dog Sighting — Yard"
     s = logic.summarize([("Unknown Dog", "Yard"), ("Unknown Cat", "Yard"), ("Unknown Dog", "Yard")], [])
     assert s.lines == ["1 Unknown Cat sighting", "2 Unknown Dog sightings"]
 
@@ -450,3 +485,12 @@ def test_prompt_names_the_unknown_kinds():
     text = logic.build_prompt(logic.DEFAULT_INSTRUCTIONS, location="Bins", animals=[], unknown_kinds=["dog"])
     assert "use 'Unknown Dog' ONLY" in text
     assert "{" not in text
+
+
+def test_same_visit_window_follows_the_camera_cooldown():
+    from datetime import datetime, timedelta
+
+    now = datetime(2026, 10, 14, 22, 0)
+    assert logic.same_visit(now - timedelta(minutes=31), now, 30)  # a 30-min cooldown: still the same visit
+    assert not logic.same_visit(now - timedelta(minutes=41), now, 30)
+    assert not logic.same_visit(None, now, 30)
