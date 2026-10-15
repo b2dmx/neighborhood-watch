@@ -202,7 +202,7 @@ Each kind also has an **On camera** sensor, for your own automations.
 
 ## Corrections and training data
 
-**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ✗ Wrong, ? Not sure and "It was…". The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. "It was…" accepts any animal: your own animals and wildlife kinds move tracking; anything else (a groundhog, a heron) is labelled for training, just not tracked.
+**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ✗ Wrong, ? Not sure and "It was…". The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. After a ✗ or "It was…", the card offers **Add a note so it doesn't happen again**, which saves it to that camera's view notes or that animal's tips, where the AI will see it (also the `add_note` action). "It was…" accepts any animal: your own animals and wildlife kinds move tracking; anything else (a groundhog, a heron) is labelled for training, just not tracked.
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 

@@ -497,3 +497,28 @@ async def test_camera_notes_reach_only_that_camera(hass, watch):
     yard, _ = w._prompt(w.cameras["yard"])
     assert "ABOUT THIS CAMERA'S VIEW: The bins are at the left edge." in garage
     assert "bins" not in yard
+
+
+async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
+    entry = watch["entry"]
+    result = await hass.services.async_call(
+        DOMAIN, "add_note", {"camera": "Yard", "note": "The dark shape by the fence is a bush."},
+        blocking=True, return_response=True,
+    )
+    assert result == {"added_to": "Yard"}
+    await hass.services.async_call(
+        DOMAIN, "add_note", {"animal": "milo", "note": "Looks very bright under strong infrared."},
+        blocking=True, return_response=True,
+    )
+    await hass.async_block_till_done()
+    data = {s.title: s.data for s in entry.subentries.values()}
+    assert data["Yard"]["ai_notes"] == "The dark shape by the fence is a bush."
+    assert data["Milo"]["tips"].endswith("Looks very bright under strong infrared.")
+    w = entry.runtime_data
+    prompt, _ = w._prompt(w.cameras["yard"])
+    assert "bush" in prompt and "very bright under strong infrared" in prompt
+
+    from homeassistant.exceptions import ServiceValidationError
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(DOMAIN, "add_note", {"animal": "Dragon", "note": "x"}, blocking=True, return_response=True)

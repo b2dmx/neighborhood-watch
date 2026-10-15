@@ -125,10 +125,37 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             ) from err
         return {"scan_id": sid}
 
+    async def add_note(call: ServiceCall) -> ServiceResponse:
+        watch = engine()
+        cam = camera(watch, call.data.get("camera"), required=False)
+        if cam is None and not call.data.get("animal"):
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="note_needs_target")
+        if cam is None and watch.subject(call.data["animal"]) is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unknown_animal",
+                translation_placeholders={"animal": str(call.data["animal"])},
+            )
+        where = watch.add_note(call.data["note"], cam, call.data.get("animal"))
+        return {"added_to": where}
+
     async def build_summary(call: ServiceCall) -> ServiceResponse:
         summary = engine().build_summary()
         return {"text": summary.text, "lines": summary.lines}
 
+    hass.services.async_register(
+        DOMAIN,
+        "add_note",
+        add_note,
+        vol.Schema(
+            {
+                vol.Optional("camera"): cv.string,
+                vol.Optional("animal"): cv.string,
+                vol.Required("note"): vol.All(cv.string, vol.Length(min=1)),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN,
         "identify",

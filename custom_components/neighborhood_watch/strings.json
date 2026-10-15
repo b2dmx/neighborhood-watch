@@ -707,6 +707,9 @@
     },
     "scan_failed": {
       "message": "The scan could not start: {error}"
+    },
+    "note_needs_target": {
+      "message": "Choose a camera or an animal for the note."
     }
   },
   "services": {
@@ -807,6 +810,24 @@
         "limit": {
           "name": "At most",
           "description": "How many visits to name; the rest are listed as \"animal\"."
+        }
+      }
+    },
+    "add_note": {
+      "name": "Add a note for the AI",
+      "description": "Adds a note where the AI will use it: a camera's view notes, or an animal's identification tips.",
+      "fields": {
+        "note": {
+          "name": "Note",
+          "description": "What the AI should know."
+        },
+        "camera": {
+          "name": "Camera",
+          "description": "Add it to this camera's view notes."
+        },
+        "animal": {
+          "name": "Animal",
+          "description": "Or add it to this animal's (or wildlife kind's) tips."
         }
       }
     }

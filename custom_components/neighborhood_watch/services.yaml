@@ -96,3 +96,20 @@ scan:
           mode: box
 
 build_summary:
+
+add_note:
+  fields:
+    note:
+      required: true
+      example: Milo looks very bright under strong infrared.
+      selector:
+        text:
+          multiline: true
+    camera:
+      example: Garage
+      selector:
+        text:
+    animal:
+      example: Luna
+      selector:
+        text:

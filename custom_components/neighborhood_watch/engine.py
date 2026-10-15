@@ -1849,6 +1849,25 @@ class WatchEngine:
         self._notify()
         return "ok"
 
+    def add_note(self, note: str, camera: CameraConfig | None = None, animal: str | None = None) -> str:
+        """Add a note for the AI where it belongs: a camera's view notes, an animal's
+        identification tips or a wildlife kind's description. Returns where it went."""
+        note = note.strip()
+        if camera is not None:
+            owner, key, where = camera.subentry_id, CONF_AI_NOTES, camera.name
+        else:
+            subject = self.subject(animal or "")
+            if subject is None:
+                raise ValueError(f"unknown animal {animal}")
+            owner, where = subject.subentry_id, subject.name
+            key = CONF_TIPS if subject.kind == "animal" else CONF_DESCRIPTION
+        subentry = self.entry.subentries[owner]
+        old = (subentry.data.get(key) or "").strip()
+        self.hass.config_entries.async_update_subentry(
+            self.entry, subentry, data={**subentry.data, key: f"{old} {note}".strip()}
+        )
+        return where
+
     def test_event(self, cam: CameraConfig, animal: str, confidence: str, candidate: str) -> dict[str, Any]:
         now = dt_util.utcnow()
         rule = self.rules.get(animal.lower())

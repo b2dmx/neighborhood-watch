@@ -143,6 +143,8 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _render() {
     if (!this._hass || !this._config) return;
+    const typing = this.shadowRoot?.querySelector("[data-note-text]");
+    if (typing && this._note) this._note.text = typing.value;
     const show = new Set(this._config.sections || []);
     const d = this._devices();
     const parts = [];
@@ -183,6 +185,29 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._answer(el.dataset.sid, el.value);
       })
     );
+    const noteSave = this.shadowRoot.querySelector("[data-note-save]");
+    if (noteSave)
+      noteSave.addEventListener("click", () => {
+        const text = (this.shadowRoot.querySelector("[data-note-text]")?.value || "").trim();
+        const [kind, name] = (this.shadowRoot.querySelector("[data-note-about]")?.value || "").split("|");
+        if (!text || !name) return;
+        noteSave.disabled = true;
+        Promise.resolve(this._hass.callService(DOMAIN, "add_note", { note: text, [kind]: name }))
+          .then(() => {
+            this._note = null;
+            this._render();
+          })
+          .catch((err) => {
+            noteSave.disabled = false;
+            alert(`Note not saved: ${err.message || err}`);
+          });
+      });
+    const noteSkip = this.shadowRoot.querySelector("[data-note-skip]");
+    if (noteSkip)
+      noteSkip.addEventListener("click", () => {
+        this._note = null;
+        this._render();
+      });
     this._loadFrames();
     const scanButton = this.shadowRoot.querySelector("[data-scan]");
     if (scanButton)
@@ -200,6 +225,32 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _answer(sid, answer) {
     this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid });
+    // A mistake fixed: offer to tell the AI, where it will use it.
+    if (["right", "unsure"].includes(answer)) return;
+    const d = this._devices();
+    const items = this._state(d.hub?.keys.to_review)?.attributes?.items || [];
+    const it = items.find((x) => x.id === sid);
+    if (!it) return;
+    const known = new Set([...d.animals, ...d.wildlife].map((x) => x.name));
+    const about = [];
+    if (answer !== "wrong" && known.has(answer)) about.push(["animal", answer, `${answer}: how to recognise them`]);
+    if (known.has(it.animal) && it.animal !== answer) about.push(["animal", it.animal, `${it.animal}: how to tell them apart`]);
+    if (d.cameras.some((c) => c.name === it.where)) about.push(["camera", it.where, `${it.where} camera: what's in this view`]);
+    if (!about.length) return;
+    this._note = { said: it.animal, was: answer === "wrong" ? "not that" : answer, where: it.where, about, text: "" };
+    this._render();
+  }
+
+  _noteBox() {
+    const n = this._note;
+    if (!n) return "";
+    const opts = n.about.map(([k, name, label]) => `<option value="${k}|${esc(name)}">${esc(label)}</option>`).join("");
+    return `<div class="note">
+        <div><b>Add a note so it doesn't happen again?</b> <span class="muted">The AI said ${esc(n.said)}; it was ${esc(n.was)}.</span></div>
+        <select data-note-about>${opts}</select>
+        <textarea data-note-text rows="2" placeholder="e.g. looks very bright under strong infrared">${esc(n.text || "")}</textarea>
+        <div class="acts"><button class="chip" data-note-save>Save note</button><button class="chip" data-note-skip>No thanks</button></div>
+      </div>`;
   }
 
   _loadFrames() {
@@ -222,7 +273,7 @@ class NeighborhoodWatchCard extends HTMLElement {
   _review(d) {
     const s = this._state(d.hub.keys.to_review);
     const items = s?.attributes?.items || [];
-    if (!items.length) return `<div class="section"><h2>To review</h2><div class="muted">All caught up.</div></div>`;
+    if (!items.length) return `<div class="section"><h2>To review</h2>${this._noteBox()}<div class="muted">All caught up.</div></div>`;
     const limit = this._config.review_limit || 6;
     const names = [...d.animals, ...d.wildlife].map((x) => x.name);
     const options = ["Nothing", ...names].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
@@ -243,7 +294,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         </div>`;
     });
     const more = items.length > limit ? `<div class="muted">${items.length - limit} more after these.</div>` : "";
-    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${rows.join("")}${more}</div>`;
+    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${this._noteBox()}${rows.join("")}${more}</div>`;
   }
 
   _scan(hub) {
@@ -406,6 +457,8 @@ const STYLE = `
   .mini { font: inherit; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: pointer; }
   .mini:disabled { opacity: .4; }
   .empty { color: var(--secondary-text-color); }
+  .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
+  .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
   .rev { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--divider-color); }
   .rev:last-of-type { border-bottom: none; }
   .thumb { width: 132px; height: 88px; object-fit: cover; border-radius: 10px; background: var(--secondary-background-color); flex: none; }
