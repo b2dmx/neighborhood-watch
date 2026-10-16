@@ -142,7 +142,8 @@
       "init": {
         "title": "Neighborhood Watch",
         "menu_options": {
-          "mode": "Mode (live or shadow)",
+          "cameras": "Cameras",
+          "people": "People (who gets alerts)",
           "models": "AI models",
           "schedule": "When to watch",
           "identification": "Identification",
@@ -151,13 +152,6 @@
           "training": "Training data",
           "detector": "Local detector",
           "catch_alls": "Wildlife and catch-alls"
-        }
-      },
-      "mode": {
-        "title": "Mode",
-        "description": "Shadow modes never fire the sighting event, so nothing alerts or feeds. Compare results with the Shadow mismatches sensor.",
-        "data": {
-          "mode": "Mode"
         }
       },
       "models": {
@@ -275,90 +269,97 @@
           "pests": "Alert every time they come back, and are scared off with a camera's lights and sound.",
           "motion_critical_at": "Each has a Critical alerts switch on the Neighborhood Watch device; these limit where it rings. Empty: wherever it alerts."
         }
+      },
+      "camera": {
+        "title": "Camera",
+        "data": {
+          "camera": "Camera",
+          "name": "Name",
+          "triggers": "Start a check when any of these turn on",
+          "skip_when": "Skip the check while any of these are on",
+          "cooldown": "Cooldown",
+          "priority_cooldown": "Cooldown after a priority animal",
+          "missing_cooldown": "Cooldown in missing mode",
+          "reopened_by": "A check on these cameras ends the cooldown",
+          "deterrent_lights": "Lights that scare pests off",
+          "deterrent_minutes": "Leave them on for",
+          "deterrent_sound": "Sound that scares pests off",
+          "check_every": "Also check every",
+          "critical_except": "Critical alerts here, except",
+          "ai_notes": "What the AI should know about this view",
+          "remove": "Remove this camera"
+        },
+        "data_description": {
+          "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+          "deterrent_sound": "Played when a pest is seen here.",
+          "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
+          "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
+          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet.",
+          "remove": "Its entities go too."
+        },
+        "description": "Camera {camera}."
+      },
+      "person": {
+        "title": "Person",
+        "data": {
+          "name": "Name",
+          "person": "Person",
+          "notify_service": "Phone",
+          "quiet_zones": "Quiet zones",
+          "missing_alerts": "Gets missing-mode alerts",
+          "critical_sound": "Critical sound",
+          "critical_volume": "Critical volume",
+          "muted": "Don't notify me about",
+          "quiet_start": "Quiet hours start",
+          "quiet_end": "Quiet hours end",
+          "quiet_mode": "When in a quiet zone or quiet hours",
+          "remove": "Remove this person"
+        },
+        "data_description": {
+          "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
+          "quiet_zones": "Zones (like work) where alerts are toned down.",
+          "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
+          "critical_sound": "The sound file name on the phone, or default.",
+          "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
+          "quiet_start": "Optional: a daily window, like overnight.",
+          "quiet_end": "Leave both empty for no quiet hours.",
+          "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones.",
+          "remove": "They stop getting alerts."
+        },
+        "description": "Someone who gets Neighborhood Watch alerts on their phone."
+      },
+      "cameras": {
+        "title": "Cameras",
+        "description": "Pick a camera to change, or add one.",
+        "data": {
+          "camera": "Camera"
+        }
+      },
+      "people": {
+        "title": "People",
+        "description": "Pick a person to change, or add someone who should get alerts.",
+        "data": {
+          "person": "Person"
+        }
+      },
+      "camera_add": {
+        "title": "Add a camera",
+        "data": {
+          "camera": "Camera"
+        },
+        "data_description": {
+          "camera": "Its name and motion sensors are filled in from its device next."
+        }
       }
     },
     "error": {
       "first_look_required": "Pick at least one model for the first look.",
-      "missing_animals": "The instructions must contain {animals}."
+      "missing_animals": "The instructions must contain {animals}.",
+      "name_required": "Enter a name.",
+      "name_taken": "That name is already used."
     }
   },
   "config_subentries": {
-    "camera": {
-      "initiate_flow": {
-        "user": "Add camera",
-        "reconfigure": "Edit camera"
-      },
-      "entry_type": "Camera",
-      "step": {
-        "user": {
-          "title": "Add camera",
-          "data": {
-            "camera": "Camera"
-          }
-        },
-        "details": {
-          "title": "Camera: {camera}",
-          "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.",
-          "data": {
-            "name": "Name",
-            "triggers": "Start a check when any of these turn on",
-            "skip_when": "Skip the check while any of these are on",
-            "cooldown": "Cooldown",
-            "priority_cooldown": "Cooldown after a priority animal",
-            "missing_cooldown": "Cooldown in missing mode",
-            "reopened_by": "A check on these cameras ends the cooldown",
-            "deterrent_lights": "Lights that scare pests off",
-            "deterrent_minutes": "Leave them on for",
-            "deterrent_sound": "Sound that scares pests off",
-            "check_every": "Also check every",
-            "critical_except": "Critical alerts here, except",
-            "ai_notes": "What the AI should know about this view"
-          },
-          "data_description": {
-            "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
-            "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
-            "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
-            "deterrent_sound": "Played when a pest is seen here.",
-            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
-            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
-            "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
-          }
-        },
-        "reconfigure": {
-          "title": "Edit camera",
-          "data": {
-            "camera": "Camera",
-            "name": "Name",
-            "triggers": "Start a check when any of these turn on",
-            "skip_when": "Skip the check while any of these are on",
-            "cooldown": "Cooldown",
-            "priority_cooldown": "Cooldown after a priority animal",
-            "missing_cooldown": "Cooldown in missing mode",
-            "reopened_by": "A check on these cameras ends the cooldown",
-            "deterrent_lights": "Lights that scare pests off",
-            "deterrent_minutes": "Leave them on for",
-            "deterrent_sound": "Sound that scares pests off",
-            "check_every": "Also check every",
-            "critical_except": "Critical alerts here, except",
-            "ai_notes": "What the AI should know about this view"
-          },
-          "data_description": {
-            "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
-            "deterrent_sound": "Played when a pest is seen here.",
-            "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
-            "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
-            "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
-          }
-        }
-      },
-      "error": {
-        "name_required": "Enter a name.",
-        "name_taken": "That name is already used."
-      },
-      "abort": {
-        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
-      }
-    },
     "animal": {
       "initiate_flow": {
         "user": "Add animal",
@@ -433,128 +434,6 @@
       "abort": {
         "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
       }
-    },
-    "species": {
-      "initiate_flow": {
-        "user": "Add wildlife rules",
-        "reconfigure": "Edit wildlife rules"
-      },
-      "entry_type": "Wildlife rules",
-      "step": {
-        "user": {
-          "title": "Wildlife with its own rules",
-          "description": "Optional. Every animal is already tracked as wildlife without this. Add a kind here only when it needs rules of its own (different cameras, its own switches).",
-          "data": {
-            "name": "Name",
-            "description": "What it looks like (optional)",
-            "pest": "Pest",
-            "in_summary": "Count it in the night summary",
-            "alert_at": "Alert at",
-            "critical_at": "Critical alerts only at"
-          },
-          "data_description": {
-            "name": "What the AI calls it, e.g. Raccoon.",
-            "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
-            "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
-            "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
-          }
-        },
-        "reconfigure": {
-          "title": "Edit wildlife",
-          "data": {
-            "name": "Name",
-            "description": "What it looks like (optional)",
-            "pest": "Pest",
-            "in_summary": "Count it in the night summary",
-            "alert_at": "Alert at",
-            "critical_at": "Critical alerts only at"
-          },
-          "data_description": {
-            "name": "What the AI calls it, e.g. Raccoon.",
-            "description": "Extra hints for the AI, e.g. a ringed tail and a masked face.",
-            "pest": "Scare it off with the camera's lights and sound, and alert every time it comes back (others alert once per visit).",
-            "alert_at": "Cameras where it sends an alert. Empty: never.",
-            "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
-          }
-        }
-      },
-      "error": {
-        "name_required": "Enter a name.",
-        "name_taken": "That name is already used.",
-        "name_reserved": "That name is reserved."
-      },
-      "abort": {
-        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
-      }
-    },
-    "recipient": {
-      "initiate_flow": {
-        "user": "Add person",
-        "reconfigure": "Edit person"
-      },
-      "entry_type": "Person",
-      "step": {
-        "user": {
-          "title": "Add person",
-          "description": "Someone who gets Neighborhood Watch alerts on their phone.",
-          "data": {
-            "name": "Name",
-            "person": "Person",
-            "notify_service": "Phone",
-            "quiet_zones": "Quiet zones",
-            "missing_alerts": "Gets missing-mode alerts",
-            "critical_sound": "Critical sound",
-            "critical_volume": "Critical volume",
-            "muted": "Don't notify me about",
-            "quiet_start": "Quiet hours start",
-            "quiet_end": "Quiet hours end",
-            "quiet_mode": "When in a quiet zone or quiet hours"
-          },
-          "data_description": {
-            "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
-            "quiet_zones": "Zones (like work) where alerts are toned down.",
-            "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-            "critical_sound": "The sound file name on the phone, or default.",
-            "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
-            "quiet_start": "Optional: a daily window, like overnight.",
-            "quiet_end": "Leave both empty for no quiet hours.",
-            "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones."
-          }
-        },
-        "reconfigure": {
-          "title": "Edit person",
-          "data": {
-            "name": "Name",
-            "person": "Person",
-            "notify_service": "Phone",
-            "quiet_zones": "Quiet zones",
-            "missing_alerts": "Gets missing-mode alerts",
-            "critical_sound": "Critical sound",
-            "critical_volume": "Critical volume",
-            "muted": "Don't notify me about",
-            "quiet_start": "Quiet hours start",
-            "quiet_end": "Quiet hours end",
-            "quiet_mode": "When in a quiet zone or quiet hours"
-          },
-          "data_description": {
-            "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
-            "quiet_zones": "Zones (like work) where alerts are toned down.",
-            "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-            "critical_sound": "The sound file name on the phone, or default.",
-            "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
-            "quiet_start": "Optional: a daily window, like overnight.",
-            "quiet_end": "Leave both empty for no quiet hours.",
-            "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones."
-          }
-        }
-      },
-      "error": {
-        "name_required": "Enter a name."
-      },
-      "abort": {
-        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
-      }
     }
   },
   "selector": {
@@ -572,13 +451,6 @@
         "grey": "Grey",
         "black": "Black",
         "na": "Not checked"
-      }
-    },
-    "mode": {
-      "options": {
-        "live": "Live: fire the sighting event",
-        "shadow_reuse": "Shadow, reuse answers: re-run the rules on another system's sighting events (no AI calls)",
-        "shadow_independent": "Shadow, independent: check cameras itself without paid models"
       }
     },
     "priority_candidate": {
@@ -618,9 +490,6 @@
       },
       "ai_calls": {
         "name": "AI calls today"
-      },
-      "shadow_mismatches": {
-        "name": "Shadow mismatches"
       },
       "current_animal": {
         "name": "Animal"

@@ -51,11 +51,11 @@ async def test_camera_entities_join_the_cameras_own_device(hass: HomeAssistant, 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    ours = [e for e in er.async_entries_for_config_entry(entities, entry.entry_id) if e.config_subentry_id == backyard_id]
+    ours = [e for e in er.async_entries_for_config_entry(entities, entry.entry_id) if backyard_id in e.unique_id]
     assert ours and {e.device_id for e in ours} == {cam_device.id}
     assert devices.async_get(old.id) is None
     assert devices.async_get(cam_device.id) is not None
-    shed = next(s.subentry_id for s in entry.subentries.values() if s.title == "Shed")
+    shed = next(cid for cid, d in entry.options["cameras"].items() if d["name"] == "Shed")
     assert devices.async_get_device_by_identifier((DOMAIN, f"camera_{shed}"), entry.entry_id) is not None
 
 
@@ -92,3 +92,30 @@ async def test_person_switch_sits_on_their_phone(hass: HomeAssistant, tmp_path: 
     assert hass.states.get(ann.entity_id).state == "on"
     bo = [e for e in er.async_entries_for_config_entry(entities, entry.entry_id) if e.translation_key == "person_critical" and e.device_id != phone.id]
     assert len(bo) == 1 and hass.states.get(bo[0].entity_id) is not None  # no phone found: on the hub
+
+
+async def test_moving_cameras_into_the_options_keeps_entity_ids(hass: HomeAssistant, tmp_path: Path, freezer):
+    freezer.move_to(NIGHT)
+    hass.config.config_dir = str(tmp_path)
+    hass.config.media_dirs = {"local": str(tmp_path / "media")}
+    assert await async_setup_component(hass, "homeassistant", {})
+    hass.states.async_set(FIRST, "unknown")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        minor_version=2,
+        options={"first_look": [FIRST], "use_dark": False},
+        subentries_data=[camera_sub("Backyard", "backyard", "binary_sensor.backyard_motion")],
+    )
+    entry.add_to_hass(hass)
+    sid = next(iter(entry.subentries))
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "sensor", DOMAIN, f"{entry.entry_id}_{sid}_last_detection",
+        config_entry=entry, config_subentry_id=sid, suggested_object_id="backyard_last_detection",
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert not entry.subentries and sid in entry.options["cameras"]
+    kept = registry.async_get(old.entity_id)
+    assert kept is not None and kept.config_subentry_id is None
+    assert hass.states.get("sensor.backyard_last_detection") is not None

@@ -19,8 +19,9 @@ NAME: Final = "Neighborhood Watch"
 EVENT_SIGHTING: Final = "neighborhood_watch_sighting"
 TASK_NAME: Final = "Neighborhood Watch"
 
-SUBENTRY_CAMERA: Final = "camera"
 SUBENTRY_ANIMAL: Final = "animal"
+# Before 0.12 cameras, people and wildlife kinds were subentries too (see migrate.py).
+SUBENTRY_CAMERA: Final = "camera"
 SUBENTRY_SPECIES: Final = "species"
 SUBENTRY_RECIPIENT: Final = "recipient"
 
@@ -41,7 +42,6 @@ CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_RULES = "extra_rules"
 CONF_WILDLIFE = "wildlife"
 CONF_REFERENCE_PHOTOS = "reference_photos"
-CONF_MODE = "mode"
 CONF_PUBLIC_URL = "public_url"
 CONF_ALERTS = "alerts"
 CONF_UNKNOWN_ALERTS = "unknown_alerts"  # before 0.7: migrated into the built-ins
@@ -76,10 +76,8 @@ BUILTIN_DEFAULTS: dict[str, tuple[list[str], list[str]]] = {
 }
 VISIT_SLACK_MINUTES = 10  # same visit: seen again within the camera's cooldown + this
 
-MODE_LIVE = "live"
-MODE_SHADOW_REUSE = "shadow_reuse"
-MODE_SHADOW_INDEPENDENT = "shadow_independent"
-MODES = [MODE_LIVE, MODE_SHADOW_REUSE, MODE_SHADOW_INDEPENDENT]
+CONF_CAMERAS = "cameras"  # {id: camera settings}
+CONF_PEOPLE = "people"  # {id: person settings}
 
 DEFAULT_OPTIONS: dict = {
     CONF_FIRST_LOOK: [],
@@ -98,7 +96,6 @@ DEFAULT_OPTIONS: dict = {
     CONF_EXTRA_RULES: "",
     CONF_WILDLIFE: list(DEFAULT_WILDLIFE),
     CONF_REFERENCE_PHOTOS: True,
-    CONF_MODE: MODE_LIVE,
     CONF_PUBLIC_URL: "",
     CONF_ALERTS: True,
     CONF_MIN_CONFIDENCE: MEDIUM,
@@ -176,7 +173,6 @@ EVENT_ACTION = "mobile_app_notification_action"
 STORAGE_VERSION = 1
 SIGHTING_DAYS = 30
 SIGHTING_MAX = 4000
-COMPARISON_MAX = 200
 AI_TIMEOUT = 90  # seconds per model call
 SNAPSHOT_TIMEOUT = 15
 

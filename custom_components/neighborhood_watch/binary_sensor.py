@@ -29,10 +29,6 @@ async def async_setup_entry(
         else:
             entities.append(RecentlyAbsent(watch, "recently_absent", animal=animal))
         async_add_entities(entities, config_subentry_id=animal.subentry_id)
-    for kind in watch.species.values():
-        async_add_entities(
-            [OnCamera(watch, "on_camera", animal=kind)], config_subentry_id=kind.subentry_id
-        )
     async_add_entities(
         [WildlifeOnCamera(watch, "wildlife_on_camera"), WildlifeOnCamera(watch, "pest_on_camera")]
     )

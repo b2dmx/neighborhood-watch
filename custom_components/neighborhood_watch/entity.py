@@ -10,7 +10,7 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.util import slugify
 
 from .const import DOMAIN, NAME
-from .engine import AnimalConfig, CameraConfig, SpeciesConfig, WatchEngine
+from .engine import AnimalConfig, CameraConfig, WatchEngine
 
 
 def camera_device(hass: HomeAssistant, camera_entity: str) -> dr.DeviceEntry | None:
@@ -47,7 +47,7 @@ class WatchEntity(Entity):
         watch: WatchEngine,
         key: str,
         camera: CameraConfig | None = None,
-        animal: AnimalConfig | SpeciesConfig | None = None,
+        animal: AnimalConfig | None = None,
     ) -> None:
         self.watch = watch
         self.camera = camera
@@ -75,7 +75,7 @@ class WatchEntity(Entity):
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"animal_{owner}")},
                 name=animal.name,
-                model="Wildlife" if animal.kind == "species" else (animal.species.title() or "Animal"),
+                model=animal.species.title() or "Animal",
                 manufacturer=NAME,
                 via_device_id=watch.hub_device_id,
                 entry_type=DeviceEntryType.SERVICE,

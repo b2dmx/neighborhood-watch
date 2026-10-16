@@ -17,7 +17,7 @@ from homeassistant.setup import async_setup_component
 from custom_components.neighborhood_watch.const import DOMAIN
 
 from .test_ha_integration import FIRST, NIGHT, SECOND, FakeAI, animal_sub, camera_sub, trigger
-from .test_ha_v03 import _jpeg, person_sub, species_sub
+from .test_ha_v03 import _jpeg, person_sub
 
 EVERY = ["*"]
 
@@ -59,8 +59,9 @@ async def watch(hass: HomeAssistant, tmp_path: Path, freezer):
             "unknown_alert_at": EVERY,
             "other_alert_at": ["garage"],
             "motion_alert_at": [],
-            "pests": ["Opossum"],
-            "pest_alert_at": ["garage"],
+            "pests": ["Raccoon", "Opossum"],
+            "pest_alert_at": EVERY,
+            "pest_critical_at": ["garage"],
         },
         subentries_data=[
             camera_sub("Garage", "garage", "binary_sensor.garage_motion", critical_except=["luna"]),
@@ -68,7 +69,6 @@ async def watch(hass: HomeAssistant, tmp_path: Path, freezer):
             animal_sub("Luna", priority=True, pattern="blotchy", base="white", known_last_seen=None,
                        alert_at=EVERY, critical_at=[]),
             animal_sub("Milo", alert_at=EVERY, critical_at=[]),
-            species_sub("Raccoon", alert_at=EVERY, critical_at=["garage"], pest=True),
             person_sub("Ann", missing_alerts=True, quiet_zones=["zone.work"]),
             person_sub("Bo"),
             person_sub("Cy", missing_alerts=True, quiet_start="21:00:00", quiet_end="07:00:00", quiet_mode="none"),
@@ -108,14 +108,14 @@ async def later(freezer, minutes: float) -> None:
 
 
 async def test_switches_exist_where_they_should(hass, watch):
-    for entity_id in ("switch.luna_alerts", "switch.milo_alerts", "switch.raccoon_alerts",
+    for entity_id in ("switch.luna_alerts", "switch.milo_alerts",
                       "switch.luna_missing_mode", "switch.milo_missing_mode"):
         assert hass.states.get(entity_id) is not None, entity_id
-    for entity_id in ("switch.raccoon_critical_alerts", "switch.milo_critical_alerts",
+    for entity_id in ("switch.neighborhood_watch_pests_critical_alerts", "switch.milo_critical_alerts",
                       "switch.garage_critical_alerts", "switch.neighborhood_watch_unknown_animals_critical_alerts",
                       "switch.neighborhood_watch_unsure_motion_critical_alerts"):
         assert hass.states.get(entity_id).state == "off", entity_id  # every critical switch starts off
-    assert hass.states.get("switch.raccoon_missing_mode") is None  # wildlife has no missing mode
+    assert hass.states.get("switch.raccoon_alerts") is None  # no switches per wild animal
 
 
 async def test_critical_switch_rings_only_at_its_cameras(hass, watch, freezer):
@@ -123,7 +123,7 @@ async def test_critical_switch_rings_only_at_its_cameras(hass, watch, freezer):
     await trigger(hass, "garage")
     assert level(to(watch["sent"], "bo")[-1]) == "active"  # switch off: a normal alert
     await later(freezer, 4)
-    await switch(hass, "switch.raccoon_critical_alerts", True)
+    await switch(hass, "switch.neighborhood_watch_pests_critical_alerts", True)
     watch["ai"].say(FIRST, "Raccoon|high|na|na|", "Raccoon|high|na|na|")
     await trigger(hass, "yard")
     assert level(to(watch["sent"], "bo")[-1]) == "active"  # not one of its critical cameras
@@ -240,9 +240,6 @@ async def test_person_critical_switch_turns_their_critical_alerts_normal(hass, w
 
 async def test_pests_and_wildlife_without_pages(hass, watch, freezer):
     watch["ai"].say(FIRST, "Opossum|high|na|na|", "Opossum|high|na|na|", "Opossum|high|na|na|", "Groundhog|high|na|na|")
-    await trigger(hass, "yard")
-    assert watch["sent"] == []  # pests alert at the garage only
-    await later(freezer, 4)
     await trigger(hass, "garage")
     await later(freezer, 4)
     await trigger(hass, "garage")
@@ -252,10 +249,12 @@ async def test_pests_and_wildlife_without_pages(hass, watch, freezer):
     assert hass.states.get("binary_sensor.neighborhood_watch_pest_on_camera").attributes["camera"] == "Garage"
     await later(freezer, 4)
     await trigger(hass, "yard")
+    await later(freezer, 4)
+    await trigger(hass, "yard")
     wildlife = hass.states.get("sensor.neighborhood_watch_wildlife")
     kinds = wildlife.attributes["kinds"]
     assert wildlife.state == "Groundhog · Yard"
     assert kinds["Opossum"]["pest"] is True and kinds["Opossum"]["tonight"] == 3
     assert kinds["Groundhog"]["pest"] is False
-    assert len(to(watch["sent"], "bo")) == 2  # a groundhog never alerts
-    assert hass.states.get("device_tracker.opossum") is None and hass.states.get("sensor.opossum_last_seen") is None
+    assert len(to(watch["sent"], "bo")) == 3  # the opossum at the yard too; a groundhog never alerts
+    assert hass.states.get("sensor.opossum_last_seen") is None

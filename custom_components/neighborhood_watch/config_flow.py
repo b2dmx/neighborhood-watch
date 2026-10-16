@@ -2,13 +2,14 @@
 
 Onboarding walks through: which AI models look (and in what order), when to watch, which
 cameras (each pre-filled from its own device's motion and person/vehicle sensors), then the
-animals one by one. Cameras and animals are subentries, so each has its own "Add" button
-and its own reconfigure page afterwards.
+animals one by one. Animals are subentries (each a device with its own page); cameras and
+people are managed under Configure → Cameras / People.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from uuid import uuid4
 
 try:  # Home Assistant 2026.10 replaced voluptuous with probatio (same API).
     import probatio as vol
@@ -73,22 +74,20 @@ from .const import (
     COMMON_WILDLIFE,
     DEFAULT_WILDLIFE_PICKS,
     CONF_INTERVAL,
-    CONF_IN_SUMMARY,
     CONF_MIN_CONFIDENCE,
     CONF_MISSING_ALERTS,
     CONF_MUTED,
     CONF_NOTIFY,
     CONF_PERSON,
-    CONF_PEST,
     CONF_PESTS,
+    CONF_CAMERAS,
+    CONF_PEOPLE,
     CONF_QUIET_END,
     CONF_QUIET_MODE,
     CONF_QUIET_START,
     CONF_QUIET_ZONES,
     QUIET_NONE,
     QUIET_NORMAL,
-    SUBENTRY_RECIPIENT,
-    SUBENTRY_SPECIES,
     CONF_ABSENT_DAYS,
     CONF_ADD_ANOTHER,
     CONF_ADDED,
@@ -105,7 +104,6 @@ from .const import (
     CONF_KNOWN_LAST_SEEN,
     CONF_KNOWN_LOCATION,
     CONF_MISSING_COOLDOWN,
-    CONF_MODE,
     CONF_NAME,
     CONF_NIGHT_END,
     CONF_NIGHT_START,
@@ -130,10 +128,8 @@ from .const import (
     CONF_WILDLIFE,
     DEFAULT_OPTIONS,
     DOMAIN,
-    MODES,
     NAME,
     SUBENTRY_ANIMAL,
-    SUBENTRY_CAMERA,
 )
 from .engine import remove_file, reference_file, save_reference
 
@@ -153,9 +149,6 @@ PATTERN = SelectSelector(
     SelectSelectorConfig(options=list(logic.PATTERNS), translation_key="pattern")
 )
 BASE = SelectSelector(SelectSelectorConfig(options=list(logic.BASES), translation_key="base"))
-MODE = SelectSelector(
-    SelectSelectorConfig(options=MODES, translation_key="mode", mode=SelectSelectorMode.LIST)
-)
 WILDLIFE = SelectSelector(
     SelectSelectorConfig(options=list(logic.DEFAULT_WILDLIFE), multiple=True, custom_value=True)
 )
@@ -233,20 +226,23 @@ def _alert_data(user_input: Mapping[str, Any], prefix: str = "") -> dict[str, li
     return {f"{prefix}{CONF_ALERT_AT}": alert, f"{prefix}{CONF_CRITICAL_AT}": critical}
 
 
-def _camera_options(entry: ConfigEntry) -> list[SelectOptionDict]:
+NEW = "__new__"
+
+
+def _camera_options(entry: ConfigEntry, exclude: str | None = None) -> list[SelectOptionDict]:
     return [
-        SelectOptionDict(value=s.data[CONF_SLUG], label=s.title)
-        for s in entry.subentries.values()
-        if s.subentry_type == SUBENTRY_CAMERA
+        SelectOptionDict(value=d[CONF_SLUG], label=d[CONF_NAME])
+        for cid, d in (entry.options.get(CONF_CAMERAS) or {}).items()
+        if cid != exclude
     ]
 
 
 def _subjects(entry: ConfigEntry) -> list[str]:
-    """Everything an alert can be about: named animals, wildlife kinds and the catch-alls."""
+    """Everything an alert can be about: named animals, pests and the catch-alls."""
     named = [
         s.data.get(CONF_NAME) or s.title
         for s in entry.subentries.values()
-        if s.subentry_type in (SUBENTRY_ANIMAL, SUBENTRY_SPECIES)
+        if s.subentry_type == SUBENTRY_ANIMAL
     ]
     pests = [p for p in entry.options.get(CONF_PESTS) or [] if p.lower() not in {n.lower() for n in named}]
     return [*named, *pests, *BUILTIN_KEYS]
@@ -478,15 +474,15 @@ def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str
 
 class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
 
     def __init__(self) -> None:
         self._options: dict[str, Any] = dict(DEFAULT_OPTIONS)
         self._pending_cameras: list[str] = []
         self._camera_values: dict[str, Any] = {}
-        self._cameras: list[ConfigSubentryData] = []
+        self._cameras: dict[str, dict[str, Any]] = {}
+        self._people: dict[str, dict[str, Any]] = {}
         self._animals: list[ConfigSubentryData] = []
-        self._extra: list[ConfigSubentryData] = []
 
     @staticmethod
     @callback
@@ -498,12 +494,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        return {
-            SUBENTRY_CAMERA: CameraSubentryFlow,
-            SUBENTRY_ANIMAL: AnimalSubentryFlow,
-            SUBENTRY_SPECIES: SpeciesSubentryFlow,
-            SUBENTRY_RECIPIENT: RecipientSubentryFlow,
-        }
+        return {SUBENTRY_ANIMAL: AnimalSubentryFlow}
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if not self.hass.states.async_entity_ids("ai_task"):
@@ -541,20 +532,13 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             camera = self._camera_values[CONF_CAMERA]
             slug = slugify(user_input[CONF_NAME])
-            taken = {c["data"][CONF_SLUG] for c in self._cameras}
+            taken = {c[CONF_SLUG] for c in self._cameras.values()}
             if not slug:
                 errors[CONF_NAME] = "name_required"
             elif slug in taken:
                 errors[CONF_NAME] = "name_taken"
             else:
-                self._cameras.append(
-                    ConfigSubentryData(
-                        data=_camera_data(user_input, slug, camera),
-                        subentry_type=SUBENTRY_CAMERA,
-                        title=user_input[CONF_NAME].strip(),
-                        unique_id=slug,
-                    )
-                )
+                self._cameras[uuid4().hex] = _camera_data(user_input, slug, camera)
                 self._camera_values = {}
                 user_input = None
         if not errors:
@@ -562,9 +546,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_wildlife()
             camera = self._pending_cameras.pop(0)
             self._camera_values = {CONF_CAMERA: camera, **suggest_camera(self.hass, camera)}
-        others = [
-            SelectOptionDict(value=c["data"][CONF_SLUG], label=c["title"]) for c in self._cameras
-        ]
+        others = self._onboarding_cameras()
         return self.async_show_form(
             step_id="camera",
             data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False),
@@ -588,13 +570,8 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
                 name = service.removeprefix("mobile_app_").replace("_", " ").title()
-                self._extra.append(
-                    ConfigSubentryData(
-                        data=_recipient_data({CONF_NAME: name, CONF_NOTIFY: service, CONF_MISSING_ALERTS: True}),
-                        subentry_type=SUBENTRY_RECIPIENT,
-                        title=name,
-                        unique_id=None,
-                    )
+                self._people[uuid4().hex] = _recipient_data(
+                    {CONF_NAME: name, CONF_NOTIFY: service, CONF_MISSING_ALERTS: True}
                 )
             return await self.async_step_animal()
         return self.async_show_form(
@@ -614,7 +591,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             if not (user_input.get(CONF_NAME) or "").strip():
                 return self._finish()
-            taken = {a["data"][CONF_NAME].lower() for a in [*self._animals, *self._extra]}
+            taken = {a["data"][CONF_NAME].lower() for a in self._animals}
             errors = _validate_animal(user_input, taken)
             if not errors:
                 slug = slugify(user_input[CONF_NAME])
@@ -650,14 +627,14 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     def _onboarding_cameras(self) -> list[SelectOptionDict]:
-        return [SelectOptionDict(value=c["data"][CONF_SLUG], label=c["title"]) for c in self._cameras]
+        return [SelectOptionDict(value=c[CONF_SLUG], label=c[CONF_NAME]) for c in self._cameras.values()]
 
     def _finish(self) -> ConfigFlowResult:
         return self.async_create_entry(
             title=NAME,
             data={},
-            options=self._options,
-            subentries=[*self._cameras, *self._extra, *self._animals],
+            options={**self._options, CONF_CAMERAS: self._cameras, CONF_PEOPLE: self._people},
+            subentries=self._animals,
         )
 
 
@@ -676,7 +653,8 @@ class WatchOptionsFlow(OptionsFlow):
         return self.async_show_menu(
             step_id="init",
             menu_options=[
-                "mode",
+                "cameras",
+                "people",
                 "alerts",
                 "catch_alls",
                 "models",
@@ -688,13 +666,109 @@ class WatchOptionsFlow(OptionsFlow):
             ],
         )
 
-    async def async_step_mode(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    # --- cameras -------------------------------------------------------------------------
+
+    async def async_step_cameras(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Pick a camera to edit, or add one."""
+        cams = self._values.get(CONF_CAMERAS) or {}
         if user_input is not None:
-            return self._save(user_input)
+            self._editing = None if user_input["camera"] == NEW else user_input["camera"]
+            return await (self.async_step_camera_add() if self._editing is None else self.async_step_camera())
+        choices = [
+            SelectOptionDict(value=cid, label=d[CONF_NAME])
+            for cid, d in sorted(cams.items(), key=lambda kv: kv[1][CONF_NAME].lower())
+        ] + [SelectOptionDict(value=NEW, label="+ Add a camera")]
         return self.async_show_form(
-            step_id="mode",
-            data_schema=vol.Schema({vol.Required(CONF_MODE, default=self._values[CONF_MODE]): MODE}),
+            step_id="cameras",
+            data_schema=vol.Schema(
+                {vol.Required("camera"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST))}
+            ),
         )
+
+    async def async_step_camera_add(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            self._new_camera = user_input[CONF_CAMERA]
+            return await self.async_step_camera()
+        return self.async_show_form(
+            step_id="camera_add", data_schema=vol.Schema({vol.Required(CONF_CAMERA): CAMERA})
+        )
+
+    async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """One camera's settings (pre-filled from its device when it's new)."""
+        cams = dict(self._values.get(CONF_CAMERAS) or {})
+        editing = self._editing
+        current = cams[editing] if editing else {CONF_CAMERA: self._new_camera, **suggest_camera(self.hass, self._new_camera)}
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if editing and user_input.get("remove"):
+                cams.pop(editing)
+                return self._save({CONF_CAMERAS: cams})
+            slug = current[CONF_SLUG] if editing else slugify(user_input.get(CONF_NAME) or "")
+            taken = {d[CONF_SLUG] for cid, d in cams.items() if cid != editing}
+            if not slug:
+                errors[CONF_NAME] = "name_required"
+            elif slug in taken:
+                errors[CONF_NAME] = "name_taken"
+            else:
+                cams[editing or uuid4().hex] = _camera_data(
+                    user_input, slug, user_input.get(CONF_CAMERA) or current[CONF_CAMERA]
+                )
+                return self._save({CONF_CAMERAS: cams})
+        schema = _camera_schema(
+            user_input or current,
+            _camera_options(self.config_entry, editing),
+            include_camera=bool(editing),
+            subjects=_subjects(self.config_entry),
+        )
+        if editing:
+            schema = schema.extend({vol.Required("remove", default=False): BOOL})
+        return self.async_show_form(
+            step_id="camera",
+            data_schema=schema,
+            description_placeholders={"camera": current[CONF_CAMERA]},
+            errors=errors,
+        )
+
+    # --- people --------------------------------------------------------------------------
+
+    async def async_step_people(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Pick a person to edit, or add one."""
+        people = self._values.get(CONF_PEOPLE) or {}
+        if user_input is not None:
+            self._editing = None if user_input["person"] == NEW else user_input["person"]
+            return await self.async_step_person()
+        choices = [
+            SelectOptionDict(value=pid, label=d[CONF_NAME])
+            for pid, d in sorted(people.items(), key=lambda kv: kv[1][CONF_NAME].lower())
+        ] + [SelectOptionDict(value=NEW, label="+ Add a person")]
+        return self.async_show_form(
+            step_id="people",
+            data_schema=vol.Schema(
+                {vol.Required("person"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST))}
+            ),
+        )
+
+    async def async_step_person(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Someone who gets alerts: phone, sound, mutes, quiet zones and hours."""
+        people = dict(self._values.get(CONF_PEOPLE) or {})
+        editing = self._editing
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if editing and user_input.get("remove"):
+                people.pop(editing)
+                return self._save({CONF_PEOPLE: people})
+            data = _recipient_data(user_input)
+            if not data[CONF_NAME]:
+                errors[CONF_NAME] = "name_required"
+            else:
+                people[editing or uuid4().hex] = data
+                return self._save({CONF_PEOPLE: people})
+        schema = _recipient_schema(
+            self.hass, user_input or (people.get(editing) if editing else {}), _subjects(self.config_entry)
+        )
+        if editing:
+            schema = schema.extend({vol.Required("remove", default=False): BOOL})
+        return self.async_show_form(step_id="person", data_schema=schema, errors=errors)
 
     async def async_step_models(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -844,79 +918,6 @@ class WatchOptionsFlow(OptionsFlow):
 # --- Add camera ------------------------------------------------------------------------------
 
 
-class CameraSubentryFlow(ConfigSubentryFlow):
-    def __init__(self) -> None:
-        self._camera: str | None = None
-
-    def _others(self, exclude: str | None = None) -> list[SelectOptionDict]:
-        return [
-            SelectOptionDict(value=s.data[CONF_SLUG], label=s.title)
-            for s in self._get_entry().subentries.values()
-            if s.subentry_type == SUBENTRY_CAMERA and s.subentry_id != exclude
-        ]
-
-    def _taken(self, exclude: str | None = None) -> set[str]:
-        return {
-            s.data[CONF_SLUG]
-            for s in self._get_entry().subentries.values()
-            if s.subentry_type == SUBENTRY_CAMERA and s.subentry_id != exclude
-        }
-
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        if user_input is not None:
-            self._camera = user_input[CONF_CAMERA]
-            return await self.async_step_details()
-        return self.async_show_form(
-            step_id="user", data_schema=vol.Schema({vol.Required(CONF_CAMERA): CAMERA})
-        )
-
-    async def async_step_details(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            slug = slugify(user_input[CONF_NAME])
-            if not slug:
-                errors[CONF_NAME] = "name_required"
-            elif slug in self._taken():
-                errors[CONF_NAME] = "name_taken"
-            else:
-                return self.async_create_entry(
-                    title=user_input[CONF_NAME].strip(),
-                    data=_camera_data(user_input, slug, self._camera),
-                    unique_id=slug,
-                )
-        values = user_input or suggest_camera(self.hass, self._camera)
-        return self.async_show_form(
-            step_id="details",
-            data_schema=_camera_schema(
-                values, self._others(), include_camera=False, subjects=_subjects(self._get_entry())
-            ),
-            description_placeholders={"camera": self._camera},
-            errors=errors,
-        )
-
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry()
-        if user_input is not None:
-            data = _camera_data(user_input, subentry.data[CONF_SLUG], user_input[CONF_CAMERA])
-            return self.async_update_and_abort(
-                self._get_entry(), subentry, title=data[CONF_NAME], data=data
-            )
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=_camera_schema(
-                subentry.data,
-                self._others(subentry.subentry_id),
-                include_camera=True,
-                subjects=_subjects(self._get_entry()),
-            ),
-        )
-
-
-# --- Add animal ------------------------------------------------------------------------------
-
-
 class AnimalSubentryFlow(ConfigSubentryFlow):
     def _reference_markdown(self, subentry_id: str) -> str:
         """The saved reference photo, shown above the form (the upload box can't show it)."""
@@ -993,91 +994,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         )
 
 
-# --- Add wildlife ------------------------------------------------------------------------------
-
-
-def _species_schema(values: Mapping[str, Any], cameras: list[SelectOptionDict]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}): TEXT,
-            vol.Optional(
-                CONF_DESCRIPTION, description={"suggested_value": values.get(CONF_DESCRIPTION)}
-            ): LONG_TEXT,
-            **_alert_fields(values, cameras),
-            vol.Required(CONF_PEST, default=values.get(CONF_PEST, False)): BOOL,
-            vol.Required(CONF_IN_SUMMARY, default=values.get(CONF_IN_SUMMARY, True)): BOOL,
-        }
-    )
-
-
-def _species_data(user_input: Mapping[str, Any], slug: str) -> dict[str, Any]:
-    return {
-        CONF_NAME: user_input[CONF_NAME].strip(),
-        CONF_SLUG: slug,
-        CONF_DESCRIPTION: (user_input.get(CONF_DESCRIPTION) or "").strip(),
-        **_alert_data(user_input),
-        CONF_PEST: bool(user_input.get(CONF_PEST)),
-        CONF_IN_SUMMARY: user_input.get(CONF_IN_SUMMARY, True),
-    }
-
-
-class SpeciesSubentryFlow(ConfigSubentryFlow):
-    """Wildlife told apart by kind only, with its own alert and scare-off settings."""
-
-    def _taken(self, exclude: str | None = None) -> set[str]:
-        entry = self._get_entry()
-        return {
-            s.data[CONF_NAME].lower()
-            for s in entry.subentries.values()
-            if s.subentry_type in (SUBENTRY_SPECIES, SUBENTRY_ANIMAL) and s.subentry_id != exclude
-        }
-
-    def _check(self, user_input: Mapping[str, Any], exclude: str | None = None) -> dict[str, str]:
-        name = (user_input.get(CONF_NAME) or "").strip()
-        if not name or not slugify(name):
-            return {CONF_NAME: "name_required"}
-        if name.lower() in self._taken(exclude):
-            return {CONF_NAME: "name_taken"}
-        if logic.is_unknown(name) or name.lower() in ("none", "nothing") or "|" in name:
-            return {CONF_NAME: "name_reserved"}
-        return {}
-
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            errors = self._check(user_input)
-            if not errors:
-                name = user_input[CONF_NAME].strip()
-                return self.async_create_entry(
-                    title=name, data=_species_data(user_input, slugify(name)), unique_id=f"species_{name.lower()}"
-                )
-        return self.async_show_form(
-            step_id="user",
-            data_schema=_species_schema(user_input or {}, _camera_options(self._get_entry())),
-            errors=errors,
-        )
-
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry()
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            errors = self._check(user_input, subentry.subentry_id)
-            if not errors:
-                data = _species_data(user_input, subentry.data[CONF_SLUG])
-                return self.async_update_and_abort(
-                    self._get_entry(), subentry, title=data[CONF_NAME], data=data,
-                    unique_id=f"species_{data[CONF_NAME].lower()}",
-                )
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=_species_schema(user_input or subentry.data, _camera_options(self._get_entry())),
-            errors=errors,
-        )
-
-
-# --- Add person (alerts) -------------------------------------------------------------------------
+# --- people (alerts) -------------------------------------------------------------------------
 
 
 def _notify_services(hass: HomeAssistant) -> list[str]:
@@ -1125,35 +1042,3 @@ def _recipient_data(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_CRITICAL_SOUND: (user_input.get(CONF_CRITICAL_SOUND) or "default").strip(),
         CONF_CRITICAL_VOLUME: user_input.get(CONF_CRITICAL_VOLUME, 0.7),
     }
-
-
-class RecipientSubentryFlow(ConfigSubentryFlow):
-    """Someone who gets the alerts."""
-
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            data = _recipient_data(user_input)
-            if not data[CONF_NAME]:
-                errors[CONF_NAME] = "name_required"
-            else:
-                return self.async_create_entry(title=data[CONF_NAME], data=data)
-        return self.async_show_form(
-            step_id="user",
-            data_schema=_recipient_schema(self.hass, user_input or {}, _subjects(self._get_entry())),
-            errors=errors,
-        )
-
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> SubentryFlowResult:
-        subentry = self._get_reconfigure_subentry()
-        if user_input is not None:
-            data = _recipient_data(user_input)
-            return self.async_update_and_abort(
-                self._get_entry(), subentry, title=data[CONF_NAME] or subentry.title, data=data
-            )
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=_recipient_schema(self.hass, subentry.data, _subjects(self._get_entry())),
-        )

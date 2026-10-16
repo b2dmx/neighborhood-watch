@@ -61,15 +61,14 @@ Onboarding walks through:
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
 6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Skip this step if you only care about pests.
 
-Afterwards, the integration page has Add buttons for cameras, animals and people. Each also gets its own page, where you can edit or delete it:
+Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one:
 
-- **Add camera**. Besides its sensors and cooldowns, a camera has:
+- **Cameras**. Besides its sensors and cooldowns, a camera has:
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
 - **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
-- **Add wildlife rules** (optional, rarely needed): gives one wildlife kind rules of its own instead of the shared Pests / Other wildlife ones, with its own device and switches.
-- **Add person**: someone who gets alerts. Each has these settings:
+- **People**: someone who gets alerts. Each has these settings:
   - their phone, and their critical sound and volume;
   - **Don't notify me about**: animals this person never hears about;
   - **quiet zones** (like work) and **quiet hours**, and what happens there: critical alerts arrive as normal ones, or no alerts at all;
@@ -81,7 +80,7 @@ Afterwards, the integration page has Add buttons for cameras, animals and people
 
 | Page | Settings (defaults) |
 |---|---|
-| Mode | Live; shadow (reuse another system's answers); shadow (independent, no paid models) |
+| Cameras / People | Pick one to change or remove, or add one |
 | Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
 | Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | AI models | First look, second opinion, paid models; optional hours for the main model |
@@ -143,7 +142,6 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 | Night summary | Each animal's sightings last night, with places; low-confidence wildlife counts as possible, e.g. "Raccoon — 3 sightings (1 confirmed, 2 possible)"; full detail in attributes |
 | Last sighting | The latest result from any camera |
 | AI calls today | Calls per model today (quota day, midnight Pacific), answers, errors and the last error |
-| Shadow mismatches | In shadow mode: tonight's disagreements with the live system; recent comparisons in attributes |
 
 ## The sighting event
 
@@ -262,15 +260,6 @@ columns: 3
 | `neighborhood_watch.mark_wrong` | "That wasn't Pepper": removes the latest counted sighting of an animal from tracking |
 | `neighborhood_watch.set_reference_photo` | Uses an animal's last photo, or a fresh snapshot, as its reference photo |
 | `neighborhood_watch.build_summary` | Builds the night summary now and starts a new night |
-
-## Shadow mode
-
-Run the integration beside an existing setup before switching over:
-
-- **Shadow, reuse answers** re-runs the rules on the existing system's own sighting events. It makes no AI calls of its own.
-- **Shadow, independent** checks the cameras itself without paid models, to test snapshots and the fallback chain.
-
-Neither fires the sighting event, so nothing alerts or feeds. **Shadow mismatches** lists every disagreement. Alerts are not sent in shadow mode.
 
 ## Privacy
 

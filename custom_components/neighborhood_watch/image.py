@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import WatchConfigEntry
-from .engine import AnimalConfig, CameraConfig, SpeciesConfig, WatchEngine, _dt, _read
+from .engine import AnimalConfig, CameraConfig, WatchEngine, _dt, _read
 from .entity import WatchEntity
 
 
@@ -20,14 +20,12 @@ async def async_setup_entry(
 ) -> None:
     watch = entry.runtime_data
     for cam in watch.cameras.values():
-        async_add_entities([CameraFrame(watch, cam)], config_subentry_id=cam.subentry_id)
+        async_add_entities([CameraFrame(watch, cam)])
     for animal in watch.animals.values():
         async_add_entities(
             [AnimalPhoto(watch, animal), ReferencePhoto(watch, animal)],
             config_subentry_id=animal.subentry_id,
         )
-    for kind in watch.species.values():
-        async_add_entities([AnimalPhoto(watch, kind)], config_subentry_id=kind.subentry_id)
 
 
 class _Image(WatchEntity, ImageEntity):
@@ -63,7 +61,7 @@ class CameraFrame(_Image):
 
 
 class AnimalPhoto(_Image):
-    def __init__(self, watch: WatchEngine, animal: AnimalConfig | SpeciesConfig) -> None:
+    def __init__(self, watch: WatchEngine, animal: AnimalConfig) -> None:
         super().__init__(watch, "last_photo", animal=animal)
 
     def _updated_at(self) -> datetime | None:

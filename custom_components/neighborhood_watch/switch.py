@@ -1,7 +1,7 @@
 """Quick on/off switches, all starting off except Alerts.
 
-Each animal and wildlife kind: Alerts, Critical alerts (rings through silent mode at its
-critical cameras), and Missing mode for named animals. Each camera: Critical alerts
+Each named animal: Alerts, Critical alerts (rings through silent mode at its
+critical cameras) and Missing mode. Each camera: Critical alerts
 (anything there rings, except the animals its page lists). The hub: Critical alerts for
 unknown animals, other wildlife and unsure motion, and one per person: gets critical alerts
 (starts on)."""
@@ -25,27 +25,19 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     watch = entry.runtime_data
-    for subject in [*watch.animals.values(), *watch.species.values()]:
+    for subject in watch.animals.values():
         entities: list[SwitchEntity] = [
             Alerts(watch, "alerts", animal=subject),
             CriticalAlerts(watch, "critical_alerts", animal=subject),
+            MissingMode(watch, "missing_mode", animal=subject),
         ]
-        if subject.kind == "animal":
-            entities.append(MissingMode(watch, "missing_mode", animal=subject))
         async_add_entities(entities, config_subentry_id=subject.subentry_id)
     for cam in watch.cameras.values():
-        async_add_entities(
-            [CriticalAlerts(watch, "critical_alerts", camera=cam)],
-            config_subentry_id=cam.subentry_id,
-        )
+        async_add_entities([CriticalAlerts(watch, "critical_alerts", camera=cam)])
     # The catch-alls (unknown animals, other wildlife, unsure motion) live on the hub.
     async_add_entities([CatchAllCritical(watch, f"{key}_critical") for key in BUILTIN_KEYS.values()])
     for person in watch.recipients:
-        switch = PersonCritical(watch, person)
-        if switch.device_entry is not None:  # on their phone: listed under their page
-            async_add_entities([switch], config_subentry_id=person.subentry_id)
-        else:  # on the hub, which belongs to no single page
-            async_add_entities([switch])
+        async_add_entities([PersonCritical(watch, person)])  # on their phone, else the hub
 
 
 class MissingMode(WatchEntity, SwitchEntity):

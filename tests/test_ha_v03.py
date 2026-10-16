@@ -145,39 +145,52 @@ def _jpeg() -> bytes:
     return buffer.getvalue()
 
 
+def kinds(hass):
+    """Wildlife tracked on the hub: {kind: {where, tonight, week, pest, ...}}."""
+    return state(hass, "sensor.neighborhood_watch_wildlife").attributes["kinds"]
+
+
+def camera_options(entry, name):
+    return next(d for d in entry.options["cameras"].values() if d["name"] == name)
+
+
 def state(hass, entity_id):
     s = hass.states.get(entity_id)
     assert s is not None, f"{entity_id} missing"
     return s
 
 
-async def test_wildlife_is_tracked_with_its_own_entities(hass, watch):
+async def test_wildlife_is_tracked_on_the_hub(hass, watch):
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")
-    assert state(hass, "sensor.raccoon_location").state == "Yard"
-    assert state(hass, "binary_sensor.raccoon_on_camera").state == "on"
-    assert state(hass, "sensor.raccoon_sightings_tonight").state == "1"
-    assert state(hass, "image.raccoon_last_photo").state != "unknown"
-    assert state(hass, "switch.raccoon_critical_alerts").state == "off"
+    raccoon = kinds(hass)["Raccoon"]
+    assert (raccoon["where"], raccoon["tonight"], raccoon["pest"]) == ("Yard", 1, True)
+    pest = state(hass, "binary_sensor.neighborhood_watch_pest_on_camera")
+    assert (pest.state, pest.attributes["animal"], pest.attributes["camera"]) == ("on", "Raccoon", "Yard")
+    assert state(hass, "switch.neighborhood_watch_pests_critical_alerts").state == "off"
+    assert hass.states.get("sensor.raccoon_location") is None  # no device per wild animal
     assert state(hass, "switch.garage_critical_alerts").state == "off"
     (event,) = watch["events"]
     assert event.data["sighting_id"]
 
 
 async def test_older_setup_is_moved_to_alert_at(hass, watch):
-    """0.6 settings (house cameras, alert scopes, critical switches) become the 0.7 rules."""
+    """0.6 settings become today's: house cameras and alert scopes → Alert at, cameras and
+    people → Configure, wildlife pages → the pest list."""
     entry = watch["entry"]
-    assert entry.minor_version == 2
-    data = {s.title: s.data for s in entry.subentries.values()}
-    assert data["Garage"]["critical_except"] == ["luna"] and "house" not in data["Garage"]
-    assert data["Yard"]["critical_except"] == ["luna"]
-    assert (data["Raccoon"]["alert_at"], data["Raccoon"]["critical_at"]) == (["*"], [])
-    assert (data["Opossum"]["alert_at"], data["Opossum"]["critical_at"]) == (["garage"], [])
-    assert data["Milo"]["alert_at"] == ["*"] and data["Milo"]["critical_at"] == []
-    assert "alert_scope" not in data["Raccoon"]
+    assert entry.minor_version == 3
+    assert sorted(s.subentry_type for s in entry.subentries.values()) == ["animal", "animal"]
     opts = entry.options
+    garage, yard = camera_options(entry, "Garage"), camera_options(entry, "Yard")
+    assert garage["critical_except"] == ["luna"] and "house" not in garage
+    assert yard["critical_except"] == ["luna"]
+    assert sorted(p["name"] for p in opts["people"].values()) == ["Ann", "Bo"]
+    assert opts["pests"] == ["Raccoon"]  # the opossum wasn't a pest: it's other wildlife now
+    milo = next(s.data for s in entry.subentries.values() if s.title == "Milo")
+    assert milo["alert_at"] == ["*"] and milo["critical_at"] == []
     assert opts["unknown_alert_at"] == ["*"] and "unknown_alerts" not in opts
     assert opts["other_alert_at"] == ["garage"] and opts["motion_alert_at"] == ["garage"]
+    assert "mode" not in opts
 
 
 async def test_alerts_reach_everyone_with_buttons(hass, watch):
@@ -194,7 +207,7 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
 
 
 async def test_critical_switch_but_quiet_zone_mutes_it(hass, watch):
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.raccoon_critical_alerts"}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.neighborhood_watch_pests_critical_alerts"}, blocking=True)
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")
     by = {m["to"]: m["data"]["push"] for m in watch["sent"]}
@@ -286,8 +299,8 @@ async def test_correct_service_wrong_and_nothing(hass, watch):
         DOMAIN, "correct", {"answer": "nothing", "camera": "Yard"}, blocking=True, return_response=True
     )
     assert result["was"] == "Raccoon"
-    assert state(hass, "sensor.raccoon_location").state == "Not seen"
-    assert state(hass, "binary_sensor.raccoon_on_camera").state == "off"
+    assert "Raccoon" not in kinds(hass)
+    assert state(hass, "binary_sensor.neighborhood_watch_pest_on_camera").state == "off"
 
 
 async def test_correct_accepts_any_animal_name(hass, watch):
@@ -307,12 +320,12 @@ async def test_night_summary_counts_wildlife(hass, watch):
 async def test_wildlife_names_and_notes_reach_the_prompt(hass, watch):
     w = watch["watch"]
     prompt, _ = w._prompt(w.cameras["yard"])
-    assert "Listed wildlife (name these by kind): Raccoon, Opossum, Squirrel" in prompt
+    assert "Listed wildlife (name these by kind): Raccoon, Squirrel, Chipmunk, Opossum" in prompt  # pests first
 
 
 
 async def test_android_critical_fields_and_plain_notify(hass, watch):
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.raccoon_critical_alerts"}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.neighborhood_watch_pests_critical_alerts"}, blocking=True)
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")
     bo = next(m for m in watch["sent"] if m["to"] == "bo")
@@ -321,8 +334,8 @@ async def test_android_critical_fields_and_plain_notify(hass, watch):
 
 async def test_timed_checks_for_cameras_without_sensors(hass, watch, freezer):
     entry = watch["entry"]
-    yard = next(s for s in entry.subentries.values() if s.title == "Yard")
-    hass.config_entries.async_update_subentry(entry, yard, data={**yard.data, "check_every": 5})
+    cameras = {cid: ({**d, "check_every": 5} if d["name"] == "Yard" else d) for cid, d in entry.options["cameras"].items()}
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "cameras": cameras})
     await hass.async_block_till_done()
     watch["ai"].say(FIRST, "None|high|na|na|")
     freezer.tick(timedelta(minutes=5, seconds=1))
@@ -359,7 +372,7 @@ async def test_review_queue_and_unsure(hass, watch, freezer):
     await hass.services.async_call(DOMAIN, "correct", {"answer": "unsure", "sighting_id": items[0]["id"]}, blocking=True, return_response=True)
     await hass.services.async_call(DOMAIN, "correct", {"answer": "right", "sighting_id": items[1]["id"]}, blocking=True, return_response=True)
     assert state(hass, "sensor.neighborhood_watch_to_review").state == "0"
-    assert state(hass, "sensor.raccoon_location").state == "Yard"  # unsure changes nothing
+    assert kinds(hass)["Raccoon"]["where"] == "Yard"  # unsure changes nothing
 
 
 async def test_frame_view_serves_the_saved_photo(hass, watch, hass_client):
@@ -461,7 +474,7 @@ async def test_bulk_scan_names_visits_and_writes_report(hass, watch, aioclient_m
     report_call = next(c for c in aioclient_mock.mock_calls if str(c[1]).endswith("/report"))
     assert report_call[2]["names"]["1"]["animal"] == "Raccoon"
     # Old footage never moves tracking, but the visits wait for review.
-    assert state(hass, "sensor.raccoon_location").state == "Not seen"
+    assert "Raccoon" not in kinds(hass)
     assert state(hass, "sensor.neighborhood_watch_to_review").state == "2"
     assert any(m["title"] == "Scan finished — trail" for m in watch["sent"])
 
@@ -488,7 +501,7 @@ async def test_correct_to_listed_wildlife_that_is_not_set_up(hass, watch):
     await trigger(hass, "yard")
     result = await hass.services.async_call(DOMAIN, "correct", {"answer": "squirrel"}, blocking=True, return_response=True)
     assert result["corrected"]["animal"] == "Squirrel" and result["was"] == "Raccoon"
-    assert state(hass, "sensor.raccoon_location").state in ("unknown", "Not seen")
+    assert "Raccoon" not in kinds(hass) and "Squirrel" in kinds(hass)
 
 
 async def test_camera_notes_reach_only_that_camera(hass, watch):
@@ -512,7 +525,7 @@ async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
     )
     await hass.async_block_till_done()
     data = {s.title: s.data for s in entry.subentries.values()}
-    assert data["Yard"]["ai_notes"] == "The dark shape by the fence is a bush."
+    assert camera_options(entry, "Yard")["ai_notes"] == "The dark shape by the fence is a bush."
     assert data["Milo"]["tips"].endswith("Looks very bright under strong infrared.")
     w = entry.runtime_data
     prompt, _ = w._prompt(w.cameras["yard"])

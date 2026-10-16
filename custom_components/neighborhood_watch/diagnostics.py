@@ -1,4 +1,4 @@
-"""Diagnostics: settings, the roster, recent sightings and shadow comparisons."""
+"""Diagnostics: settings, the roster and recent sightings."""
 from __future__ import annotations
 
 from typing import Any
@@ -29,7 +29,6 @@ async def async_get_config_entry_diagnostics(
     data = watch.data
     result.update(
         {
-            "mode": watch.mode,
             "strict_now": sorted(watch.strict_keys()),
             "references": sorted(watch.references),
             "animals": data.get("animals"),
@@ -39,7 +38,6 @@ async def async_get_config_entry_diagnostics(
             "summary": data.get("summary"),
             "last_summary_at": data.get("last_summary_at"),
             "sightings": data.get("sightings", [])[-200:],
-            "comparisons": data.get("comparisons", [])[-100:],
         }
     )
     return result

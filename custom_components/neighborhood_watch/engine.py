@@ -14,7 +14,6 @@ from functools import partial
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -60,14 +59,14 @@ from .const import (
     CONF_AI_NOTES,
     CONF_ALWAYS,
     CONF_INTERVAL,
-    CONF_IN_SUMMARY,
     CONF_MIN_CONFIDENCE,
     CONF_MISSING_ALERTS,
     CONF_MUTED,
     CONF_NOTIFY,
     CONF_PERSON,
-    CONF_PEST,
     CONF_PESTS,
+    CONF_CAMERAS,
+    CONF_PEOPLE,
     COMMON_WILDLIFE,
     CONF_QUIET_END,
     CONF_QUIET_MODE,
@@ -77,9 +76,6 @@ from .const import (
     QUIET_NONE,
     QUIET_NORMAL,
     VISIT_SLACK_MINUTES,
-    SUBENTRY_RECIPIENT,
-    SUBENTRY_SPECIES,
-    COMPARISON_MAX,
     CONF_ABSENT_DAYS,
     CONF_ADDED,
     CONF_ALWAYS_STRICT,
@@ -95,7 +91,6 @@ from .const import (
     CONF_KNOWN_LAST_SEEN,
     CONF_KNOWN_LOCATION,
     CONF_MISSING_COOLDOWN,
-    CONF_MODE,
     CONF_NAME,
     CONF_NIGHT_END,
     CONF_NIGHT_START,
@@ -120,9 +115,6 @@ from .const import (
     DOMAIN,
     EVENT_SIGHTING,
     MEDIA_SUBDIR,
-    MODE_LIVE,
-    MODE_SHADOW_INDEPENDENT,
-    MODE_SHADOW_REUSE,
     PHOTO_DIR,
     QUOTA_TZ,
     SIGHTING_DAYS,
@@ -130,7 +122,6 @@ from .const import (
     SNAPSHOT_TIMEOUT,
     STORAGE_VERSION,
     SUBENTRY_ANIMAL,
-    SUBENTRY_CAMERA,
     TASK_NAME,
     WWW_SUBDIR,
 )
@@ -138,12 +129,13 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
-PAIR_WINDOW = timedelta(minutes=3)
 
 
 def _is_busy(err: BaseException) -> bool:
     text = str(err).lower()
-    return "503" in text or "high demand" in text or "overloaded" in text  # a live check and ours count as the same sighting
+    return "503" in text or "high demand" in text or "overloaded" in text
+
+
 TICK = timedelta(seconds=30)
 
 
@@ -167,29 +159,6 @@ class CameraConfig:
     @property
     def switch_key(self) -> str:
         return f"camera:{self.slug}"
-
-
-@dataclass
-class SpeciesConfig:
-    """Wildlife told apart by kind only: a raccoon is a raccoon."""
-
-    subentry_id: str
-    name: str
-    slug: str
-    description: str
-    alert_at: frozenset[str] | str
-    critical_at: frozenset[str] | str
-    pest: bool
-    in_summary: bool
-    kind: str = "species"
-
-    @property
-    def key(self) -> str:
-        return self.name.lower()
-
-    @property
-    def switch_key(self) -> str:
-        return f"species:{self.slug}"
 
 
 @dataclass
@@ -260,7 +229,6 @@ class Check:
     models: str
     frame: bytes | None
     at: datetime
-    source: str = "own"  # own | reuse
     test: bool = False
     detector: dict[str, Any] | None = None
 
@@ -341,7 +309,6 @@ class WatchEngine:
         self.options: dict[str, Any] = {**DEFAULT_OPTIONS, **entry.options}
         self.cameras: dict[str, CameraConfig] = {}
         self.animals: dict[str, AnimalConfig] = {}  # by slug
-        self.species: dict[str, SpeciesConfig] = {}  # by slug
         self.recipients: list[RecipientConfig] = []
         self._deterring: dict[str, Callable[[], None]] = {}
         self.frames: dict[str, Frame] = {}
@@ -349,7 +316,6 @@ class WatchEngine:
         self.hub_device_id: str | None = None
         self._lock = asyncio.Lock()
         self._unsubs: list[Callable[[], None]] = []
-        self._pending_live: dict[str, dict[str, Any]] = {}
         self._trigger_map: dict[str, list[str]] = {}
         self.references: dict[str, datetime] = {}
         self._load_config()
@@ -361,84 +327,68 @@ class WatchEngine:
     # --- config ------------------------------------------------------------------
 
     def _load_config(self) -> None:
+        for cid, d in (self.options.get(CONF_CAMERAS) or {}).items():
+            slug = d.get(CONF_SLUG) or slugify(d[CONF_NAME])
+            self.cameras[slug] = CameraConfig(
+                subentry_id=cid,
+                name=d[CONF_NAME],
+                slug=slug,
+                camera=d[CONF_CAMERA],
+                triggers=list(d.get(CONF_TRIGGERS) or []),
+                skip_when=list(d.get(CONF_SKIP_WHEN) or []),
+                cooldown=logic.Cooldown(
+                    minutes=float(d.get(CONF_COOLDOWN, 3)),
+                    after_priority_minutes=float(d.get(CONF_PRIORITY_COOLDOWN, 0)),
+                    missing_mode_minutes=float(d.get(CONF_MISSING_COOLDOWN, 0)),
+                ),
+                reopened_by=list(d.get(CONF_REOPENED_BY) or []),
+                critical_except=frozenset(n.lower() for n in d.get(CONF_CRITICAL_EXCEPT) or []),
+                interval=float(d.get(CONF_INTERVAL) or 0),
+                ai_notes=(d.get(CONF_AI_NOTES) or "").strip(),
+                deter_lights=list(d.get(CONF_DETER_LIGHTS) or []),
+                deter_minutes=float(d.get(CONF_DETER_MINUTES, 2)),
+                deter_sound=d.get(CONF_DETER_SOUND) or None,
+            )
+        for pid, d in (self.options.get(CONF_PEOPLE) or {}).items():
+            self.recipients.append(
+                RecipientConfig(
+                    subentry_id=pid,
+                    name=d[CONF_NAME],
+                    person=d.get(CONF_PERSON) or None,
+                    notify=d[CONF_NOTIFY],
+                    quiet_zones=list(d.get(CONF_QUIET_ZONES) or []),
+                    missing_alerts=bool(d.get(CONF_MISSING_ALERTS)),
+                    sound=d.get(CONF_CRITICAL_SOUND) or "default",
+                    volume=float(d.get(CONF_CRITICAL_VOLUME, 0.7)),
+                    muted=frozenset(n.lower() for n in d.get(CONF_MUTED) or []),
+                    quiet_mode=d.get(CONF_QUIET_MODE) or QUIET_NORMAL,
+                    quiet_start=d.get(CONF_QUIET_START) or None,
+                    quiet_end=d.get(CONF_QUIET_END) or None,
+                )
+            )
         for subentry in self.entry.subentries.values():
+            if subentry.subentry_type != SUBENTRY_ANIMAL:
+                continue
             d = subentry.data
-            if subentry.subentry_type == SUBENTRY_CAMERA:
-                slug = d.get(CONF_SLUG) or slugify(subentry.title)
-                self.cameras[slug] = CameraConfig(
-                    subentry_id=subentry.subentry_id,
-                    name=d.get(CONF_NAME) or subentry.title,
-                    slug=slug,
-                    camera=d[CONF_CAMERA],
-                    triggers=list(d.get(CONF_TRIGGERS) or []),
-                    skip_when=list(d.get(CONF_SKIP_WHEN) or []),
-                    cooldown=logic.Cooldown(
-                        minutes=float(d.get(CONF_COOLDOWN, 3)),
-                        after_priority_minutes=float(d.get(CONF_PRIORITY_COOLDOWN, 0)),
-                        missing_mode_minutes=float(d.get(CONF_MISSING_COOLDOWN, 0)),
-                    ),
-                    reopened_by=list(d.get(CONF_REOPENED_BY) or []),
-                    critical_except=frozenset(n.lower() for n in d.get(CONF_CRITICAL_EXCEPT) or []),
-                    interval=float(d.get(CONF_INTERVAL) or 0),
-                    ai_notes=(d.get(CONF_AI_NOTES) or "").strip(),
-                    deter_lights=list(d.get(CONF_DETER_LIGHTS) or []),
-                    deter_minutes=float(d.get(CONF_DETER_MINUTES, 2)),
-                    deter_sound=d.get(CONF_DETER_SOUND) or None,
-                )
-            elif subentry.subentry_type == SUBENTRY_ANIMAL:
-                name = d.get(CONF_NAME) or subentry.title
-                slug = d.get(CONF_SLUG) or slugify(name)
-                self.animals[slug] = AnimalConfig(
-                    subentry_id=subentry.subentry_id,
-                    name=name,
-                    slug=slug,
-                    species=d.get(CONF_SPECIES, "cat"),
-                    description=d.get(CONF_DESCRIPTION, ""),
-                    tips=d.get(CONF_TIPS, ""),
-                    pattern=d.get(CONF_PATTERN, "na"),
-                    base=d.get(CONF_BASE, "na"),
-                    priority=bool(d.get(CONF_PRIORITY)),
-                    always_strict=bool(d.get(CONF_ALWAYS_STRICT)),
-                    added=_dt(d.get(CONF_ADDED)),
-                    known_last_seen=_local_dt(d.get(CONF_KNOWN_LAST_SEEN)),
-                    known_location=d.get(CONF_KNOWN_LOCATION),
-                    alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
-                    critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
-                )
-            elif subentry.subentry_type == SUBENTRY_SPECIES:
-                name = d.get(CONF_NAME) or subentry.title
-                slug = d.get(CONF_SLUG) or slugify(name)
-                self.species[slug] = SpeciesConfig(
-                    subentry_id=subentry.subentry_id,
-                    name=name,
-                    slug=slug,
-                    description=d.get(CONF_DESCRIPTION, ""),
-                    alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
-                    critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
-                    pest=bool(d.get(CONF_PEST)),
-                    in_summary=d.get(CONF_IN_SUMMARY, True),
-                )
-            elif subentry.subentry_type == SUBENTRY_RECIPIENT:
-                self.recipients.append(
-                    RecipientConfig(
-                        subentry_id=subentry.subentry_id,
-                        name=d.get(CONF_NAME) or subentry.title,
-                        person=d.get(CONF_PERSON) or None,
-                        notify=d[CONF_NOTIFY],
-                        quiet_zones=list(d.get(CONF_QUIET_ZONES) or []),
-                        missing_alerts=bool(d.get(CONF_MISSING_ALERTS)),
-                        sound=d.get(CONF_CRITICAL_SOUND) or "default",
-                        volume=float(d.get(CONF_CRITICAL_VOLUME, 0.7)),
-                        muted=frozenset(n.lower() for n in d.get(CONF_MUTED) or []),
-                        quiet_mode=d.get(CONF_QUIET_MODE) or QUIET_NORMAL,
-                        quiet_start=d.get(CONF_QUIET_START) or None,
-                        quiet_end=d.get(CONF_QUIET_END) or None,
-                    )
-                )
-
-    @property
-    def mode(self) -> str:
-        return self.options.get(CONF_MODE, MODE_LIVE)
+            name = d.get(CONF_NAME) or subentry.title
+            slug = d.get(CONF_SLUG) or slugify(name)
+            self.animals[slug] = AnimalConfig(
+                subentry_id=subentry.subentry_id,
+                name=name,
+                slug=slug,
+                species=d.get(CONF_SPECIES, "cat"),
+                description=d.get(CONF_DESCRIPTION, ""),
+                tips=d.get(CONF_TIPS, ""),
+                pattern=d.get(CONF_PATTERN, "na"),
+                base=d.get(CONF_BASE, "na"),
+                priority=bool(d.get(CONF_PRIORITY)),
+                always_strict=bool(d.get(CONF_ALWAYS_STRICT)),
+                added=_dt(d.get(CONF_ADDED)),
+                known_last_seen=_local_dt(d.get(CONF_KNOWN_LAST_SEEN)),
+                known_location=d.get(CONF_KNOWN_LOCATION),
+                alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
+                critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
+            )
 
     @property
     def rules(self) -> dict[str, logic.AnimalRule]:
@@ -448,35 +398,26 @@ class WatchEngine:
         key = name.strip().lower()
         return next((a for a in self.animals.values() if a.key == key or a.slug == key), None)
 
-    def species_by_name(self, name: str) -> SpeciesConfig | None:
-        key = name.strip().lower()
-        return next((s for s in self.species.values() if s.key == key or s.slug == key), None)
-
-    def subject(self, name: str) -> AnimalConfig | SpeciesConfig | None:
-        """A tracked animal: an individual or a wildlife kind."""
-        return self.animal_by_name(name) or self.species_by_name(name)
+    def subject(self, name: str) -> AnimalConfig | None:
+        """One of your named animals (wildlife is tracked by kind on the hub)."""
+        return self.animal_by_name(name)
 
     @property
     def wildlife(self) -> list[str]:
-        names = [s.name for s in self.species.values()]
-        extra = [*(self.options.get(CONF_PESTS) or []), *(self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE))]
-        for w in extra:
+        names: list[str] = []
+        for w in [*(self.options.get(CONF_PESTS) or []), *(self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE))]:
             if w.lower() not in {n.lower() for n in names}:
                 names.append(w)
         return names
 
     @property
     def pests(self) -> frozenset[str]:
-        """Lower-case wildlife kinds on the pest list (a wildlife page marked Pest counts too)."""
-        return frozenset(
-            [p.lower() for p in self.options.get(CONF_PESTS) or []]
-            + [s.key for s in self.species.values() if s.pest]
-        )
+        """Lower-case wildlife kinds on the pest list."""
+        return frozenset(p.lower() for p in self.options.get(CONF_PESTS) or [])
 
     def is_wildlife(self, name: str) -> bool:
-        """Any animal that isn't one of yours and has no wildlife page of its own."""
-        named = {a.key for a in self.animals.values()} | {s.key for s in self.species.values()}
-        return name != logic.NOTHING and logic.is_wildlife(name, named)
+        """Any animal that isn't one of yours."""
+        return name != logic.NOTHING and logic.is_wildlife(name, {a.key for a in self.animals.values()})
 
     def wildlife_now(self, pests_only: bool = False) -> dict[str, Any] | None:
         """The wildlife on camera right now (a sure sighting within the on-camera window)."""
@@ -500,7 +441,7 @@ class WatchEngine:
         return None
 
     def wildlife_seen(self, now: datetime | None = None) -> dict[str, dict[str, Any]]:
-        """Every wildlife kind seen (last 30 days), tracked without a page of its own."""
+        """Every wildlife kind seen (last 30 days)."""
         now = now or dt_util.utcnow()
         night = self.night_start()
         week = now - timedelta(days=7)
@@ -564,9 +505,8 @@ class WatchEngine:
     def reference_media_id(self, animal: AnimalConfig) -> str:
         return f"media-source://media_source/{self._media_key}/{MEDIA_SUBDIR}/reference/{animal.slug}.jpg"
 
-    def photo_path(self, animal: AnimalConfig | SpeciesConfig) -> Path:
-        folder = "species" if animal.kind == "species" else "photos"
-        return self._photo_root / folder / f"{animal.slug}.jpg"
+    def photo_path(self, animal: AnimalConfig) -> Path:
+        return self._photo_root / "photos" / f"{animal.slug}.jpg"
 
     @property
     def dataset_root(self) -> Path:
@@ -600,9 +540,8 @@ class WatchEngine:
 
     # --- state helpers ----------------------------------------------------------------
 
-    def animal_state(self, animal: AnimalConfig | SpeciesConfig) -> dict[str, Any]:
-        bucket = "species" if animal.kind == "species" else "animals"
-        return self.data.setdefault(bucket, {}).setdefault(animal.slug, {})
+    def animal_state(self, animal: AnimalConfig) -> dict[str, Any]:
+        return self.data.setdefault("animals", {}).setdefault(animal.slug, {})
 
     def camera_state(self, slug: str) -> dict[str, Any]:
         return self.data.setdefault("cameras", {}).setdefault(slug, {})
@@ -618,11 +557,11 @@ class WatchEngine:
         self._save()
         self._notify()
 
-    def last_seen(self, animal: AnimalConfig | SpeciesConfig) -> datetime | None:
+    def last_seen(self, animal: AnimalConfig) -> datetime | None:
         return _dt(self.animal_state(animal).get("last_seen"))
 
     def is_absent(self, animal: AnimalConfig, now: datetime | None = None) -> bool:
-        if animal.kind == "species" or animal.priority:
+        if animal.priority:
             return False
         return logic.recently_absent(
             self.last_seen(animal),
@@ -645,7 +584,7 @@ class WatchEngine:
         return self.data.setdefault("sightings", [])
 
     def counted_sightings(
-        self, animal: AnimalConfig | SpeciesConfig, since: datetime | None = None
+        self, animal: AnimalConfig, since: datetime | None = None
     ) -> list[dict]:
         return [
             s
@@ -667,9 +606,9 @@ class WatchEngine:
         self.data.setdefault("cameras", {})
         self.data.setdefault("sightings", [])
         self.data.setdefault("missing", {})
-        self.data.setdefault("comparisons", [])
         self.data.setdefault("ai", {"day": None, "models": {}})
-        self.data.setdefault("species", {})
+        for old in ("comparisons", "species"):  # before 0.12: shadow mode and wildlife pages
+            self.data.pop(old, None)
         self.data.setdefault("critical", {})
         self.data.setdefault("alerts", {})
         for row in self.sightings():
@@ -697,7 +636,6 @@ class WatchEngine:
             self._unsubs.append(
                 async_track_state_change_event(self.hass, list(trigger_map), self._on_trigger)
             )
-        self._unsubs.append(self.hass.bus.async_listen(EVENT_SIGHTING, self._on_live_event))
         # Cameras without (or besides) a motion sensor: a check every N minutes.
         for cam in self.cameras.values():
             if cam.interval > 0:
@@ -784,7 +722,7 @@ class WatchEngine:
 
     @callback
     def _queue_check(self, slug: str) -> None:
-        if self.mode == MODE_SHADOW_REUSE or not self.is_night():
+        if not self.is_night():
             return
         if slug not in self._queued:
             self._queued.add(slug)
@@ -851,11 +789,10 @@ class WatchEngine:
                 self._notify()
                 return None
             self.frames[slug] = Frame(image.content, now)
-            if self.mode == MODE_LIVE:
-                try:
-                    await self.hass.async_add_executor_job(_write, self.www_path(slug), image.content)
-                except OSError as err:
-                    _LOGGER.warning("%s: notification picture not saved: %s", cam.name, err)
+            try:
+                await self.hass.async_add_executor_job(_write, self.www_path(slug), image.content)
+            except OSError as err:
+                _LOGGER.warning("%s: notification picture not saved: %s", cam.name, err)
 
             detector = await self._detect(image.content)
             skip = (
@@ -871,7 +808,6 @@ class WatchEngine:
                 verdict, models = await self._identify(cam)
             check = Check(cam, verdict, models, image.content, now, detector=detector)
             await self._record(check)
-            self._pair_with_live(cam.slug)
             return self._result(check)
 
     async def _detect(self, frame: bytes) -> dict[str, Any] | None:
@@ -972,9 +908,7 @@ class WatchEngine:
                     f"{name}: {COMMON_WILDLIFE[name][2]}"
                     for name in COMMON_WILDLIFE
                     if name.lower() in self.pests and COMMON_WILDLIFE[name][2]
-                    and name.lower() not in {s.key for s in self.species.values()}
                 ]
-                + [f"{s.name}: {s.description}" for s in self.species.values() if s.description]
             ).strip(),
             references=references,
         )
@@ -989,7 +923,7 @@ class WatchEngine:
 
     def _chain(self, key: str, free_only: bool = False) -> list[str]:
         chain = list(self.options.get(key) or [])
-        if free_only or self.mode == MODE_SHADOW_INDEPENDENT:
+        if free_only:
             paid = set(self.options.get(CONF_PAID) or [])
             chain = [m for m in chain if m not in paid]
         return chain
@@ -1117,7 +1051,6 @@ class WatchEngine:
             "second_opinion_said": v.second_opinion_said,
             "models_used": check.models,
             "time": _iso(now),
-            "source": check.source,
             "detector": check.detector,
         }
         if check.detector is not None and not check.models.startswith("Local detector"):
@@ -1132,7 +1065,7 @@ class WatchEngine:
         day = dt_util.as_local(now).date().isoformat()
         cam_state["last"]["id"] = sid
         self.data["last_sighting"] = {"camera": cam.name, **cam_state["last"]}
-        kind = self.species_by_name(v.animal)
+        wild = self.is_wildlife(v.animal)
         self.sightings().append(
             {
                 "id": sid,
@@ -1144,9 +1077,8 @@ class WatchEngine:
                 "confidence": v.confidence,
                 "counted": counted,
                 "log": logic.is_cat_for_log(v, rules)
-                or bool(kind and kind.in_summary)
-                or (not kind and self.is_wildlife(v.animal) and v.animal.lower() not in logic.HARMLESS),
-                "possible": (bool(kind) or self.is_wildlife(v.animal)) and v.confidence == logic.LOW,
+                or (wild and v.animal.lower() not in logic.HARMLESS),
+                "possible": wild and v.confidence == logic.LOW,
             }
         )
         self._prune(now)
@@ -1169,21 +1101,6 @@ class WatchEngine:
                 )
             except Exception as err:  # noqa: BLE001 - training data is best-effort
                 _LOGGER.debug("Training sample not saved: %s", err)
-
-        if kind and counted:
-            state = self.animal_state(kind)
-            state["last_seen"] = _iso(now)
-            state["location"] = cam.name
-            state["on_camera_until"] = _iso(until)
-            state["on_camera_where"] = cam.name
-            if check.frame:
-                try:
-                    await self.hass.async_add_executor_job(
-                        _rotate_and_write, self.photo_path(kind), check.frame
-                    )
-                    state["photo_at"] = _iso(now)
-                except OSError as err:
-                    _LOGGER.warning("Photo for %s not saved: %s", kind.name, err)
 
         animal = self.animal_by_name(v.animal)
         if animal and counted:
@@ -1208,7 +1125,7 @@ class WatchEngine:
 
         self._save()
         self._notify()
-        if self.mode == MODE_LIVE and check.source == "own":
+        if not check.test:
             data = self.event_data(cam, v, check.models, now)
             data["sighting_id"] = sid
             self.hass.bus.async_fire(EVENT_SIGHTING, data)
@@ -1244,96 +1161,6 @@ class WatchEngine:
         kept = [s for s in self.sightings() if (_dt(s.get("time")) or now) >= cutoff]
         self.data["sightings"] = kept[-SIGHTING_MAX:]
 
-    # --- shadow mode --------------------------------------------------------------------------
-
-    @callback
-    def _on_live_event(self, event: Event) -> None:
-        data = event.data
-        if data.get("source") == DOMAIN or data.get("test") == "yes" or self.mode == MODE_LIVE:
-            return
-        if self.mode == MODE_SHADOW_REUSE:
-            self.hass.async_create_task(self._reuse_live(dict(data)))
-        else:
-            slug = str(data.get("location", ""))
-            self._pending_live[slug] = {**data, "_at": dt_util.utcnow()}
-            self._pair_with_live(slug)
-
-    async def _reuse_live(self, data: dict[str, Any]) -> None:
-        """Re-run our rules on the live system's own AI answers (no extra AI calls)."""
-        async with self._lock:
-            now = dt_util.utcnow()
-            slug = str(data.get("location", ""))
-            cam = self.cameras.get(slug) or self.camera_by_ref(str(data.get("location_name", "")))
-            first = logic.tidy(str(data.get("first_look_said") or ""))
-            second = logic.tidy(str(data.get("second_opinion_said") or ""))
-            verdict = logic.decide(first, second, self.rules, self.strict_keys(now))
-            self._compare("reuse", slug, data, verdict, now)
-            if cam is None:
-                self._save()
-                self._notify()
-                return
-            frame = await self.hass.async_add_executor_job(self._read_live_picture, data.get("image"))
-            if frame:
-                self.frames[cam.slug] = Frame(frame, now)
-            self.camera_state(cam.slug)["last_check"] = _iso(now)
-            await self._record(Check(cam, verdict, str(data.get("models_used") or ""), frame, now, "reuse"))
-
-    def _read_live_picture(self, url: Any) -> bytes | None:
-        """The live event's picture, when it is a /local/ file of this install."""
-        path = urlparse(str(url or "")).path
-        if not path.startswith("/local/"):
-            return None
-        www = Path(self.hass.config.path("www")).resolve()
-        target = (www / path.removeprefix("/local/")).resolve()
-        if www not in target.parents:
-            return None
-        return _read(target)
-
-    def _pair_with_live(self, slug: str) -> None:
-        """Independent shadow: compare our check with the live one at the same camera."""
-        live = self._pending_live.get(slug)
-        if live is None or self.mode != MODE_SHADOW_INDEPENDENT:
-            return
-        now = dt_util.utcnow()
-        if now - live["_at"] > PAIR_WINDOW:
-            self._pending_live.pop(slug, None)
-            self._compare("independent", slug, live, None, now)
-            return
-        ours = self.camera_state(slug).get("last") or {}
-        ours_at = _dt(ours.get("time"))
-        if ours_at is None or abs(ours_at - live["_at"]) > PAIR_WINDOW or ours.get("animal") is None:
-            return  # wait for our check (or it never comes; the next event reports it)
-        self._pending_live.pop(slug, None)
-        verdict = logic.Verdict(
-            ours["animal"], ours["confidence"], ours.get("pattern", "na"), "", "", "", ""
-        )
-        self._compare("independent", slug, live, verdict, now)
-
-    def _compare(
-        self,
-        kind: str,
-        slug: str,
-        live: dict[str, Any],
-        ours: logic.Verdict | None,
-        now: datetime,
-    ) -> None:
-        live_animal, live_conf = str(live.get("animal", "")), str(live.get("confidence", ""))
-        record = {
-            "time": _iso(now),
-            "kind": kind,
-            "camera": live.get("location_name") or slug,
-            "live": f"{live_animal} / {live_conf}",
-            "ours": f"{ours.animal} / {ours.confidence}" if ours else "no check of our own",
-            "match": bool(ours and ours.animal == live_animal and ours.confidence == live_conf),
-        }
-        comparisons = self.data.setdefault("comparisons", [])
-        comparisons.append(record)
-        del comparisons[:-COMPARISON_MAX]
-        if not record["match"]:
-            _LOGGER.info("Shadow mismatch at %s: live %s, ours %s", record["camera"], record["live"], record["ours"])
-        self._save()
-        self._notify()
-
     # --- timers -------------------------------------------------------------------------------
 
     @callback
@@ -1349,9 +1176,6 @@ class WatchEngine:
                 if state.get(key) and not self.until_active(state.get(key), now):
                     state[key] = None
                     changed = True
-        for slug, live in list(self._pending_live.items()):
-            if now - live["_at"] > PAIR_WINDOW:
-                self._pair_with_live(slug)
         if changed:
             self._save()
         # Absent status and "tonight" can change with the clock alone.
@@ -1370,9 +1194,7 @@ class WatchEngine:
             for s in self.sightings()
             if s.get("log") and not s.get("wrong") and (since is None or (_dt(s.get("time")) or now) > since)
         ]
-        order = [a.name for a in self.animals.values()] + [
-            s.name for s in self.species.values() if s.in_summary
-        ]
+        order = [a.name for a in self.animals.values()]
         order += [n for n in dict.fromkeys(e[0] for e in entries) if n not in order and self.is_wildlife(n)]
         summary = logic.summarize(entries, order)
         if self.options.get(CONF_DATASET, True):
@@ -1455,7 +1277,7 @@ class WatchEngine:
             row["user"] = "right"
             if old and not row.get("counted"):
                 row["counted"] = True
-                row["log"] = old.kind == "animal" or old.in_summary
+                row["log"] = True
                 await self._recompute(old, row)
         elif answer.lower() == "wrong":
             row["label"] = f"not:{before}"
@@ -1478,9 +1300,9 @@ class WatchEngine:
             row.update(animal=name, label=name, user="corrected", counted=True, wrong=False)
             row["confidence"] = "confirmed"
             row["log"] = bool(
-                (new and new.kind == "animal")
+                new
                 or logic.is_unknown(name)
-                or (new and new.kind == "species" and new.in_summary)
+                or (self.is_wildlife(name) and name.lower() not in logic.HARMLESS)
             )
             if old and old is not new:
                 await self._recompute(old, row, removed=True)
@@ -1495,7 +1317,7 @@ class WatchEngine:
         return {"corrected": {k: row.get(k) for k in ("id", "time", "where", "animal", "label")}, "was": before}
 
     async def _recompute(
-        self, subject: AnimalConfig | SpeciesConfig, row: dict[str, Any], removed: bool = False
+        self, subject: AnimalConfig, row: dict[str, Any], removed: bool = False
     ) -> None:
         """Rebuild last seen / location / photo after a sighting was removed or added."""
         state = self.animal_state(subject)
@@ -1507,7 +1329,7 @@ class WatchEngine:
         if known and (latest is None or known > (_dt(latest["time"]) or known)):
             state["last_seen"] = _iso(known)
             state["location"] = getattr(subject, "known_location", None)
-        if subject.kind == "animal" and subject.priority:
+        if subject.priority:
             sure = [s for s in rows if s.get("confidence") in (logic.HIGH, "confirmed")]
             state["last_confirmed"] = sure[-1]["time"] if sure else state.get("last_confirmed") if not removed else None
             if sure:
@@ -1554,19 +1376,9 @@ class WatchEngine:
         )
 
     def alert_rules(self) -> dict[str, logic.AlertRule]:
-        """Each named animal and wildlife kind, with its switches applied."""
+        """Each named animal, with its switches applied."""
         floor = self.options.get(CONF_MIN_CONFIDENCE, logic.MEDIUM)
         rules: dict[str, logic.AlertRule] = {}
-        for s in self.species.values():
-            rules[s.key] = logic.AlertRule(
-                s.name,
-                alert_at=s.alert_at,
-                min_confidence=floor,
-                critical_at=s.critical_at or s.alert_at,  # empty: wherever it alerts
-                alerts_on=self.alerts_on(s.switch_key),
-                critical_on=self.critical_on(s.switch_key),
-                repeat_every=s.pest,  # a pest that was scared off and came back: tell again
-            )
         for a in self.animals.values():
             rules[a.key] = logic.AlertRule(
                 a.name,
@@ -1643,7 +1455,7 @@ class WatchEngine:
                     continue
                 if alert.audience == logic.AUDIENCE_NOT_MISSING and person.missing_alerts:
                     continue
-                if alert.kind != "missing" and alert.subject.lower() in person.muted:
+                if alert.kind != "missing" and {alert.subject.lower(), v.animal.lower()} & person.muted:
                     continue
                 await self._send(person, alert, image, actions)
         return alerts
@@ -1932,23 +1744,27 @@ class WatchEngine:
         return "ok"
 
     def add_note(self, note: str, camera: CameraConfig | None = None, animal: str | None = None) -> str:
-        """Add a note for the AI where it belongs: a camera's view notes, an animal's
-        identification tips or a wildlife kind's description. Returns where it went."""
+        """Add a note for the AI where it belongs: a camera's view notes or an animal's
+        identification tips. Returns where it went."""
         note = note.strip()
         if camera is not None:
-            owner, key, where = camera.subentry_id, CONF_AI_NOTES, camera.name
-        else:
-            subject = self.subject(animal or "")
-            if subject is None:
-                raise ValueError(f"unknown animal {animal}")
-            owner, where = subject.subentry_id, subject.name
-            key = CONF_TIPS if subject.kind == "animal" else CONF_DESCRIPTION
-        subentry = self.entry.subentries[owner]
-        old = (subentry.data.get(key) or "").strip()
+            cameras = dict(self.entry.options.get(CONF_CAMERAS) or {})
+            data = dict(cameras[camera.subentry_id])
+            data[CONF_AI_NOTES] = f"{(data.get(CONF_AI_NOTES) or '').strip()} {note}".strip()
+            cameras[camera.subentry_id] = data
+            self.hass.config_entries.async_update_entry(
+                self.entry, options={**self.entry.options, CONF_CAMERAS: cameras}
+            )
+            return camera.name
+        subject = self.subject(animal or "")
+        if subject is None:
+            raise ValueError(f"unknown animal {animal}")
+        subentry = self.entry.subentries[subject.subentry_id]
+        old = (subentry.data.get(CONF_TIPS) or "").strip()
         self.hass.config_entries.async_update_subentry(
-            self.entry, subentry, data={**subentry.data, key: f"{old} {note}".strip()}
+            self.entry, subentry, data={**subentry.data, CONF_TIPS: f"{old} {note}".strip()}
         )
-        return where
+        return subject.name
 
     def test_event(self, cam: CameraConfig, animal: str, confidence: str, candidate: str) -> dict[str, Any]:
         now = dt_util.utcnow()

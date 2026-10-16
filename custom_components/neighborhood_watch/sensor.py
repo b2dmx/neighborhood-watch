@@ -1,4 +1,4 @@
-"""Sensors: the night summary, AI health, shadow comparison, cameras and animals."""
+"""Sensors: the night summary, AI health, wildlife, cameras and animals."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -10,7 +10,6 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import WatchConfigEntry
-from .const import CONF_MODE, MODE_LIVE
 from .engine import WatchEngine, _dt
 from .entity import WatchEntity
 
@@ -28,7 +27,6 @@ async def async_setup_entry(
             NightSummary(watch),
             LastSighting(watch),
             AiCalls(watch),
-            ShadowMismatches(watch),
             ToReview(watch),
             DetectorAgreement(watch),
             LastScan(watch),
@@ -38,7 +36,6 @@ async def async_setup_entry(
     for cam in watch.cameras.values():
         async_add_entities(
             [CameraAnimal(watch, "current_animal", camera=cam), LastDetection(watch, "last_detection", camera=cam)],
-            config_subentry_id=cam.subentry_id,
         )
     for animal in watch.animals.values():
         entities: list[SensorEntity] = [
@@ -50,16 +47,7 @@ async def async_setup_entry(
         if animal.priority:
             entities.append(LastConfirmed(watch, "last_confirmed", animal=animal))
         async_add_entities(entities, config_subentry_id=animal.subentry_id)
-    for kind in watch.species.values():
-        async_add_entities(
-            [
-                LastSeen(watch, "last_seen", animal=kind),
-                Location(watch, "location", animal=kind),
-                SightingsTonight(watch, "sightings_tonight", animal=kind),
-                SightingsWeek(watch, "sightings_week", animal=kind),
-            ],
-            config_subentry_id=kind.subentry_id,
-        )
+
 
 
 # --- hub ----------------------------------------------------------------------------
@@ -143,35 +131,6 @@ class AiCalls(WatchEntity, SensorEntity):
         return {"quota_day": ai.get("day"), "models": per_model, "last_models_used": ai.get("last_models")}
 
 
-class ShadowMismatches(WatchEntity, SensorEntity):
-    _attr_icon = "mdi:compare-horizontal"
-
-    def __init__(self, watch: WatchEngine) -> None:
-        super().__init__(watch, "shadow_mismatches")
-
-    def _tonight(self) -> list[dict[str, Any]]:
-        since = self.watch.night_start()
-        rows = self.watch.data.get("comparisons", [])
-        return [r for r in rows if since is None or (_dt(r.get("time")) or since) > since]
-
-    @property
-    def native_value(self) -> int:
-        return sum(1 for r in self._tonight() if not r.get("match"))
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        tonight = self._tonight()
-        return {
-            "mode": self.watch.options.get(CONF_MODE, MODE_LIVE),
-            "compared_tonight": len(tonight),
-            "matched_tonight": sum(1 for r in tonight if r.get("match")),
-            "recent": list(reversed(self.watch.data.get("comparisons", [])[-30:])),
-        }
-
-
-# --- cameras --------------------------------------------------------------------------
-
-
 class CameraAnimal(WatchEntity, SensorEntity):
     """What this camera is seeing now (clears itself after the on-camera window)."""
 
@@ -219,8 +178,6 @@ class LastSeen(WatchEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """How it looks, for the card's drawn icon when there's no photo yet."""
         a = self.animal
-        if getattr(a, "kind", "") != "animal":
-            return {}
         return {"pattern": a.pattern, "base": a.base, "looks": f"{a.description} {a.tips}"[:600]}
 
 

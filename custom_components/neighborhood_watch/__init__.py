@@ -250,6 +250,24 @@ async def async_migrate_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> b
         for sid, data in changed.items():
             hass.config_entries.async_update_subentry(entry, entry.subentries[sid], data=data)
         hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+    if entry.minor_version < 3:
+        from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+        from .migrate import options_from_subentries_v3  # noqa: PLC0415
+
+        options, gone = options_from_subentries_v3(
+            entry.options,
+            {sid: (s.subentry_type, s.data) for sid, s in entry.subentries.items()},
+        )
+        # Keep the cameras' and people's entities: untie them from the subentries first,
+        # or removing a subentry would remove them (and their entity ids) too.
+        registry = er.async_get(hass)
+        for ent in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if ent.config_subentry_id in gone:
+                registry.async_update_entity(ent.entity_id, config_subentry_id=None)
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=3)
+        for sid in gone:
+            hass.config_entries.async_remove_subentry(entry, sid)
     return True
 
 

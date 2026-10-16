@@ -423,48 +423,6 @@ async def test_set_reference_photo_from_last_photo(hass, setup):
 # --- shadow mode ------------------------------------------------------------------------------
 
 
-async def test_shadow_reuse_rescores_live_answers_without_ai_calls(hass, setup):
-    entry = setup["entry"]
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "mode": "shadow_reuse"})
-    await hass.async_block_till_done()
-    watch = entry.runtime_data
-    ai = setup["ai"]
-
-    await trigger(hass, "yard")  # shadow reuse never checks cameras itself
-    hass.bus.async_fire(
-        EVENT_SIGHTING,
-        {
-            "location": "yard",
-            "location_name": "Yard",
-            "animal": "Ziggy",
-            "confidence": "medium",
-            "first_look_said": "ziggy|medium|uniform|grey|",
-            "second_opinion_said": "Ziggy|medium|uniform|grey|",
-            "models_used": "live",
-            "image": "https://example/local/ai_yard.jpg?t=1",
-            "test": "no",
-        },
-    )
-    await hass.async_block_till_done()
-    assert ai.calls == []
-    (row,) = watch.data["comparisons"]
-    assert row["live"] == "Ziggy / medium"
-    assert row["ours"] == "Ziggy / low"  # Ziggy is recently absent: needs both at high
-    assert row["match"] is False
-    assert state(hass, "sensor.neighborhood_watch_shadow_mismatches").state == "1"
-    # No event of its own in shadow mode (only the one fired above).
-    assert [e.data.get("source") for e in setup["events"]] == [None]
-
-
-async def test_shadow_independent_skips_paid_models_and_fires_nothing(hass, setup):
-    entry = setup["entry"]
-    hass.config_entries.async_update_entry(entry, options={**entry.options, "mode": "shadow_independent"})
-    await hass.async_block_till_done()
-    await trigger(hass, "garage")
-    assert PAID not in setup["ai"].calls
-    assert setup["events"] == []
-
-
 async def test_known_last_seen_seeds_tracking(hass, setup):
     assert state(hass, "sensor.coco_location").state == "Cat House"
     assert state(hass, "binary_sensor.coco_recently_absent").state == "off"

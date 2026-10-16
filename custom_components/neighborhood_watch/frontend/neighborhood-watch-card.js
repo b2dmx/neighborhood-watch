@@ -123,7 +123,6 @@ class NeighborhoodWatchCard extends HTMLElement {
         item.name = this._state(keys.last_detection)?.attributes?.camera_name || item.name;
         out.cameras.push(item);
       }
-      else if (device.model === "Wildlife") out.wildlife.push(item);
       else if (keys.last_seen) out.animals.push(item);
       // Anything else (a phone carrying a person's critical switch) isn't shown here.
     }

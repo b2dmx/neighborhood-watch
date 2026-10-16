@@ -10,17 +10,22 @@ from .const import (
     CONF_ALERT_AT,
     CONF_ALERT_CAMERAS,
     CONF_ALERT_SCOPE,
+    CONF_CAMERAS,
     CONF_CRITICAL_AT,
     CONF_CRITICAL_EXCEPT,
     CONF_CRITICAL_SWITCH,
     CONF_HOUSE,
     CONF_NAME,
+    CONF_PEOPLE,
+    CONF_PEST,
+    CONF_PESTS,
     CONF_PRIORITY,
     CONF_SLUG,
     CONF_UNKNOWN_ALERTS,
     CONF_UNSURE_ALERTS,
     SUBENTRY_ANIMAL,
     SUBENTRY_CAMERA,
+    SUBENTRY_RECIPIENT,
     SUBENTRY_SPECIES,
 )
 
@@ -75,3 +80,32 @@ def alert_rules_v2(
     opts.setdefault(f"motion_{CONF_ALERT_AT}", unsure)
     opts.setdefault(f"motion_{CONF_CRITICAL_AT}", [])
     return opts, changed
+
+
+def options_from_subentries_v3(
+    options: Mapping[str, Any], subentries: Mapping[str, tuple[str, Mapping[str, Any]]]
+) -> tuple[dict[str, Any], list[str]]:
+    """0.11 → 0.12: cameras and people move from subentries into the options (keyed by
+    their old subentry id, so entity unique ids don't change); wildlife pages are gone,
+    a pest page becomes a name on the pest list. Returns the new options and the
+    subentries to remove."""
+    opts = dict(options)
+    cameras = dict(opts.get(CONF_CAMERAS) or {})
+    people = dict(opts.get(CONF_PEOPLE) or {})
+    pests = list(opts.get(CONF_PESTS) or [])
+    gone: list[str] = []
+    for sid, (kind, data) in subentries.items():
+        if kind == SUBENTRY_CAMERA:
+            cameras[sid] = dict(data)
+        elif kind == SUBENTRY_RECIPIENT:
+            people[sid] = dict(data)
+        elif kind == SUBENTRY_SPECIES:
+            name = data.get(CONF_NAME, "")
+            if data.get(CONF_PEST) and name and name.lower() not in {p.lower() for p in pests}:
+                pests.append(name)
+        else:
+            continue
+        gone.append(sid)
+    opts.update({CONF_CAMERAS: cameras, CONF_PEOPLE: people, CONF_PESTS: pests})
+    opts.pop("mode", None)  # shadow mode is gone
+    return opts, gone
