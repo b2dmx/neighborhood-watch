@@ -547,7 +547,7 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
   if (has("orange", "ginger")) fur = "#d98b45";
   const dark = base === "black" ? "#151517" : "#00000055";
   const fluffy = has("long-hair", "long hair", "longhair", "fluffy", "bushy");
-  const bib = has("bib", "white chest", "white upper chest");
+  const bib = has("bib", "white chest", "white upper chest", "tuxedo");
   const calico = pattern === "blotchy" || has("calico", "tortie");
   const tabby = pattern === "striped" || has("tabby", "stripe");
   const parts = [];
