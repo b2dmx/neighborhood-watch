@@ -9,10 +9,11 @@ services:
       - "8765:8765"
     volumes:
       - ./models:/models:ro
+      # The service's code, so updates are a file copy (it restarts itself when it changes).
+      - ./app:/app
       - ./work:/work
       # The folder you bulk-scan (photos and videos); reports are written back into it.
-      # Change the left side to your share's path on the NAS.
-      - /volume1/neighborhood-watch/scan:/scan
+      - ./scan:/scan
     devices:
       - /dev/dri:/dev/dri   # Intel GPU; remove this line on machines without one (it then runs on the CPU)
     environment:

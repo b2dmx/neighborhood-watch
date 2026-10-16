@@ -80,9 +80,27 @@ def _unload_when_idle() -> None:
                     pass
 
 
+def _restart_on_new_code() -> None:
+    """The code can live in a folder on the host (./app) so updates are a file copy: when a
+    .py file changes, exit between requests and let Docker's restart policy start the new
+    code. A bulk scan in progress is never cut short."""
+    here = Path(__file__).parent
+
+    def stamp() -> dict[str, float]:
+        return {f.name: f.stat().st_mtime for f in here.glob("*.py")}
+
+    started = stamp()
+    while True:
+        time.sleep(60)
+        if stamp() != started and not any(s.state in ("queued", "running") for s in SCANS.values()):
+            print("New code found; restarting", flush=True)
+            os._exit(0)
+
+
 with _infer_lock:
     _load()  # fail fast at start if the model can't load
 threading.Thread(target=_unload_when_idle, daemon=True).start()
+threading.Thread(target=_restart_on_new_code, daemon=True).start()
 
 
 
