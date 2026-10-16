@@ -129,7 +129,8 @@
       "name_taken": "That name is already used.",
       "name_reserved": "That name is reserved.",
       "name_pipe": "Names cannot contain |.",
-      "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict."
+      "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
+      "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo."
     },
     "abort": {
       "no_ai_task": "Set up an AI Task integration first (for example Google Generative AI).",
@@ -425,7 +426,8 @@
         "name_taken": "That name is already used.",
         "name_reserved": "That name is reserved.",
         "name_pipe": "Names cannot contain |.",
-        "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict."
+        "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
+        "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo."
       },
       "abort": {
         "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"

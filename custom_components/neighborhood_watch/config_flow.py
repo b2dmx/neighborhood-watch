@@ -159,7 +159,7 @@ MODE = SelectSelector(
 WILDLIFE = SelectSelector(
     SelectSelectorConfig(options=list(logic.DEFAULT_WILDLIFE), multiple=True, custom_value=True)
 )
-PHOTO = FileSelector(FileSelectorConfig(accept="image/jpeg,image/png,image/webp"))
+PHOTO = FileSelector(FileSelectorConfig(accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"))
 LIGHTS = EntitySelector(EntitySelectorConfig(domain=["light", "switch"], multiple=True))
 SOUND = MediaSelector(MediaSelectorConfig())
 PERSON = EntitySelector(EntitySelectorConfig(domain="person"))
@@ -442,14 +442,20 @@ def _animal_data(user_input: Mapping[str, Any], slug: str, added: str) -> dict[s
     }
 
 
-async def _store_upload(hass: HomeAssistant, file_id: str, slug: str) -> None:
+async def _store_upload(hass: HomeAssistant, file_id: str, slug: str) -> dict[str, str]:
+    """Save an uploaded reference photo; an error for the form if it can't be read (an
+    iPhone HEIC photo, for example)."""
     from homeassistant.components.file_upload import process_uploaded_file  # noqa: PLC0415
 
     def _process() -> None:
         with process_uploaded_file(hass, file_id) as path:
             save_reference(path, reference_file(hass, slug))
 
-    await hass.async_add_executor_job(_process)
+    try:
+        await hass.async_add_executor_job(_process)
+    except Exception:  # noqa: BLE001 - any unreadable picture
+        return {CONF_REFERENCE_UPLOAD: "photo_unreadable"}
+    return {}
 
 
 def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str, str]:
@@ -612,8 +618,17 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
             errors = _validate_animal(user_input, taken)
             if not errors:
                 slug = slugify(user_input[CONF_NAME])
-                if upload := user_input.get(CONF_REFERENCE_UPLOAD):
-                    await _store_upload(self.hass, upload, slug)
+                if (upload := user_input.get(CONF_REFERENCE_UPLOAD)) and (
+                    errors := await _store_upload(self.hass, upload, slug)
+                ):
+                    return self.async_show_form(
+                        step_id="animal",
+                        data_schema=_animal_schema(
+                            user_input, self._onboarding_cameras(), reconfigure=False, onboarding=True
+                        ),
+                        description_placeholders={"count": str(len(self._animals))},
+                        errors=errors,
+                    )
                 self._animals.append(
                     ConfigSubentryData(
                         data=_animal_data(user_input, slug, dt_util.utcnow().isoformat()),
@@ -918,7 +933,8 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
                 name = user_input[CONF_NAME].strip()
                 slug = slugify(name)
                 if upload := user_input.get(CONF_REFERENCE_UPLOAD):
-                    await _store_upload(self.hass, upload, slug)
+                    errors = await _store_upload(self.hass, upload, slug)
+            if not errors:
                 return self.async_create_entry(
                     title=name,
                     data=_animal_data(user_input, slug, dt_util.utcnow().isoformat()),
@@ -944,7 +960,8 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
                 if user_input.get(CONF_REMOVE_REFERENCE):
                     await self.hass.async_add_executor_job(remove_file, reference_file(self.hass, slug))
                 elif upload := user_input.get(CONF_REFERENCE_UPLOAD):
-                    await _store_upload(self.hass, upload, slug)
+                    errors = await _store_upload(self.hass, upload, slug)
+            if not errors:
                 data = _animal_data(user_input, slug, subentry.data.get(CONF_ADDED) or dt_util.utcnow().isoformat())
                 return self.async_update_and_abort(
                     self._get_entry(),

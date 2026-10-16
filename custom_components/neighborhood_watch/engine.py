@@ -1995,6 +1995,12 @@ def save_reference(source: Path | bytes, target: Path, max_side: int = 1280) -> 
 
     from PIL import Image  # noqa: PLC0415
 
+    try:  # iPhone photos (HEIC/HEIF)
+        from pillow_heif import register_heif_opener  # noqa: PLC0415
+
+        register_heif_opener()
+    except ImportError:
+        pass
     target.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(BytesIO(source) if isinstance(source, bytes) else source) as original:
         img = original.convert("RGB")

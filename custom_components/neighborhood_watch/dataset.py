@@ -107,3 +107,38 @@ def move_all(source: Path, target: Path) -> int:
             file.unlink()
         day.rmdir()
     return moved
+
+
+def read_crop(root: Path, day: str, sid: str) -> bytes | None:
+    """The frame cropped to the animal the local detector found (padded), or the whole
+    frame when there's no box."""
+    from PIL import Image  # noqa: PLC0415
+
+    frame = read_frame(root, day, sid)
+    if frame is None:
+        return None
+    try:
+        meta = json.loads((root / day / f"{sid}.json").read_text(encoding="utf-8"))
+        det = meta.get("detector") or {}
+        boxes = det.get("boxes") or []
+        size = det.get("size") or [None, None]
+    except (OSError, ValueError):
+        return frame
+    if not boxes:
+        return frame
+    box = max(boxes, key=lambda b: b.get("confidence", 0))["box"]
+    with Image.open(BytesIO(frame)) as img:
+        # Boxes are in the camera's own resolution; the saved frame may be smaller.
+        sx = img.width / (size[0] or img.width)
+        sy = img.height / (size[1] or img.height)
+        x1, y1, x2, y2 = box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy
+        side = max(x2 - x1, y2 - y1) * 1.8
+        side = max(side, min(img.width, img.height) * 0.25)
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        w, h = min(side * 4 / 3, img.width), min(side, img.height)
+        left = min(max(cx - w / 2, 0), img.width - w)
+        top = min(max(cy - h / 2, 0), img.height - h)
+        crop = img.convert("RGB").crop((int(left), int(top), int(left + w), int(top + h)))
+        buffer = BytesIO()
+        crop.save(buffer, "JPEG", quality=88)
+    return buffer.getvalue()

@@ -169,7 +169,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
           <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet.</div>`}</div>
         </div>
-      </ha-card>`;
+      </ha-card>${this._lightbox()}`;
     // Every section folds: tap its title. "To review" starts folded; choices are remembered.
     this.shadowRoot.querySelectorAll(".section > h2, .whole > h2").forEach((h) => {
       const key = h.textContent.split(" · ")[0].trim();
@@ -229,6 +229,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._render();
       });
     this._loadFrames();
+    this._wireLightbox();
     const scanButton = this.shadowRoot.querySelector("[data-scan]");
     if (scanButton)
       scanButton.addEventListener("click", () => {
@@ -286,18 +287,50 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _loadFrames() {
     this.shadowRoot.querySelectorAll("img[data-frame]").forEach((img) => {
-      const sid = img.dataset.frame;
-      if (this._signed[sid]) {
-        img.src = this._signed[sid];
+      // "crop": cut to the animal the local detector found; the full frame otherwise.
+      const path = `/api/${DOMAIN}/frame/${img.dataset.frame}${img.dataset.crop ? "/crop" : ""}`;
+      if (this._signed[path]) {
+        img.src = this._signed[path];
         return;
       }
       this._hass
-        .callWS({ type: "auth/sign_path", path: `/api/${DOMAIN}/frame/${sid}`, expires: 86400 })
+        .callWS({ type: "auth/sign_path", path, expires: 86400 })
         .then((r) => {
-          this._signed[sid] = r.path;
+          this._signed[path] = r.path;
           img.src = r.path;
         })
         .catch(() => img.classList.add("broken"));
+    });
+  }
+
+  _lightbox() {
+    // The full frame, over everything. Tap the picture to zoom in where you tapped.
+    if (!this._zoom) return "";
+    return `<div class="lightbox" data-close>
+        <button class="lbclose" data-close title="Close">✕</button>
+        <img class="lbimg" data-frame="${esc(this._zoom)}" alt="">
+      </div>`;
+  }
+
+  _wireLightbox() {
+    this.shadowRoot.querySelectorAll("[data-zoom]").forEach((el) =>
+      el.addEventListener("click", () => {
+        this._zoom = el.dataset.zoom;
+        this._render();
+      })
+    );
+    const box = this.shadowRoot.querySelector(".lightbox");
+    if (!box) return;
+    box.addEventListener("click", (ev) => {
+      const img = box.querySelector(".lbimg");
+      if (ev.target === img) {
+        const r = img.getBoundingClientRect();
+        img.style.transformOrigin = `${((ev.clientX - r.left) / r.width) * 100}% ${((ev.clientY - r.top) / r.height) * 100}%`;
+        img.classList.toggle("zoomed");
+        return;
+      }
+      this._zoom = null;
+      this._render();
     });
   }
 
@@ -311,21 +344,19 @@ class NeighborhoodWatchCard extends HTMLElement {
     const rows = items.slice(0, limit).map((it) => {
       const sid = esc(it.id);
       return `<div class="rev">
-          <img class="thumb" data-frame="${sid}" alt="">
-          <div class="revbody">
-            <div><b>${esc(it.animal)}</b> <span class="muted">(${esc(it.confidence)})</span></div>
-            <div class="muted">${esc(it.where)} · ${clock(it.time)} · ${ago(it.time)}</div>
-            <div class="acts">
-              <button class="mini" data-answer="right" data-sid="${sid}" title="Right">✓</button>
-              <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong">✗</button>
-              <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure">?</button>
-              <select data-sid="${sid}"><option value="">It was…</option>${options}</select>
-            </div>
+          <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="" title="Tap to enlarge">
+          <div class="revname"><b>${esc(it.animal)}</b> <span class="muted">${esc(it.confidence)}</span></div>
+          <div class="muted small">${esc(it.where)} · ${clock(it.time)} · ${ago(it.time)}</div>
+          <div class="acts">
+            <button class="mini" data-answer="right" data-sid="${sid}" title="Right">✓</button>
+            <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong">✗</button>
+            <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure">?</button>
+            <select data-sid="${sid}"><option value="">It was…</option>${options}</select>
           </div>
         </div>`;
     });
     const more = items.length > limit ? `<div class="muted">${items.length - limit} more after these.</div>` : "";
-    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${this._noteBox()}${rows.join("")}${more}</div>`;
+    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}</div>`;
   }
 
   _scan(hub) {
@@ -595,9 +626,18 @@ const STYLE = `
   .empty { color: var(--secondary-text-color); }
   .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
   .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
-  .rev { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--divider-color); }
-  .rev:last-of-type { border-bottom: none; }
-  .thumb { width: 132px; height: 88px; object-fit: cover; border-radius: 10px; background: var(--secondary-background-color); flex: none; }
+  .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .rev { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 14px; background: var(--secondary-background-color); min-width: 0; }
+  .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .small { font-size: .8em; }
+  .rev .acts { gap: 4px; }
+  .rev .mini { width: 28px; height: 28px; }
+  .rev select { flex: 1; min-width: 0; font-size: .85em; }
+  .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
+  .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; transition: transform .2s; }
+  .lbimg.zoomed { transform: scale(2.6); cursor: zoom-out; }
+  .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
   .thumb.broken { opacity: .3; }
   .revbody { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }

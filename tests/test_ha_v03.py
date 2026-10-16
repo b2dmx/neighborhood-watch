@@ -536,3 +536,38 @@ async def test_move_training_data_into_the_new_folder(hass, watch, tmp_path):
     assert result == {"moved": 1}
     assert (w.dataset_root / "2026-10-14" / "abc.jpg").read_bytes() == b"jpg"
     assert not (old / "2026-10-14").exists()
+
+
+def test_crop_to_the_detected_animal(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image as PILImage
+
+    from custom_components.neighborhood_watch import dataset
+
+    buffer = BytesIO()
+    PILImage.new("RGB", (1280, 720), (90, 90, 90)).save(buffer, "JPEG")
+    meta = {"detector": {"boxes": [{"confidence": 0.8, "box": [300, 200, 340, 240]}], "size": [640, 360]}}
+    dataset.save_sample(tmp_path, "2026-10-16", "abc", buffer.getvalue(), meta)
+    with PILImage.open(BytesIO(dataset.read_crop(tmp_path, "2026-10-16", "abc"))) as crop:
+        assert crop.width < 1280 and abs(crop.width / crop.height - 4 / 3) < 0.02
+    meta["detector"]["boxes"] = []
+    dataset.save_sample(tmp_path, "2026-10-16", "def", buffer.getvalue(), meta)
+    with PILImage.open(BytesIO(dataset.read_crop(tmp_path, "2026-10-16", "def"))) as full:
+        assert full.width == 1280
+
+
+def test_reference_photo_from_an_iphone_heic(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image as PILImage
+    from pillow_heif import register_heif_opener
+
+    from custom_components.neighborhood_watch.engine import save_reference
+
+    register_heif_opener()
+    buffer = BytesIO()
+    PILImage.new("RGB", (2400, 1800), (200, 180, 160)).save(buffer, "HEIF")
+    save_reference(buffer.getvalue(), tmp_path / "luna.jpg")
+    with PILImage.open(tmp_path / "luna.jpg") as saved:
+        assert saved.format == "JPEG" and max(saved.size) == 1280

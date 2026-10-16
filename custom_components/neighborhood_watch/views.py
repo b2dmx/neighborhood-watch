@@ -16,10 +16,11 @@ from .engine import WatchEngine
 
 class FrameView(HomeAssistantView):
     url = "/api/neighborhood_watch/frame/{sid}"
+    extra_urls = ["/api/neighborhood_watch/frame/{sid}/{variant}"]
     name = "api:neighborhood_watch:frame"
     requires_auth = True
 
-    async def get(self, request: web.Request, sid: str) -> web.Response:
+    async def get(self, request: web.Request, sid: str, variant: str = "") -> web.Response:
         if not sid.isalnum() or len(sid) > 32:
             return web.Response(status=400)
         hass = request.app[KEY_HASS]
@@ -34,9 +35,8 @@ class FrameView(HomeAssistantView):
         row = watch.find_sighting(sid, None) if watch else None
         if row is None or not row.get("day"):
             return web.Response(status=404)
-        frame = await hass.async_add_executor_job(
-            dataset.read_frame, watch.dataset_root, row["day"], sid
-        )
+        read = dataset.read_crop if variant == "crop" else dataset.read_frame
+        frame = await hass.async_add_executor_job(read, watch.dataset_root, row["day"], sid)
         if frame is None:
             return web.Response(status=404)
         return web.Response(

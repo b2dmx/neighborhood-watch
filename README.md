@@ -217,6 +217,8 @@ The AI models never learn from your corrections, so the integration keeps what's
 
 ## Local detector (optional)
 
+<img src="vision/logo.png" alt="Neighborhood Watch vision" width="320">
+
 The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Local detector**, it looks at every frame before the AI:
 
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
