@@ -418,7 +418,8 @@
             "known_location": "Optional: where it was last seen.",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
             "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
-          }
+          },
+          "description": "{reference}"
         }
       },
       "error": {

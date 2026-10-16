@@ -918,6 +918,16 @@ class CameraSubentryFlow(ConfigSubentryFlow):
 
 
 class AnimalSubentryFlow(ConfigSubentryFlow):
+    def _reference_markdown(self, subentry_id: str) -> str:
+        """The saved reference photo, shown above the form (the upload box can't show it)."""
+        unique_id = f"{self._get_entry().entry_id}_{subentry_id}_reference_photo"
+        entity_id = er.async_get(self.hass).async_get_entity_id("image", DOMAIN, unique_id)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        picture = state.attributes.get("entity_picture") if state and state.state != "unavailable" else None
+        if not picture:
+            return "No reference photo yet."
+        return "Current reference photo:\n\n" + f"![reference photo]({picture})"
+
     def _taken(self, exclude: str | None = None) -> set[str]:
         return {
             s.data[CONF_NAME].lower()
@@ -972,6 +982,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
                 )
         return self.async_show_form(
             step_id="reconfigure",
+            description_placeholders={"reference": self._reference_markdown(subentry.subentry_id)},
             data_schema=_animal_schema(
                 user_input or subentry.data,
                 _camera_options(self._get_entry()),
