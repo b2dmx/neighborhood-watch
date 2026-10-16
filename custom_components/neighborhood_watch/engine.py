@@ -573,6 +573,16 @@ class WatchEngine:
         custom = (self.options.get(CONF_DATASET_DIR) or "").strip()
         return Path(custom) if custom else self._media_root / "dataset"
 
+    async def async_move_training_data(self, sources: list[str] | None = None) -> int:
+        """Bring samples saved elsewhere (the default folder, or folders given) into the
+        current training folder, e.g. after pointing it at a NAS."""
+        folders = [Path(p) for p in sources or []] or [self._media_root / "dataset"]
+        moved = 0
+        for folder in folders:
+            moved += await self.hass.async_add_executor_job(dataset.move_all, folder, self.dataset_root)
+        self._notify()
+        return moved
+
     def www_path(self, slug: str) -> Path:
         return self._www_root / f"{slug}.jpg"
 

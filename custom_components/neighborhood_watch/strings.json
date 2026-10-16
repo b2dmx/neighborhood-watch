@@ -849,6 +849,16 @@
           "description": "Or add it to this animal's (or wildlife kind's) tips."
         }
       }
+    },
+    "move_training_data": {
+      "name": "Move training data",
+      "description": "Moves saved training photos into the current training folder, e.g. after pointing it at a NAS.",
+      "fields": {
+        "from": {
+          "name": "From",
+          "description": "Folders to move from. Empty: the default folder in the media folder."
+        }
+      }
     }
   }
 }

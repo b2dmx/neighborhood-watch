@@ -124,7 +124,8 @@ class NeighborhoodWatchCard extends HTMLElement {
         out.cameras.push(item);
       }
       else if (device.model === "Wildlife") out.wildlife.push(item);
-      else out.animals.push(item);
+      else if (keys.last_seen) out.animals.push(item);
+      // Anything else (a phone carrying a person's critical switch) isn't shown here.
     }
     for (const list of [out.animals, out.wildlife, out.cameras]) list.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -164,9 +165,24 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${STYLE.replace("__COLS__", this._config.columns || 3).replace("__PH__", this._config.photo_height || 140)}</style>
       <ha-card>
-        ${this._config.title ? `<h1 class="title">${esc(this._config.title)}</h1>` : ""}
-        ${parts.join("") || `<div class="empty">Nothing to show yet.</div>`}
+        <div class="whole">
+          <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
+          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet.</div>`}</div>
+        </div>
       </ha-card>`;
+    // Every section folds: tap its title. "To review" starts folded; choices are remembered.
+    this.shadowRoot.querySelectorAll(".section > h2, .whole > h2").forEach((h) => {
+      const key = h.textContent.split(" · ")[0].trim();
+      if (this._folded().has(key)) h.parentElement.classList.add("folded");
+      h.addEventListener("click", () => {
+        const folded = this._folded();
+        folded.has(key) ? folded.delete(key) : folded.add(key);
+        try {
+          localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
+        } catch (e) {}
+        h.parentElement.classList.toggle("folded");
+      });
+    });
     this.shadowRoot.querySelectorAll("[data-more]").forEach((el) =>
       el.addEventListener("click", () => this._more(el.dataset.more))
     );
@@ -225,6 +241,17 @@ class NeighborhoodWatchCard extends HTMLElement {
           .catch((err) => alert(`Scan could not start: ${err.message || err}`))
           .finally(() => (scanButton.disabled = false));
       });
+  }
+
+  _folded() {
+    if (!this._foldSet) {
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem(FOLD_KEY) || "null");
+      } catch (e) {}
+      this._foldSet = new Set(saved || ["To review"]);
+    }
+    return this._foldSet;
   }
 
   _answer(sid, answer) {
@@ -320,6 +347,22 @@ class NeighborhoodWatchCard extends HTMLElement {
       <button class="chip" data-scan>Scan</button></div></div>`;
   }
 
+  _toggles(k) {
+    // Icon toggles for an animal's Alerts, Critical alerts and Missing mode switches.
+    const t = (id, on, icon, offIcon, label, alarm) => {
+      const s = id && this._state(id);
+      if (!s) return "";
+      const isOn = s.state === "on";
+      return `<button class="tog ${isOn ? (alarm ? "alarm" : "on") : ""}" data-toggle="${esc(id)}" title="${label}: ${isOn ? "on" : "off"}">
+          <ha-icon icon="${isOn ? icon : offIcon}"></ha-icon><span>${label}</span></button>`;
+    };
+    return (
+      t(k.alerts, true, "mdi:bell", "mdi:bell-off-outline", "Alerts") +
+      t(k.critical_alerts, true, "mdi:bell-ring", "mdi:bell-ring-outline", "Critical", true) +
+      t(k.missing_mode, true, "mdi:map-marker-alert", "mdi:map-marker-question-outline", "Missing", true)
+    );
+  }
+
   _ruleChips(k) {
     // An animal's Alerts switch, and its Critical switch when it has critical cameras.
     const out = [];
@@ -350,23 +393,25 @@ class NeighborhoodWatchCard extends HTMLElement {
       const absent = this._state(k.recently_absent);
       const live = onCam?.state === "on";
       let status;
-      if (live) status = `<span class="live">● On camera — ${esc(onCam.attributes.camera || "")}</span>`;
+      if (live) status = `<span class="live">● On camera · ${esc(onCam.attributes.camera || "")}</span>`;
       else if (seen && !["unknown", "unavailable"].includes(seen.state))
-        status = `Last seen <b>${esc(where?.state)}</b> · ${ago(seen.state)}`;
-      else status = `<span class="muted">Not seen yet</span>`;
-      const img =
-        photo && !["unknown", "unavailable"].includes(photo.state) && photo.attributes.entity_picture
-          ? `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}" data-more="${esc(k.last_photo)}">`
-          : `<div class="nophoto" data-more="${esc(k.last_seen || "")}"><ha-icon icon="mdi:cat"></ha-icon></div>`;
-      const chips = [];
-      if (tonight && Number(tonight.state) > 0) chips.push(`<span class="chip">${esc(tonight.state)} tonight</span>`);
-      if (absent?.state === "on") chips.push(`<span class="chip dim">away lately</span>`);
-      chips.push(...this._ruleChips(k));
-      if (missing)
-        chips.push(
-          `<button class="chip ${missing.state === "on" ? "alarm" : ""}" data-toggle="${esc(k.missing_mode)}">Missing mode ${missing.state === "on" ? "on" : "off"}</button>`
-        );
-      return `<div class="tile ${live ? "is-live" : ""}">${img}<div class="body"><div class="name">${esc(a.name)}</div><div class="status">${status}</div><div class="chips">${chips.join("")}</div></div></div>`;
+        status = `${esc(where?.state)} · ${ago(seen.state)}`;
+      else status = `Not seen yet`;
+      const hasPhoto = photo && !["unknown", "unavailable"].includes(photo.state) && photo.attributes.entity_picture;
+      const img = hasPhoto
+        ? `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
+        : `<div class="nophoto"><ha-icon icon="mdi:cat"></ha-icon></div>`;
+      const badges = [];
+      if (tonight && Number(tonight.state) > 0) badges.push(`<span class="badge">${esc(tonight.state)} tonight</span>`);
+      if (absent?.state === "on") badges.push(`<span class="badge dim">away lately</span>`);
+      if (missing?.state === "on") badges.push(`<span class="badge alarm">MISSING</span>`);
+      return `<div class="tile ${live ? "is-live" : ""} ${missing?.state === "on" ? "is-missing" : ""}">
+          <div class="pic" data-more="${esc(hasPhoto ? k.last_photo : k.last_seen || "")}">${img}
+            <div class="over"><div class="name">${esc(a.name)}</div><div class="status">${status}</div></div>
+            <div class="badges">${badges.join("")}</div>
+          </div>
+          <div class="toggles">${this._toggles(k)}</div>
+        </div>`;
     });
     return `<div class="section"><div class="grid">${tiles.join("")}</div></div>`;
   }
@@ -446,16 +491,44 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 }
 
+const FOLD_KEY = "neighborhood-watch-card-folded";
+
 const STYLE = `
+  .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
+  .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
+  .section.folded > h2::after { transform: rotate(-90deg); }
+  .section.folded > :not(h2) { display: none; }
   ha-card { padding: 16px; }
   .title { font-size: 1.4em; font-weight: 500; margin: 0 0 12px; }
   h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   .section + .section { margin-top: 18px; }
   .grid { display: grid; grid-template-columns: repeat(__COLS__, minmax(0, 1fr)); gap: 12px; }
-  .tile { border-radius: 16px; overflow: hidden; background: var(--secondary-background-color); border: 2px solid transparent; }
+  .tile { border-radius: 18px; overflow: hidden; background: var(--secondary-background-color); border: 2px solid transparent; display: flex; flex-direction: column; }
   .tile.is-live { border-color: var(--success-color, #43a047); }
-  .tile img, .nophoto { display: block; width: 100%; height: __PH__px; object-fit: cover; cursor: pointer; }
-  .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color); --mdc-icon-size: 40px; }
+  .tile.is-missing { border-color: var(--error-color, #db4437); }
+  .pic { position: relative; height: __PH__px; cursor: pointer; }
+  .pic img, .nophoto { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color); --mdc-icon-size: 44px;
+    background: linear-gradient(135deg, var(--secondary-background-color), var(--card-background-color)); }
+  .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: #fff;
+    background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+  .nophoto + .over { color: var(--primary-text-color); background: none; }
+  .over .name { font-weight: 600; font-size: 1.1em; }
+  .over .status { font-size: .85em; opacity: .9; }
+  .over .live { color: #7CFC9A; }
+  .badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .badge { font-size: .72em; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
+  .badge.dim { opacity: .8; }
+  .badge.alarm { background: var(--error-color, #db4437); font-weight: 600; }
+  .toggles { display: flex; gap: 4px; padding: 6px; }
+  .tog { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; border: none; border-radius: 12px;
+    background: transparent; color: var(--secondary-text-color); font: inherit; font-size: .7em; cursor: pointer; --mdc-icon-size: 20px; }
+  .tog:hover { background: var(--card-background-color); }
+  .tog.on { color: var(--primary-color); }
+  .tog.alarm { color: var(--error-color, #db4437); }
+  .whole > h2.title { font-size: 1.3em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--primary-text-color); margin: 0; }
+  .whole > .inner { margin-top: 12px; }
+  .whole.folded > .inner { display: none; }
   .body { padding: 8px 10px 10px; }
   .name { font-weight: 600; font-size: 1.05em; }
   .status { font-size: .9em; margin-top: 2px; color: var(--primary-text-color); }

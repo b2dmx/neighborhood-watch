@@ -522,3 +522,17 @@ async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
 
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(DOMAIN, "add_note", {"animal": "Dragon", "note": "x"}, blocking=True, return_response=True)
+
+
+async def test_move_training_data_into_the_new_folder(hass, watch, tmp_path):
+    w = watch["watch"]
+    old = tmp_path / "old_dataset"
+    (old / "2026-10-14").mkdir(parents=True)
+    (old / "2026-10-14" / "abc.jpg").write_bytes(b"jpg")
+    (old / "2026-10-14" / "abc.json").write_text("{}")
+    result = await hass.services.async_call(
+        DOMAIN, "move_training_data", {"from": [str(old)]}, blocking=True, return_response=True
+    )
+    assert result == {"moved": 1}
+    assert (w.dataset_root / "2026-10-14" / "abc.jpg").read_bytes() == b"jpg"
+    assert not (old / "2026-10-14").exists()

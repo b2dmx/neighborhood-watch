@@ -139,10 +139,21 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         where = watch.add_note(call.data["note"], cam, call.data.get("animal"))
         return {"added_to": where}
 
+    async def move_training_data(call: ServiceCall) -> ServiceResponse:
+        moved = await engine().async_move_training_data(call.data.get("from"))
+        return {"moved": moved}
+
     async def build_summary(call: ServiceCall) -> ServiceResponse:
         summary = engine().build_summary()
         return {"text": summary.text, "lines": summary.lines}
 
+    hass.services.async_register(
+        DOMAIN,
+        "move_training_data",
+        move_training_data,
+        vol.Schema({vol.Optional("from"): vol.All(cv.ensure_list, [cv.string])}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN,
         "add_note",

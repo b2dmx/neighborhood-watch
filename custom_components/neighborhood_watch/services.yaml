@@ -113,3 +113,11 @@ add_note:
       example: Luna
       selector:
         text:
+
+move_training_data:
+  fields:
+    from:
+      example: /media/neighborhood_watch/dataset
+      selector:
+        text:
+          multiple: true

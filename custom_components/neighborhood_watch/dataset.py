@@ -88,3 +88,22 @@ def prune(root: Path, max_bytes: int) -> int:
             total -= freed
             removed += 1
     return removed
+
+
+def move_all(source: Path, target: Path) -> int:
+    """Move every day folder's samples from `source` into `target` (merging; a sample
+    already in the target is kept). Returns how many photos moved."""
+    if not source.is_dir() or source.resolve() == target.resolve():
+        return 0
+    moved = 0
+    for day in sorted(d for d in source.iterdir() if d.is_dir()):
+        dest = target / day.name
+        dest.mkdir(parents=True, exist_ok=True)
+        for file in day.iterdir():
+            if not (dest / file.name).exists():
+                shutil.copy2(file, dest / file.name)
+                if file.suffix == ".jpg":
+                    moved += 1
+            file.unlink()
+        day.rmdir()
+    return moved
