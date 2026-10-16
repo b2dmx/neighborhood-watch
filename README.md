@@ -238,7 +238,7 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches;
+- each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ✗ buttons;
 - the critical-alert switches.
 
