@@ -44,6 +44,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       hide: [],
       columns: 3,
       photo_height: 140,
+      photo_hours: 12,
       review_limit: 6,
       ...config,
     };
@@ -86,6 +87,7 @@ class NeighborhoodWatchCard extends HTMLElement {
             { name: "columns", selector: { number: { min: 1, max: 6, mode: "box" } } },
             { name: "photo_height", selector: { number: { min: 60, max: 400, step: 10, mode: "box", unit_of_measurement: "px" } } },
             { name: "review_limit", selector: { number: { min: 1, max: 40, mode: "box" } } },
+            { name: "photo_hours", selector: { number: { min: 0, max: 720, mode: "box", unit_of_measurement: "h" } } },
           ],
         },
       ],
@@ -97,6 +99,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           columns: "Animal columns",
           photo_height: "Photo height",
           review_limit: "Sightings to review at once",
+          photo_hours: "Photo shows for (0 = always)",
         })[s.name],
     };
   }
@@ -432,7 +435,11 @@ class NeighborhoodWatchCard extends HTMLElement {
       else if (seen && !["unknown", "unavailable"].includes(seen.state))
         status = `${esc(where?.state)} · ${ago(seen.state)}`;
       else status = `Not seen yet`;
-      const hasPhoto = photo && !["unknown", "unavailable"].includes(photo.state) && photo.attributes.entity_picture;
+      // A sighting photo shows for photo_hours, then the tile goes back to the drawn face.
+      const hours = Number(this._config.photo_hours ?? 12);
+      const fresh = !hours || Date.now() - new Date(photo?.state).getTime() < hours * 3600e3;
+      const hasPhoto =
+        photo && !["unknown", "unavailable"].includes(photo.state) && photo.attributes.entity_picture && fresh;
       const img = hasPhoto
         ? `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
         : `<div class="nophoto">${catFace(seen?.attributes || {})}</div>`;
@@ -543,7 +550,6 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
   const bib = has("bib", "white chest", "white upper chest");
   const calico = pattern === "blotchy" || has("calico", "tortie");
   const tabby = pattern === "striped" || has("tabby", "stripe");
-  const paws = has("white paws", "white front paws", "four paws", "white socks", "white only on the");
   const parts = [];
   if (fluffy)
     parts.push(`<path d="M18 62 L10 70 L22 70 L16 80 L30 76 L32 88 L50 82 L68 88 L70 76 L84 80 L78 70 L90 70 L82 62 Z" fill="${fur}"/>`);
@@ -562,11 +568,6 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     );
   if (bib || base === "white" || calico) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="#f4f1ea"/>`);
   if (bib) parts.push(`<path d="M34 78 Q50 96 66 78 L60 92 L40 92 Z" fill="#f4f1ea"/>`);
-  if (paws)
-    parts.push(
-      `<ellipse cx="38" cy="90" rx="8" ry="5" fill="#f4f1ea"/><ellipse cx="62" cy="90" rx="8" ry="5" fill="#f4f1ea"/>`,
-      `<path d="M35 88 v4 M38 88 v4 M41 88 v4 M59 88 v4 M62 88 v4 M65 88 v4" stroke="#c9c4ba" stroke-width="1"/>`
-    );
   const eye = has("green") ? "#a6b83a" : has("blue") ? "#6aa7d8" : "#d4b23a";
   parts.push(
     `<ellipse cx="39" cy="52" rx="5" ry="6" fill="${eye}"/><ellipse cx="61" cy="52" rx="5" ry="6" fill="${eye}"/>`,

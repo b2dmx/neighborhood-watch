@@ -25,5 +25,5 @@
     "pillow-heif==1.8.1"
   ],
   "single_config_entry": true,
-  "version": "0.12.1"
+  "version": "0.12.2"
 }
