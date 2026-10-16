@@ -327,7 +327,8 @@ async def _register_card(hass: HomeAssistant) -> None:
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
 
     path = Path(__file__).parent / "frontend" / "neighborhood-watch-card.js"
-    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), True)])
+    # No long-lived cache: browsers revalidate, so a card update shows without a restart.
+    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
     if "frontend" in hass.config.components:
         from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 

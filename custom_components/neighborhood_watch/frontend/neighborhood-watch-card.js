@@ -154,11 +154,15 @@ class NeighborhoodWatchCard extends HTMLElement {
     const parts = [];
     if (show.has("review") && d.hub?.keys.to_review) parts.push(this._review(d));
     if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
-    if (show.has("wildlife") && (d.wildlife.length || d.hub?.keys.wildlife)) parts.push(this._wildlife(d.wildlife, d.hub));
-    if (show.has("summary") && d.hub) parts.push(this._summary(d.hub));
-    if (show.has("recent") && d.cameras.length) parts.push(this._recent(d.cameras));
-    if (show.has("switches")) parts.push(this._switches(d));
-    if (show.has("scan") && d.hub?.keys.last_scan) parts.push(this._scan(d.hub));
+    // The shorter sections sit side by side on wide screens instead of each taking a row.
+    const side = [];
+    if (show.has("wildlife") && (d.wildlife.length || d.hub?.keys.wildlife)) side.push(this._wildlife(d.wildlife, d.hub));
+    if (show.has("summary") && d.hub) side.push(this._summary(d.hub));
+    if (show.has("recent") && d.cameras.length) side.push(this._recent(d.cameras));
+    if (show.has("switches")) side.push(this._switches(d));
+    if (show.has("scan") && d.hub?.keys.last_scan) side.push(this._scan(d.hub));
+    const filled = side.filter(Boolean);
+    if (filled.length) parts.push(`<div class="side">${filled.join("")}</div>`);
 
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this.shadowRoot.innerHTML = `
@@ -322,7 +326,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!box) return;
     box.addEventListener("click", (ev) => {
       const img = box.querySelector(".lbimg");
-      if (ev.target === img) {
+      if (ev.target === img && !img.classList.contains("zoomed")) {
+        // First tap zooms in where you tapped; a tap on the zoomed picture closes it.
         const r = img.getBoundingClientRect();
         img.style.transformOrigin = `${((ev.clientX - r.left) / r.width) * 100}% ${((ev.clientY - r.top) / r.height) * 100}%`;
         img.classList.toggle("zoomed");
@@ -467,12 +472,12 @@ class NeighborhoodWatchCard extends HTMLElement {
     const own = new Set(list.map((w) => w.name));
     for (const [name, k] of Object.entries(seen)) {
       if (own.has(name)) continue;
-      const tag = k.pest ? `<span class="chip alarm">pest</span>` : "";
+      const tag = k.pest ? ` <span class="badge alarm">pest</span>` : "";
       const maybe = k.possible ? ` <span class="muted">(possible)</span>` : "";
       rows.push(`<div class="row" data-more="${esc(hub.keys.wildlife)}">
-          <span class="rname">${esc(name)}${maybe}</span>
+          <span class="rname">${esc(name)}${tag}${maybe}</span>
           <span class="rinfo">${esc(k.where || "")} · ${ago(k.last_seen)}</span>
-          <span class="rcount">${k.tonight ? `${esc(k.tonight)} tonight` : ""}</span>${tag}
+          <span class="rcount">${k.tonight ? `${esc(k.tonight)} tonight` : ""}</span>
         </div>`);
     }
     if (!rows.length) return "";
@@ -528,16 +533,17 @@ const FOLD_KEY = "neighborhood-watch-card-folded";
 function catFace({ pattern = "na", base = "na", looks = "" }) {
   const t = looks.toLowerCase();
   const has = (...w) => w.some((x) => t.includes(x));
-  const tones = { white: "#f2efe9", grey: "#8b9099", black: "#2a2a2e", na: "#a59f96" };
+  const tones = { white: "#f2efe9", grey: "#8b9099", black: "#1c1c1f", na: "#a59f96" };
   let fur = tones[base] || tones.na;
-  if (has("dark grey", "dark gray")) fur = "#555960";
-  if (has("brown")) fur = base === "white" ? fur : "#6b4a33";
+  if (base === "grey" && has("dark grey", "dark gray")) fur = "#4b4e56"; // a black coat stays black
+  if (has("brown")) fur = base === "white" ? fur : "#4a3f36"; // dark, greyish brown
   if (has("orange", "ginger")) fur = "#d98b45";
   const dark = base === "black" ? "#151517" : "#00000055";
   const fluffy = has("long-hair", "long hair", "longhair", "fluffy", "bushy");
   const bib = has("bib", "white chest", "white upper chest");
   const calico = pattern === "blotchy" || has("calico", "tortie");
   const tabby = pattern === "striped" || has("tabby", "stripe");
+  const paws = has("white paws", "white front paws", "four paws", "white socks", "white only on the");
   const parts = [];
   if (fluffy)
     parts.push(`<path d="M18 62 L10 70 L22 70 L16 80 L30 76 L32 88 L50 82 L68 88 L70 76 L84 80 L78 70 L90 70 L82 62 Z" fill="${fur}"/>`);
@@ -556,6 +562,11 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     );
   if (bib || base === "white" || calico) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="#f4f1ea"/>`);
   if (bib) parts.push(`<path d="M34 78 Q50 96 66 78 L60 92 L40 92 Z" fill="#f4f1ea"/>`);
+  if (paws)
+    parts.push(
+      `<ellipse cx="38" cy="90" rx="8" ry="5" fill="#f4f1ea"/><ellipse cx="62" cy="90" rx="8" ry="5" fill="#f4f1ea"/>`,
+      `<path d="M35 88 v4 M38 88 v4 M41 88 v4 M59 88 v4 M62 88 v4 M65 88 v4" stroke="#c9c4ba" stroke-width="1"/>`
+    );
   const eye = has("green") ? "#a6b83a" : has("blue") ? "#6aa7d8" : "#d4b23a";
   parts.push(
     `<ellipse cx="39" cy="52" rx="5" ry="6" fill="${eye}"/><ellipse cx="61" cy="52" rx="5" ry="6" fill="${eye}"/>`,
@@ -575,7 +586,9 @@ const STYLE = `
   ha-card { padding: 16px; }
   .title { font-size: 1.4em; font-weight: 500; margin: 0 0 12px; }
   h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
-  .section + .section { margin-top: 18px; }
+  .section + .section, .section + .side, .side + .section { margin-top: 18px; }
+  .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; align-items: start; }
+  .side > .section { margin-top: 0; min-width: 0; }
   .grid { display: grid; grid-template-columns: repeat(__COLS__, minmax(0, 1fr)); gap: 12px; }
   .tile { border-radius: 18px; overflow: hidden; background: var(--secondary-background-color); border: 2px solid transparent; display: flex; flex-direction: column; }
   .tile.is-live { border-color: var(--success-color, #43a047); }
@@ -625,7 +638,7 @@ const STYLE = `
   .empty { color: var(--secondary-text-color); }
   .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
   .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
-  .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
   .rev { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 14px; background: var(--secondary-background-color); min-width: 0; }
   .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .small { font-size: .8em; }
@@ -641,7 +654,8 @@ const STYLE = `
   .revbody { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   input[data-folder] { flex: 1; min-width: 180px; font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
-  select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
+  select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
+  select option { background: var(--card-background-color, #1c1c1f); color: var(--primary-text-color); }
   @media (max-width: 500px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 `;
 
