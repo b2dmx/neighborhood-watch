@@ -15,7 +15,10 @@ ENV NW_MODEL=/models/megadetector \
     NW_SIZE=640 \
     NW_PORT=8765 \
     NW_SCAN_ROOT=/scan \
-    NW_WORK=/work
+    NW_WORK=/work \
+    NW_IDLE_UNLOAD=600 \
+    MALLOC_ARENA_MAX=2 \
+    PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8765
 HEALTHCHECK --interval=60s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"
 CMD ["python", "app.py"]

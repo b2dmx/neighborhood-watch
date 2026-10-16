@@ -35,16 +35,54 @@ WORK = Path(os.environ.get("NW_WORK", "/work"))
 _infer_lock = threading.Lock()
 SCANS: dict = {}
 
+# Memory: the compiled model is ~250 MB, so it's unloaded after NW_IDLE_UNLOAD seconds
+# without a request (0 = keep it) and compiled again on the next one (well under a second).
+IDLE_UNLOAD = float(os.environ.get("NW_IDLE_UNLOAD", "600"))
+COMPILE_CONFIG = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1"}  # one request at a time
 core = ov.Core()
 _xml = next(MODEL_DIR.glob("*.xml"))
 _wanted = DEVICE if DEVICE != "AUTO" else ("GPU" if "GPU" in core.available_devices else "CPU")
-try:
-    compiled = core.compile_model(core.read_model(_xml), _wanted)
-    _device = _wanted
-except Exception:  # noqa: BLE001 - e.g. the container can't reach the GPU: run on the CPU
-    compiled = core.compile_model(core.read_model(_xml), "CPU")
-    _device = "CPU"
-output = compiled.output(0)
+_device = _wanted
+_model = None  # (compiled model, its output)
+_last_used = 0.0
+
+
+def _load():
+    """The compiled model, compiling it first if it was unloaded. Call under _infer_lock."""
+    global _model, _device, _last_used
+    _last_used = time.monotonic()
+    if _model is None:
+        try:
+            compiled = core.compile_model(core.read_model(_xml), _wanted, COMPILE_CONFIG)
+            _device = _wanted
+        except Exception:  # noqa: BLE001 - e.g. the container can't reach the GPU: run on the CPU
+            compiled = core.compile_model(core.read_model(_xml), "CPU", COMPILE_CONFIG)
+            _device = "CPU"
+        _model = (compiled, compiled.output(0))
+    return _model
+
+
+def _unload_when_idle() -> None:
+    global _model
+    while IDLE_UNLOAD > 0:
+        time.sleep(30)
+        with _infer_lock:
+            if _model is not None and time.monotonic() - _last_used > IDLE_UNLOAD:
+                _model = None
+                import gc  # noqa: PLC0415
+
+                gc.collect()
+                try:  # hand the freed memory back to the system (glibc)
+                    import ctypes  # noqa: PLC0415
+
+                    ctypes.CDLL("libc.so.6").malloc_trim(0)
+                except OSError:
+                    pass
+
+
+with _infer_lock:
+    _load()  # fail fast at start if the model can't load
+threading.Thread(target=_unload_when_idle, daemon=True).start()
 
 
 
@@ -80,6 +118,7 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou: float = 0.45) -> list[int]:
 def detect(img: Image.Image) -> list[dict]:
     tensor, scale, left, top = letterbox(img)
     with _infer_lock:
+        compiled, output = _load()
         raw = compiled(tensor)[output][0]  # (4 + classes, anchors)
     raw = raw.T
     scores_all = raw[:, 4:]
@@ -112,7 +151,9 @@ def detect(img: Image.Image) -> list[dict]:
 
 
 async def health(_request: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "device": _device, "model": _xml.stem, "size": SIZE})
+    return web.json_response(
+        {"ok": True, "device": _device, "model": _xml.stem, "size": SIZE, "loaded": _model is not None}
+    )
 
 
 async def detect_endpoint(request: web.Request) -> web.Response:
