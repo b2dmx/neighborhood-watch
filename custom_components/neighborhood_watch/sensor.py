@@ -215,6 +215,14 @@ class LastSeen(WatchEntity, SensorEntity):
     def native_value(self) -> datetime | None:
         return self.watch.last_seen(self.animal)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """How it looks, for the card's drawn icon when there's no photo yet."""
+        a = self.animal
+        if getattr(a, "kind", "") != "animal":
+            return {}
+        return {"pattern": a.pattern, "base": a.base, "looks": f"{a.description} {a.tips}"[:600]}
+
 
 class Location(WatchEntity, SensorEntity):
     _attr_icon = "mdi:map-marker"
