@@ -40,6 +40,8 @@ SCANS: dict = {}
 IDLE_UNLOAD = float(os.environ.get("NW_IDLE_UNLOAD", "600"))
 COMPILE_CONFIG = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1"}  # one request at a time
 core = ov.Core()
+# GPU kernels take seconds to compile; caching them makes reloading after an idle unload fast.
+core.set_property({"CACHE_DIR": str(WORK / "openvino-cache")})
 _xml = next(MODEL_DIR.glob("*.xml"))
 _wanted = DEVICE if DEVICE != "AUTO" else ("GPU" if "GPU" in core.available_devices else "CPU")
 _device = _wanted
@@ -170,7 +172,15 @@ def detect(img: Image.Image) -> list[dict]:
 
 async def health(_request: web.Request) -> web.Response:
     return web.json_response(
-        {"ok": True, "device": _device, "model": _xml.stem, "size": SIZE, "loaded": _model is not None}
+        {
+            "ok": True,
+            "device": _device,
+            "model": _xml.stem,
+            "size": SIZE,
+            "loaded": _model is not None,
+            "available": core.available_devices,  # what OpenVINO can use here (CPU, GPU, NPU)
+            "dri": sorted(p.name for p in Path("/dev/dri").glob("*")) if Path("/dev/dri").exists() else [],
+        }
     )
 
 
