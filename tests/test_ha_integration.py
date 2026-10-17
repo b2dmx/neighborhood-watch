@@ -211,6 +211,28 @@ async def test_dashboard_photo_is_the_exact_frame_the_ai_judged(hass, setup, has
     assert www == FRAME
 
 
+async def test_start_removes_old_notification_folders_only(hass, setup):
+    setup["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    watch = setup["watch"]
+    current = watch.www_path("yard")
+    root = current.parent.parent
+    outside = root.parent / "other.jpg"  # config/www, not ours
+
+    def plant() -> None:
+        (root / "0123456789abcdef0123456789abcdef").mkdir()
+        (root / "0123456789abcdef0123456789abcdef" / "yard.jpg").write_bytes(FRAME)
+        (root / "garage.jpg").write_bytes(FRAME)
+        (root / "notes.txt").write_text("kept")
+        outside.write_bytes(FRAME)
+
+    await hass.async_add_executor_job(plant)
+    await hass.async_add_executor_job(watch._load_frames)
+    left = await hass.async_add_executor_job(lambda: sorted(p.name for p in root.iterdir()))
+    assert left == sorted([current.parent.name, "notes.txt"])
+    assert current.exists() and outside.exists()
+
+
 async def test_on_camera_clears_after_the_window(hass, setup, freezer):
     setup["ai"].say(FIRST, "Milo|high|uniform|black|")
     await trigger(hass, "yard")

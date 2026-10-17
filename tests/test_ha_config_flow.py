@@ -329,20 +329,20 @@ async def test_add_and_edit_person(hass: HomeAssistant, ready):
     assert "mobile_app_phone" in selector.config["options"]
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"name": "Sam", "notify_service": "notify.mobile_app_phone",
+        {"name": "Oscar", "notify_service": "notify.mobile_app_phone",
          "critical_alerts": {"missing_alerts": True, "critical_sound": "default", "critical_volume": 0.5},
          "mutes": {"muted": ["Luna"]}, "quiet": {"quiet_start": "22:00:00", "quiet_end": "07:00:00"}},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    ((pid, sam),) = entry.options["people"].items()
-    assert sam["notify_service"] == "mobile_app_phone"
-    assert sam["muted"] == ["luna"] and sam["quiet_start"] == "22:00:00" and sam["critical_volume"] == 0.5
-    assert "quiet" not in sam and "mutes" not in sam
+    ((pid, oscar),) = entry.options["people"].items()
+    assert oscar["notify_service"] == "mobile_app_phone"
+    assert oscar["muted"] == ["luna"] and oscar["quiet_start"] == "22:00:00" and oscar["critical_volume"] == 0.5
+    assert "quiet" not in oscar and "mutes" not in oscar
     result = await _options(hass, entry, "people")
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"person": pid})
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"name": "Sam", "notify_service": "mobile_app_phone",
+        {"name": "Oscar", "notify_service": "mobile_app_phone",
          "critical_alerts": {"missing_alerts": False, "critical_sound": "default", "critical_volume": 0.5},
          "mutes": {}, "quiet": {}, "remove": False},
     )
@@ -378,9 +378,10 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
 
 
 async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
-    hass.services.async_register("notify", "mobile_app_sams_phone", lambda call: None)
+    hass.services.async_register("notify", "mobile_app_oscars_phone", lambda call: None)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
+    # API callers may leave a form's sections out: they get the sections' defaults.
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True, "watch_always": False,
@@ -389,14 +390,14 @@ async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon"]})
     assert result["step_id"] == "people"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_sams_phone"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_oscars_phone"]})
     assert "Configure → People" not in result["description_placeholders"]["notes"]
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"species": "cat", "looks": {}, "rules": {}, "last_seen": {}}
-    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"species": "cat"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    (sam,) = result["result"].options["people"].values()
-    assert (sam["name"], sam["notify_service"]) == ("Sams Phone", "mobile_app_sams_phone")
+    options = result["result"].options
+    assert "first_model_hours" not in options
+    (oscar,) = options["people"].values()
+    assert (oscar["name"], oscar["notify_service"]) == ("Oscars Phone", "mobile_app_oscars_phone")
 
 
 async def test_configure_menu_puts_the_advanced_pages_last(hass: HomeAssistant, ready):
@@ -419,6 +420,10 @@ async def test_options_models_keeps_the_hours_flat(hass: HomeAssistant, ready):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["main_start"] == "07:00:00" and entry.options["main_end"] == "21:00:00"
     assert "first_model_hours" not in entry.options
+    result = await _options(hass, entry, "models")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
+    assert result["type"] is FlowResultType.CREATE_ENTRY  # the hours section may be left out
+    assert "first_model_hours" not in entry.options
 
 
 async def test_species_is_a_list_with_any_kind_allowed(hass: HomeAssistant, ready):
@@ -432,11 +437,12 @@ async def test_species_is_a_list_with_any_kind_allowed(hass: HomeAssistant, read
     assert selector.config["custom_value"] is True
     assert [o["value"] for o in selector.config["options"]][:2] == ["cat", "dog"]
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Rex", "species": " Fox ", "looks": {}, "rules": {}, "last_seen": {}},
+        result["flow_id"], {"name": "Ziggy", "species": " Fox "},  # sections left out: their defaults
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    rex = next(s for s in entry.subentries.values() if s.title == "Rex")
-    assert rex.data["species"] == "fox"
+    ziggy = next(s for s in entry.subentries.values() if s.title == "Ziggy")
+    assert ziggy.data["species"] == "fox"
+    assert (ziggy.data["pattern"], ziggy.data["priority"]) == ("na", False) and "looks" not in ziggy.data
     result = await hass.config_entries.subentries.async_init(
         (entry.entry_id, "animal"), context={"source": config_entries.SOURCE_USER}
     )

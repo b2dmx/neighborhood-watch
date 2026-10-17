@@ -19,7 +19,9 @@ from pytest_homeassistant_custom_component.common import (
 from homeassistant.components.camera import Image
 from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 from custom_components.neighborhood_watch.const import DOMAIN, EVENT_SIGHTING
 
@@ -338,6 +340,28 @@ async def test_android_critical_fields_and_plain_notify(hass, watch):
     assert (bo["data"]["ttl"], bo["data"]["priority"], bo["data"]["channel"]) == (0, "high", "alarm_stream")
 
 
+async def test_a_plain_notify_service_gets_the_picture_link_in_the_text(hass, watch):
+    from dataclasses import replace
+
+    from custom_components.neighborhood_watch import logic
+
+    w = watch["watch"]
+    chat: list[dict[str, Any]] = []
+
+    async def family_chat(call: ServiceCall) -> None:
+        chat.append(dict(call.data))
+
+    hass.services.async_register("notify", "family_chat", family_chat)
+    alert = logic.Alert("animal", "Milo", "Milo is in the yard.", "milo", logic.NORMAL)
+    image = w.image_url("yard", dt_util.utcnow())
+    bo = next(p for p in w.recipients if p.name == "Bo")
+    await w._send(replace(bo, notify="family_chat"), alert, image, [])
+    assert chat == [{"title": "Milo", "message": f"Milo is in the yard.\n{image}"}]
+    await w._send(bo, alert, image, [])
+    phone = watch["sent"][-1]
+    assert phone["message"] == "Milo is in the yard." and phone["data"]["image"] == image
+
+
 async def test_timed_checks_for_cameras_without_sensors(hass, watch, freezer):
     entry = watch["entry"]
     cameras = {cid: ({**d, "check_every": 5} if d["name"] == "Yard" else d) for cid, d in entry.options["cameras"].items()}
@@ -353,7 +377,6 @@ async def test_timed_checks_for_cameras_without_sensors(hass, watch, freezer):
 async def test_watch_all_day(hass, watch, freezer):
     from datetime import datetime
 
-    from homeassistant.util import dt as dt_util
 
     entry = watch["entry"]
     hass.config_entries.async_update_entry(entry, options={**entry.options, "watch_always": True})
@@ -685,6 +708,56 @@ async def test_the_ai_chain_has_a_total_time_cap(hass, watch):
     assert watch["watch"].camera_state("yard")["last"]["models_used"] == "none answered"
 
 
+async def test_an_older_sighting_recorded_late_does_not_move_the_animal_back(hass, watch):
+    from custom_components.neighborhood_watch import engine, logic
+
+    w = watch["watch"]
+    milo = logic.Verdict("Milo", logic.HIGH, "na", "", "", "milo|high|na|na|", "")
+    newer = dt_util.utcnow()
+    older = newer - timedelta(minutes=1)
+    # The garage's check took its snapshot later but recorded first.
+    await w._record(engine.Check(w.cameras["garage"], milo, "test", None, newer))
+    await w._record(engine.Check(w.cameras["yard"], milo, "test", None, older))
+    state = w.animal_state(w.animal_by_name("Milo"))
+    assert state["last_seen"] == newer.isoformat() and state["location"] == "Garage"
+    assert state["on_camera_where"] == "Garage"
+    assert w.data["last_sighting"]["camera"] == "Garage"
+    times = [s["time"] for s in w.sightings()]
+    assert times == sorted(times) and [s["where"] for s in w.sightings()][-2:] == ["Yard", "Garage"]
+
+
+async def test_at_the_time_cap_what_the_ai_had_said_still_counts(hass, watch):
+    from custom_components.neighborhood_watch import engine
+
+    real_timeout = asyncio.timeout
+    caps: list[asyncio.Timeout] = []
+
+    def timeout(delay):
+        if delay != 12345:
+            return real_timeout(delay)
+        caps.append(real_timeout(None))
+        return caps[-1]
+
+    async def answer(call: ServiceCall) -> dict[str, Any]:
+        model = call.data["entity_id"]
+        if model == "ai_task.down":
+            raise HomeAssistantError("down")
+        if model == FIRST:
+            return {"conversation_id": "x", "data": "Milo|high|na|na|"}
+        caps[-1].reschedule(asyncio.get_running_loop().time())  # the cap runs out now
+        await asyncio.Event().wait()
+        return {}
+
+    hass.services.async_register("ai_task", "generate_data", answer, supports_response=SupportsResponse.ONLY)
+    watch["watch"].options["first_look"] = ["ai_task.down", FIRST]  # Milo from a backup
+    with patch.object(engine, "IDENTIFY_CAP_SECONDS", 12345), patch.object(engine.asyncio, "timeout", timeout):
+        result = await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    # The second opinion never came: the backup's Milo stands, capped at medium.
+    assert result["animal"] == "Milo" and result["confidence"] == "medium"
+    assert result["models_used"] == watch["watch"].data["ai"]["last_models"] != "none answered"
+    assert "+" not in result["models_used"]
+
+
 async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, aioclient_mock, freezer):
     await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.5)
     w = watch["entry"].runtime_data
@@ -703,7 +776,7 @@ async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, 
 async def test_scan_with_the_detector_down_is_a_friendly_error(hass, watch, aioclient_mock):
     import aiohttp
 
-    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+    from homeassistant.exceptions import ServiceValidationError
 
     entry = watch["entry"]
     hass.config_entries.async_update_entry(entry, options={**entry.options, "detector_url": "http://vision:8765"})

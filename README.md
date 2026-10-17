@@ -295,7 +295,7 @@ Frames go only to the AI models you choose. Everything else stays local:
 - Tracking lives in Home Assistant's `.storage` folder.
 - Photos are in `config/neighborhood_watch`.
 - Frames and reference photos are in the media folder.
-- Notification pictures are in `config/www/neighborhood_watch`. Like everything in `www`, anyone with the link can open them.
+- Notification pictures are in a random-named folder inside `config/www/neighborhood_watch`, so their links can't be guessed. Like everything in `www`, though, anyone who has a link can open it without logging in.
 - Training data is in the folder you choose.
 
 ## License

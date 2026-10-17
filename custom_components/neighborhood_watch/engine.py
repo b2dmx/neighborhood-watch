@@ -8,6 +8,7 @@ waiting its turn is not queued twice.
 from __future__ import annotations
 
 import asyncio
+from bisect import insort
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from functools import partial
 import logging
 from pathlib import Path
 from secrets import token_hex
+import shutil
 import time
 from typing import Any
 from uuid import uuid4
@@ -700,6 +702,7 @@ class WatchEngine:
                 record.update(state="error", error="Interrupted by a restart.")
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
+        self.sightings().sort(key=lambda s: s.get("time") or "")  # older versions appended
         if "www_secret" not in self.data:
             self.data["www_secret"] = token_hex(16)
             self._save()
@@ -801,10 +804,17 @@ class WatchEngine:
 
     def _load_frames(self) -> None:
         self._scan_references()
-        # Notification pictures from before the secret folder were guessable: they go.
+        # Notification pictures from before the secret folder were guessable, and any
+        # other folder (an old secret's) still answers its links: they all go.
         try:
-            for old in self._www_root.glob("*.jpg"):
-                old.unlink(missing_ok=True)
+            for old in self._www_root.iterdir():
+                if old.is_symlink() or old.is_junction():
+                    continue  # never follow a link out of the folder
+                if old.is_dir():
+                    if old.name != self._www_secret:
+                        shutil.rmtree(old)
+                elif old.suffix == ".jpg":
+                    old.unlink(missing_ok=True)
         except OSError as err:
             _LOGGER.debug("Old notification pictures not removed: %s", err)
         for slug in self.cameras:
@@ -1083,17 +1093,37 @@ class WatchEngine:
         return not logic.in_time_window(dt_util.now().time(), start, end)
 
     async def _identify_capped(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
-        """_identify with a cap on the whole chain: past it, nobody answered."""
+        """_identify with a cap on the whole chain: past it, what had been said is decided."""
+        said: dict[str, Any] = {}
         try:
             async with asyncio.timeout(IDENTIFY_CAP_SECONDS):
-                return await self._identify(cam)
+                return await self._identify(cam, said)
         except TimeoutError:
-            _LOGGER.warning("%s: the AI took over %s s, no answer", cam.name, IDENTIFY_CAP_SECONDS)
-            verdict = logic.decide("", "", self.rules, self.strict_keys())
-            self.data["ai"]["last_models"] = "none answered"
-            return verdict, "none answered"
+            _LOGGER.warning(
+                "%s: the AI took over %s s, deciding on what it had said", cam.name, IDENTIFY_CAP_SECONDS
+            )
+            return self._decide(said)
 
-    async def _identify(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
+    def _decide(self, said: dict[str, Any]) -> tuple[logic.Verdict, str]:
+        verdict = logic.decide(
+            said.get("first", ""),
+            said.get("second", ""),
+            self.rules,
+            self.strict_keys(),
+            unconfirmed=said.get("unconfirmed", False),
+        )
+        models = said.get("first_label") or "none answered"
+        if said.get("second_label"):
+            models += f" + {said['second_label']}"
+        self.data["ai"]["last_models"] = models
+        return verdict, models
+
+    async def _identify(
+        self, cam: CameraConfig, said: dict[str, Any] | None = None
+    ) -> tuple[logic.Verdict, str]:
+        """Ask the chain. Each answer is written into `said` as it arrives, so a caller that
+        gives up early can still decide on what was said."""
+        said = {} if said is None else said
         prompt, attachments = self._prompt(cam)
         priority = {a.key for a in self.animals.values() if a.priority or self.missing_mode(a)}
         strict = self.strict_keys()
@@ -1111,6 +1141,7 @@ class WatchEngine:
             if raw.strip():
                 first, first_model, first_label = logic.tidy(raw), model, self._model_label(model, index)
                 from_backup = index > 0
+                said.update(first=first, first_label=first_label)
                 break
 
         # A backup's answer that names an animal is always double-checked, by free models
@@ -1118,6 +1149,7 @@ class WatchEngine:
         special = logic.needs_second_opinion(first, priority, strict)
         backup_check = from_backup and logic.names_animal(first)
         second, second_label = "", ""
+        said["unconfirmed"] = backup_check
         if special or backup_check:
             for index, model in enumerate(self._chain(CONF_SECOND_OPINION, free_only=not special)):
                 if model == first_model:
@@ -1127,14 +1159,10 @@ class WatchEngine:
                 raw = await self._ask(model, prompt, attachments)
                 if raw.strip():
                     second, second_label = logic.tidy(raw), self._model_label(model, index)
+                    said.update(second=second, second_label=second_label)
                     break
 
-        verdict = logic.decide(first, second, self.rules, strict, unconfirmed=backup_check)
-        models = first_label or "none answered"
-        if second_label:
-            models += f" + {second_label}"
-        self.data["ai"]["last_models"] = models
-        return verdict, models
+        return self._decide(said)
 
     def _ai_stats(self, model: str) -> dict[str, Any]:
         ai = self.data["ai"]
@@ -1222,9 +1250,12 @@ class WatchEngine:
         sid = uuid4().hex[:10]
         day = dt_util.as_local(now).date().isoformat()
         cam_state["last"]["id"] = sid
-        self.data["last_sighting"] = {"camera": cam.name, **cam_state["last"]}
+        # Checks of different cameras record in turn, so a slower one can record an older
+        # time after a newer one: nothing newer is overwritten by it.
+        if not (_dt((self.data.get("last_sighting") or {}).get("time")) or now) > now:
+            self.data["last_sighting"] = {"camera": cam.name, **cam_state["last"]}
         wild = self.is_wildlife(v.animal)
-        self.sightings().append(
+        self._add_sighting(
             {
                 "id": sid,
                 "day": day,
@@ -1261,7 +1292,8 @@ class WatchEngine:
                 _LOGGER.debug("Training sample not saved: %s", err)
 
         animal = self.animal_by_name(v.animal)
-        if animal and counted:
+        newest = animal is not None and not (self.last_seen(animal) or now) > now
+        if animal and counted and newest:
             state = self.animal_state(animal)
             state["last_seen"] = _iso(now)
             state["location"] = cam.name
@@ -1320,8 +1352,13 @@ class WatchEngine:
             "source": DOMAIN,
         }
 
+    def _add_sighting(self, row: dict[str, Any]) -> None:
+        """Rows are kept in time order. Every time is the same UTC ISO format, so the
+        strings sort like the times."""
+        insort(self.sightings(), row, key=lambda s: s.get("time") or "")
+
     def _prune(self, now: datetime) -> None:
-        """Sightings are appended in time order with UTC ISO times: the old ones are a
+        """Sightings are kept in time order with UTC ISO times: the old ones are a
         prefix, and comparing the strings finds its end."""
         rows = self.sightings()
         cutoff = _iso(now - timedelta(days=SIGHTING_DAYS)) or ""
@@ -1712,6 +1749,9 @@ class WatchEngine:
             if actions:
                 data["actions"] = actions
             payload["data"] = data
+        elif image:
+            # Other services have no attachment: the picture's link goes in the text.
+            payload["message"] = f"{alert.message}\n{image}"
         try:
             await self.hass.services.async_call("notify", person.notify, payload, blocking=True)
         except Exception as err:  # noqa: BLE001 - one phone failing must not stop the others
@@ -1892,7 +1932,7 @@ class WatchEngine:
         now = dt_util.utcnow()
         row_id = uuid4().hex[:10]
         day = dt_util.as_local(now).date().isoformat()
-        self.sightings().append(
+        self._add_sighting(
             {
                 "id": row_id,
                 "day": day,

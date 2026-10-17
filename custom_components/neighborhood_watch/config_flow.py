@@ -285,7 +285,7 @@ def _models_schema(values: Mapping[str, Any]) -> vol.Schema:
             vol.Required(CONF_FIRST_LOOK, default=values.get(CONF_FIRST_LOOK, [])): AI_MODELS,
             vol.Optional(CONF_SECOND_OPINION, default=values.get(CONF_SECOND_OPINION, [])): AI_MODELS,
             vol.Optional(CONF_PAID, default=values.get(CONF_PAID, [])): AI_MODELS,
-            vol.Required("first_model_hours"): _section(
+            vol.Required("first_model_hours", default={}): _section(
                 {
                     vol.Optional(
                         CONF_MAIN_START, description={"suggested_value": values.get(CONF_MAIN_START) or None}
@@ -384,9 +384,9 @@ def _camera_schema(
             SelectSelectorConfig(options=others, multiple=True)
         )
     timing[vol.Required(CONF_INTERVAL, default=values.get(CONF_INTERVAL, 0))] = _minutes(240)
-    fields[vol.Required("timing")] = _section(timing)
+    fields[vol.Required("timing", default={})] = _section(timing)
     if subjects:
-        fields[vol.Required("critical_alerts")] = _section(
+        fields[vol.Required("critical_alerts", default={})] = _section(
             {
                 vol.Optional(
                     CONF_CRITICAL_EXCEPT,
@@ -394,7 +394,7 @@ def _camera_schema(
                 ): _names(subjects)
             }
         )
-    fields[vol.Required("deterrent")] = _section(
+    fields[vol.Required("deterrent", default={})] = _section(
         {
             vol.Optional(CONF_DETER_LIGHTS, default=values.get(CONF_DETER_LIGHTS, [])): LIGHTS,
             vol.Required(CONF_DETER_MINUTES, default=values.get(CONF_DETER_MINUTES, 2)): _minutes(60),
@@ -459,21 +459,21 @@ def _animal_schema(
     }
     if reconfigure:
         fields[vol.Required(CONF_REMOVE_REFERENCE, default=False)] = BOOL
-    fields[vol.Required("looks")] = _section(
+    fields[vol.Required("looks", default={})] = _section(
         {
             vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
             vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
         }
     )
-    fields[vol.Required("rules")] = _section(
+    fields[vol.Required("rules", default={})] = _section(
         {
             vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
             vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
             **_alert_fields(values, cameras),
         }
     )
-    fields[vol.Required("last_seen")] = _section(
+    fields[vol.Required("last_seen", default={})] = _section(
         {
             vol.Optional(
                 CONF_KNOWN_LAST_SEEN, description={"suggested_value": values.get(CONF_KNOWN_LAST_SEEN)}
@@ -1150,21 +1150,21 @@ def _recipient_schema(hass: HomeAssistant, values: Mapping[str, Any], subjects: 
             vol.Required(CONF_NOTIFY, description={"suggested_value": values.get(CONF_NOTIFY)}): SelectSelector(
                 SelectSelectorConfig(options=_notify_services(hass), custom_value=True)
             ),
-            vol.Required("critical_alerts"): _section(
+            vol.Required("critical_alerts", default={}): _section(
                 {
                     vol.Required(CONF_MISSING_ALERTS, default=values.get(CONF_MISSING_ALERTS, True)): BOOL,
                     vol.Required(CONF_CRITICAL_SOUND, default=values.get(CONF_CRITICAL_SOUND, "default")): TEXT,
                     vol.Required(CONF_CRITICAL_VOLUME, default=values.get(CONF_CRITICAL_VOLUME, 0.7)): VOLUME,
                 }
             ),
-            vol.Required("mutes"): _section(
+            vol.Required("mutes", default={}): _section(
                 {
                     vol.Optional(
                         CONF_MUTED, default=_pick(list(values.get(CONF_MUTED) or []), subjects)
                     ): _names(subjects),
                 }
             ),
-            vol.Required("quiet"): _section(
+            vol.Required("quiet", default={}): _section(
                 {
                     vol.Optional(CONF_QUIET_ZONES, default=values.get(CONF_QUIET_ZONES, [])): ZONES,
                     vol.Optional(
