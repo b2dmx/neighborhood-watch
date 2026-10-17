@@ -4,3 +4,4 @@ home-assistant-intents
 gazetteer-matcher
 PyTurboJPEG
 pillow-heif==1.8.1
+pytest-timeout
