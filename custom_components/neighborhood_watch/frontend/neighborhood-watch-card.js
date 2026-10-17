@@ -46,6 +46,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       photo_height: 140,
       photo_hours: 12,
       review_limit: 6,
+      order: "recent",
       ...config,
     };
     this._sig = null;
@@ -81,6 +82,18 @@ class NeighborhoodWatchCard extends HTMLElement {
         { name: "sections", selector: { select: { multiple: true, options: SECTIONS } } },
         { name: "hide", selector: { device: { multiple: true, filter: { integration: DOMAIN } } } },
         {
+          name: "order",
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: [
+                { value: "recent", label: "Most recently seen first" },
+                { value: "name", label: "Alphabetical" },
+              ],
+            },
+          },
+        },
+        {
           type: "grid",
           name: "",
           schema: [
@@ -96,6 +109,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           title: "Title",
           sections: "Show",
           hide: "Hide these animals, wildlife or cameras",
+          order: "Animal order",
           columns: "Animal columns",
           photo_height: "Photo height",
           review_limit: "Sightings to review at once",
@@ -130,6 +144,15 @@ class NeighborhoodWatchCard extends HTMLElement {
       // Anything else (a phone carrying a person's critical switch) isn't shown here.
     }
     for (const list of [out.animals, out.wildlife, out.cameras]) list.sort((a, b) => a.name.localeCompare(b.name));
+    if (this._config.order !== "name") {
+      // On camera now first, then the most recently seen; never-seen animals last.
+      const rank = (a) => {
+        if (this._state(a.keys.on_camera)?.state === "on") return Infinity;
+        const t = new Date(this._state(a.keys.last_seen)?.state).getTime();
+        return Number.isNaN(t) ? -Infinity : t;
+      };
+      out.animals.sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
+    }
     return out;
   }
 
