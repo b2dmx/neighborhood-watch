@@ -238,13 +238,10 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _busy() {
-    // Typing or zoomed into a frame: a redraw now would undo it. (Not a list: closing one
-    // without choosing leaves it focused.)
-    const root = this.shadowRoot;
-    if (!root) return false;
-    const el = root.activeElement;
-    if (el && !el.disabled && el.matches("input, textarea")) return true;
-    return !!(this._zoom && root.querySelector(".lbimg.zoomed"));
+    // Typing: a redraw now would undo it. (Not a list: closing one without choosing leaves
+    // it focused.)
+    const el = this.shadowRoot?.activeElement;
+    return !!(el && !el.disabled && el.matches("input, textarea"));
   }
 
   _resume() {
@@ -516,15 +513,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     const box = this.shadowRoot.querySelector(".lightbox");
     if (!box) return;
     box.querySelector(".lbclose").focus();
-    box.addEventListener("click", (ev) => {
-      const img = box.querySelector(".lbimg");
-      if (ev.target === img && !img.classList.contains("zoomed")) {
-        // First tap zooms in where you tapped; a tap on the zoomed picture closes it.
-        const r = img.getBoundingClientRect();
-        img.style.transformOrigin = `${((ev.clientX - r.left) / r.width) * 100}% ${((ev.clientY - r.top) / r.height) * 100}%`;
-        img.classList.toggle("zoomed");
-        return;
-      }
+    // The picture is already enlarged: a tap anywhere, on it or around it, closes it.
+    box.addEventListener("click", () => {
       this._zoom = null;
       this._render(true);
     });
@@ -854,8 +844,7 @@ const STYLE = `
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; transition: transform .2s; }
-  .lbimg.zoomed { transform: scale(2.6); cursor: zoom-out; }
+  .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-out; }
   .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
   .thumb.broken { opacity: .3; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
