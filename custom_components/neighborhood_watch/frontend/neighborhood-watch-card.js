@@ -18,7 +18,7 @@ const SECTIONS = [
 const SHOWN = new Set([
   "night_summary", "to_review", "wildlife", "last_scan", "pest_critical", "other_critical", "unknown_critical", "motion_critical",
   "last_seen", "last_photo", "location", "on_camera", "sightings_tonight", "recently_absent", "alerts", "critical_alerts", "missing_mode",
-  "last_detection",
+  "last_detection", "last_frame",
 ]);
 
 const esc = (s) =>

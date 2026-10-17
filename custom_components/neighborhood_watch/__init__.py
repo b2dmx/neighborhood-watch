@@ -47,7 +47,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     def camera(watch: WatchEngine, ref: Any, required: bool = True) -> CameraConfig | None:
         if not ref:
             if required:
-                raise ServiceValidationError(translation_domain=DOMAIN, translation_key="unknown_camera")
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="unknown_camera", translation_placeholders={"camera": "(none)"}
+                )
             return None
         cam = watch.camera_by_ref(str(ref))
         if cam is None:
