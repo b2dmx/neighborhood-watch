@@ -313,7 +313,7 @@
         "description": "Who gets alerts is set per person under Configure → People. Cameras, animals and wildlife each decide when they alert.",
         "data": {
           "alerts": "Send alerts",
-          "correction_buttons": "Right / Not sure buttons on alerts",
+          "correction_buttons": "Right / Not sure / It was… buttons on alerts",
           "min_confidence": "Alert from confidence"
         },
         "data_description": {

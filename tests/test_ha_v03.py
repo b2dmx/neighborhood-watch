@@ -209,7 +209,24 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
     assert data["image"].split("?")[0].endswith(f"/{watch['watch'].data['www_secret']}/yard.jpg")
     titles = [a["title"] for a in data["actions"]]
-    assert titles == ["✓ Right", "? Not sure", "It's Luna"]
+    assert titles == ["✓ Right", "? Not sure", "It was…"]
+    assert data["actions"][2]["behavior"] == "textInput"
+
+
+async def test_typed_it_was_reply_corrects_the_sighting(hass, watch):
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    action = watch["sent"][0]["data"]["actions"][2]["action"]
+    sid = action.split("|")[2]
+    with patch.object(watch["watch"], "async_correct") as correct:
+        hass.bus.async_fire("mobile_app_notification_action", {"action": action, "reply_text": " fox "})
+        await hass.async_block_till_done()
+        hass.bus.async_fire("mobile_app_notification_action", {"action": action, "reply_text": "milo"})
+        await hass.async_block_till_done()
+        hass.bus.async_fire("mobile_app_notification_action", {"action": action, "reply_text": "  "})
+        await hass.async_block_till_done()
+    # Matched to the wildlife kind and the animal's own spelling; an empty reply is ignored.
+    assert [c.args for c in correct.call_args_list] == [(sid, None, "Fox"), (sid, None, "Milo")]
 
 
 async def test_critical_switch_but_quiet_zone_mutes_it(hass, watch):

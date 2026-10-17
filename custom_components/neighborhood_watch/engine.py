@@ -1596,12 +1596,19 @@ class WatchEngine:
 
     @callback
     def _on_phone_action(self, event: Event) -> None:
-        """Right / Not sure / It's <animal> buttons on an alert."""
+        """Right / Not sure / It was… (typed) buttons on an alert."""
         parts = str(event.data.get("action", "")).split("|")
         if len(parts) < 3 or parts[0] != ACTION_PREFIX:
             return
         verb, sid = parts[1], parts[2]
-        if verb == "is" and len(parts) > 3:
+        if verb == "was":
+            typed = str(event.data.get("reply_text") or "").strip()
+            if not typed:
+                return
+            target = self.animal_by_name(typed)
+            wild = next((w for w in self.wildlife if w.lower() == typed.lower()), None)
+            answer = target.name if target else wild or typed
+        elif verb == "is" and len(parts) > 3:  # alerts sent before the typed reply existed
             target = self.animal_by_name(parts[3])
             answer = target.name if target else parts[3]
         elif verb in ("right", "wrong", "unsure"):
@@ -1703,10 +1710,15 @@ class WatchEngine:
             actions = [
                 {"action": f"{ACTION_PREFIX}|right|{sid}", "title": "✓ Right"},
                 {"action": f"{ACTION_PREFIX}|unsure|{sid}", "title": "? Not sure"},
+                # A phone alert can't hold a list: type what it was (an animal or a kind).
+                {
+                    "action": f"{ACTION_PREFIX}|was|{sid}",
+                    "title": "It was…",
+                    "behavior": "textInput",
+                    "textInputButtonTitle": "Save",
+                    "textInputPlaceholder": "e.g. Raccoon",
+                },
             ]
-            for a in self.animals.values():
-                if (a.priority or a.key in missing) and a.name != v.animal:
-                    actions.append({"action": f"{ACTION_PREFIX}|is|{sid}|{a.slug}", "title": f"It's {a.name}"})
         sends: list[Send] = []
         for alert in alerts:
             for person in self.recipients:
