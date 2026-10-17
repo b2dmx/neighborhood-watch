@@ -264,7 +264,7 @@ async def test_pest_turns_on_lights_that_were_off_then_back_off(hass, watch, fre
     assert watch["on"][0].data["entity_id"] == ["light.garage_flood", "light.porch"]
     msg = watch["sent"][0]
     assert msg["title"] == "Pest: Raccoon — Garage"
-    assert "Lights turned on to scare it off." in msg["message"]
+    assert msg["message"].endswith("· Lights on")
     freezer.tick(timedelta(minutes=3))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()

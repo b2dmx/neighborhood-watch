@@ -371,7 +371,7 @@ def switched(name, **changes):
 def test_priority_medium_alerts_tentatively_low_is_silent():
     (a,) = plan(verdict("Luna", "medium"), YARD)
     assert (a.title, a.urgency) == ("Possible Luna — Yard", "normal")
-    assert a.message == "AI thinks this might be Luna at Yard, 9:05 PM.\nThe AI is fairly sure."
+    assert a.message == "9:05 PM · ●●○"
     assert plan(verdict("Luna", "low"), YARD) == []
 
 
@@ -380,7 +380,7 @@ def test_min_confidence_keeps_low_guesses_off_phones():
     (a,) = plan(verdict("Ziggy", "medium"), GARAGE)
     assert a.title == "Possible Ziggy — Garage"
     (a,) = plan(verdict("Milo"), YARD)
-    assert a.message == "Milo detected at Yard, 9:05 PM.\nThe AI is very sure."
+    assert a.message == "9:05 PM · ●●●"
 
 
 def test_alert_at_limits_where():
@@ -476,9 +476,9 @@ def test_pest_alert_says_pest_and_mentions_lights_only_when_they_ran():
     (a,) = pest()
     assert a.title == "Pest: Skunk — Patio" and "Lights" not in a.message
     (a,) = pest(deterred=True)
-    assert a.message == "Skunk detected at Patio, 9:05 PM.\nLights turned on to scare it off.\nThe AI is very sure."
+    assert a.message == "9:05 PM · ●●● · Lights on"
     (a,) = plan(verdict("Nothing", "low"), GARAGE)
-    assert a.message.endswith("\nThe AI is unsure.")
+    assert a.message == "9:05 PM · Unidentified"
 
 
 def test_verdict_remembers_both_names():

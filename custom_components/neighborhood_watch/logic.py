@@ -579,7 +579,7 @@ AUDIENCE_MISSING = "missing"  # people who get missing-mode alerts
 AUDIENCE_NOT_MISSING = "not_missing"  # everyone else (the missing-mode people already had theirs)
 
 _ORDER = {LOW: 0, MEDIUM: 1, HIGH: 2}
-SURE = {HIGH: "very sure", MEDIUM: "fairly sure", LOW: "unsure"}  # how alerts word confidence
+BARS = {HIGH: "●●●", MEDIUM: "●●○", LOW: "●○○"}  # how sure the AI is, as signal bars
 
 
 def cameras(value: Iterable[str] | str | None) -> frozenset[str] | str:
@@ -676,14 +676,12 @@ def plan_alerts(
     prefix = "TEST · " if test else ""
     where = camera.name
     conf = v.confidence
-    sure = f"\nThe AI is {SURE[_level(conf)]}."
+    # The title says what and where; the message is just when and how sure (signal bars).
+    line = f"{when} · {BARS[_level(conf)]}"
     alerts: list[Alert] = []
 
     def tentative(name: str) -> tuple[str, str]:
-        return (
-            f"{prefix}Possible {name} — {where}",
-            f"AI thinks this might be {name} at {where}, {when}.{sure}",
-        )
+        return f"{prefix}Possible {name} — {where}", line
 
     # Missing mode: ANY possible sighting, either model, any confidence, any camera.
     missing_name = next(
@@ -712,18 +710,18 @@ def plan_alerts(
 
     if is_motion:
         title = f"{prefix}Motion — {where}"
-        message = f"Unidentified motion at {where}, {when}.{sure}"
+        message = f"{when} · Unidentified"
     elif rule.priority:
         title, message = tentative(v.animal)
     else:
-        lead = f"{v.animal} detected" if conf == HIGH else f"Possible {v.animal}"
-        looks = f"\nLooks like: {v.description}" if v.description else ""
+        message = line
         if rule.name == BUILTIN_PEST:
             title = f"{prefix}Pest: {'' if conf == HIGH else 'possible '}{v.animal} — {where}"
-            looks += "\nLights turned on to scare it off." if deterred else ""
+            message += " · Lights on" if deterred else ""
         else:
             title = f"{prefix}{'' if conf == HIGH else 'Possible '}{v.animal} — {where}"
-        message = f"{lead} at {where}, {when}.{looks}{sure}"
+        if v.description:
+            message += f"\nLooks like: {v.description}"
     audience = AUDIENCE_NOT_MISSING if missing_name and missing_name == v.animal else AUDIENCE_ALL
     alerts.append(
         Alert(
