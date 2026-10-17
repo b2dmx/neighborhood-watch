@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -676,10 +677,11 @@ async def test_a_slow_ai_does_not_hold_up_other_cameras_snapshots(hass, watch):
     hass.services.async_register("ai_task", "generate_data", slow_ai, supports_response=SupportsResponse.ONLY)
 
     async def until(condition) -> None:
-        for _ in range(200):
+        # Waits in real time (a thread's sleep), since the test loop's clock may not move.
+        for _ in range(500):
             if condition():
                 return
-            await asyncio.sleep(0.01)
+            await hass.async_add_executor_job(time.sleep, 0.01)
         raise AssertionError("timed out")
 
     hass.states.async_set("binary_sensor.garage_motion", "on")
