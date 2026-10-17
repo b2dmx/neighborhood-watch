@@ -482,8 +482,9 @@ async def test_bulk_scan_names_visits_and_writes_report(hass, watch, aioclient_m
 async def test_scan_needs_a_detector(hass, watch):
     from homeassistant.exceptions import ServiceValidationError
 
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(DOMAIN, "scan", {"folder": "x"}, blocking=True, return_response=True)
+    assert err.value.translation_key == "no_detector"
 
 
 async def test_low_wildlife_counts_as_possible(hass, watch, freezer):
@@ -642,14 +643,17 @@ async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, 
 async def test_scan_with_the_detector_down_is_a_friendly_error(hass, watch, aioclient_mock):
     import aiohttp
 
-    from homeassistant.exceptions import ServiceValidationError
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
     entry = watch["entry"]
     hass.config_entries.async_update_entry(entry, options={**entry.options, "detector_url": "http://vision:8765"})
     await hass.async_block_till_done()
     aioclient_mock.post("http://vision:8765/scan", exc=aiohttp.ClientError("down"))
-    with pytest.raises(ServiceValidationError):
+    with pytest.raises(HomeAssistantError) as err:
         await hass.services.async_call(DOMAIN, "scan", {"folder": "x"}, blocking=True, return_response=True)
+    # A failure on the detector's side, not a mistake in the call.
+    assert not isinstance(err.value, ServiceValidationError)
+    assert err.value.translation_key == "scan_failed"
 
 
 async def test_state_of_removed_cameras_and_animals_is_forgotten(hass, watch):

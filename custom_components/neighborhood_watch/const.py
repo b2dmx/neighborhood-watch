@@ -143,7 +143,6 @@ CONF_REMOVE_REFERENCE = "remove_reference"
 CONF_ADDED = "added"
 CONF_KNOWN_LAST_SEEN = "known_last_seen"
 CONF_KNOWN_LOCATION = "known_location"
-CONF_ADD_ANOTHER = "add_another"
 CONF_ALERT = "alert"  # before 0.7
 
 # --- species (wildlife) subentry ---

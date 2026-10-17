@@ -26,6 +26,7 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.selector import (
     BooleanSelector,
@@ -89,7 +90,6 @@ from .const import (
     QUIET_NONE,
     QUIET_NORMAL,
     CONF_ABSENT_DAYS,
-    CONF_ADD_ANOTHER,
     CONF_ADDED,
     CONF_ALWAYS_STRICT,
     CONF_BASE,
@@ -191,6 +191,24 @@ def _number(low: float, high: float, unit: str) -> NumberSelector:
 
 # --- shared schema pieces ----------------------------------------------------------------
 
+# Collapsible groups on the long forms. Only the form is grouped: the values are flattened
+# again before they are checked and saved, so stored settings keep their flat keys.
+CAMERA_SECTIONS = ("timing", "critical_alerts", "deterrent")
+PERSON_SECTIONS = ("critical_alerts", "mutes", "quiet")
+ANIMAL_SECTIONS = ("looks", "rules", "last_seen")
+
+
+def _section(fields: dict[Any, Any], collapsed: bool = True) -> section:
+    return section(vol.Schema(fields), {"collapsed": collapsed})
+
+
+def _flatten(user_input: Mapping[str, Any], sections: tuple[str, ...]) -> dict[str, Any]:
+    """A form's answers with its sections' fields lifted back to the top level."""
+    flat = {k: v for k, v in user_input.items() if k not in sections}
+    for key in sections:
+        flat.update(user_input.get(key) or {})
+    return flat
+
 
 def _where(cameras: list[SelectOptionDict]) -> SelectSelector:
     """A camera picker for Alert at / Critical at: "All cameras" or chosen ones; empty = none."""
@@ -226,7 +244,13 @@ def _alert_data(user_input: Mapping[str, Any], prefix: str = "") -> dict[str, li
     return {f"{prefix}{CONF_ALERT_AT}": alert, f"{prefix}{CONF_CRITICAL_AT}": critical}
 
 
-NEW = "__new__"
+NEW = "add_new"  # the "+ Add ..." choice; camera and person ids are uuid hex
+
+
+def _camera_label(hass: HomeAssistant, camera: str) -> str:
+    """A camera entity's friendly name, or its entity id when it has no state."""
+    state = hass.states.get(camera)
+    return state.name if state else camera
 
 
 def _camera_options(entry: ConfigEntry, exclude: str | None = None) -> list[SelectOptionDict]:
@@ -330,31 +354,32 @@ def _camera_schema(
             vol.Required(CONF_NAME, default=values.get(CONF_NAME, "")): TEXT,
             vol.Optional(CONF_TRIGGERS, default=values.get(CONF_TRIGGERS, [])): BINARY_SENSORS,
             vol.Optional(CONF_SKIP_WHEN, default=values.get(CONF_SKIP_WHEN, [])): BINARY_SENSORS,
-            vol.Required(CONF_COOLDOWN, default=values.get(CONF_COOLDOWN, 3)): _minutes(120),
-            vol.Required(CONF_PRIORITY_COOLDOWN, default=values.get(CONF_PRIORITY_COOLDOWN, 0)): _minutes(240),
-            vol.Required(CONF_MISSING_COOLDOWN, default=values.get(CONF_MISSING_COOLDOWN, 0)): _minutes(60),
-        }
-    )
-    if others:
-        fields[vol.Optional(CONF_REOPENED_BY, default=values.get(CONF_REOPENED_BY, []))] = SelectSelector(
-            SelectSelectorConfig(options=others, multiple=True)
-        )
-    fields.update(
-        {
-            vol.Required(CONF_INTERVAL, default=values.get(CONF_INTERVAL, 0)): _minutes(240),
             vol.Optional(
                 CONF_AI_NOTES, description={"suggested_value": values.get(CONF_AI_NOTES) or None}
             ): LONG_TEXT,
         }
     )
+    timing: dict[Any, Any] = {
+        vol.Required(CONF_COOLDOWN, default=values.get(CONF_COOLDOWN, 3)): _minutes(120),
+        vol.Required(CONF_PRIORITY_COOLDOWN, default=values.get(CONF_PRIORITY_COOLDOWN, 0)): _minutes(240),
+        vol.Required(CONF_MISSING_COOLDOWN, default=values.get(CONF_MISSING_COOLDOWN, 0)): _minutes(60),
+    }
+    if others:
+        timing[vol.Optional(CONF_REOPENED_BY, default=values.get(CONF_REOPENED_BY, []))] = SelectSelector(
+            SelectSelectorConfig(options=others, multiple=True)
+        )
+    timing[vol.Required(CONF_INTERVAL, default=values.get(CONF_INTERVAL, 0))] = _minutes(240)
+    fields[vol.Required("timing")] = _section(timing)
     if subjects:
-        fields[
-            vol.Optional(
-                CONF_CRITICAL_EXCEPT,
-                default=_pick(list(values.get(CONF_CRITICAL_EXCEPT) or []), subjects),
-            )
-        ] = _names(subjects)
-    fields.update(
+        fields[vol.Required("critical_alerts")] = _section(
+            {
+                vol.Optional(
+                    CONF_CRITICAL_EXCEPT,
+                    default=_pick(list(values.get(CONF_CRITICAL_EXCEPT) or []), subjects),
+                ): _names(subjects)
+            }
+        )
+    fields[vol.Required("deterrent")] = _section(
         {
             vol.Optional(CONF_DETER_LIGHTS, default=values.get(CONF_DETER_LIGHTS, [])): LIGHTS,
             vol.Required(CONF_DETER_MINUTES, default=values.get(CONF_DETER_MINUTES, 2)): _minutes(60),
@@ -393,30 +418,43 @@ def _animal_schema(
     reconfigure: bool,
     onboarding: bool,
 ) -> vol.Schema:
+    """Name, kind, look and photo up top; the finer points in sections. In onboarding the
+    name may be left empty, which finishes the step."""
     fields: dict[Any, Any] = {
         (vol.Optional if onboarding else vol.Required)(
             CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
         ): TEXT,
         vol.Required(CONF_SPECIES, default=values.get(CONF_SPECIES, "cat")): TEXT,
         vol.Optional(CONF_DESCRIPTION, description={"suggested_value": values.get(CONF_DESCRIPTION)}): LONG_TEXT,
-        vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
-        vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
-        vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
-        vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
-        vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
-        **_alert_fields(values, cameras),
         vol.Optional(CONF_REFERENCE_UPLOAD): PHOTO,
-        vol.Optional(
-            CONF_KNOWN_LAST_SEEN, description={"suggested_value": values.get(CONF_KNOWN_LAST_SEEN)}
-        ): DateTimeSelector(),
-        vol.Optional(
-            CONF_KNOWN_LOCATION, description={"suggested_value": values.get(CONF_KNOWN_LOCATION)}
-        ): TEXT,
     }
     if reconfigure:
         fields[vol.Required(CONF_REMOVE_REFERENCE, default=False)] = BOOL
-    if onboarding:
-        fields[vol.Required(CONF_ADD_ANOTHER, default=True)] = BOOL
+    fields[vol.Required("looks")] = _section(
+        {
+            vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
+            vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
+            vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
+        }
+    )
+    fields[vol.Required("rules")] = _section(
+        {
+            vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
+            vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
+            **_alert_fields(values, cameras),
+        },
+        collapsed=False,
+    )
+    fields[vol.Required("last_seen")] = _section(
+        {
+            vol.Optional(
+                CONF_KNOWN_LAST_SEEN, description={"suggested_value": values.get(CONF_KNOWN_LAST_SEEN)}
+            ): DateTimeSelector(),
+            vol.Optional(
+                CONF_KNOWN_LOCATION, description={"suggested_value": values.get(CONF_KNOWN_LOCATION)}
+            ): TEXT,
+        }
+    )
     return vol.Schema(fields)
 
 
@@ -483,6 +521,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         self._cameras: dict[str, dict[str, Any]] = {}
         self._people: dict[str, dict[str, Any]] = {}
         self._animals: list[ConfigSubentryData] = []
+        self._phones_found = False
 
     @staticmethod
     @callback
@@ -530,6 +569,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         """Confirm one camera at a time, pre-filled from its device."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, CAMERA_SECTIONS)
             camera = self._camera_values[CONF_CAMERA]
             slug = slugify(user_input[CONF_NAME])
             taken = {c[CONF_SLUG] for c in self._cameras.values()}
@@ -550,7 +590,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="camera",
             data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False),
-            description_placeholders={"camera": self._camera_values[CONF_CAMERA]},
+            description_placeholders={"camera": _camera_label(self.hass, self._camera_values[CONF_CAMERA])},
             errors=errors,
         )
 
@@ -568,6 +608,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         """Phones that get alerts. Quiet zones and sounds are set per person later, under
         Configure → People."""
         phones = [s for s in _notify_services(self.hass) if s.startswith("mobile_app_")]
+        self._phones_found = bool(phones)
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
                 name = service.removeprefix("mobile_app_").replace("_", " ").title()
@@ -590,6 +631,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         """Add animals one by one; leave the name empty to finish."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, ANIMAL_SECTIONS)
             if not (user_input.get(CONF_NAME) or "").strip():
                 return self._finish()
             taken = {a["data"][CONF_NAME].lower() for a in self._animals}
@@ -604,7 +646,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                         data_schema=_animal_schema(
                             user_input, self._onboarding_cameras(), reconfigure=False, onboarding=True
                         ),
-                        description_placeholders={"count": str(len(self._animals))},
+                        description_placeholders=self._animal_placeholders(),
                         errors=errors,
                     )
                 self._animals.append(
@@ -615,17 +657,28 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                         unique_id=user_input[CONF_NAME].strip().lower(),
                     )
                 )
-                if not user_input.get(CONF_ADD_ANOTHER):
-                    return self._finish()
                 user_input = None
         return self.async_show_form(
             step_id="animal",
             data_schema=_animal_schema(
                 user_input or {}, self._onboarding_cameras(), reconfigure=False, onboarding=True
             ),
-            description_placeholders={"count": str(len(self._animals))},
+            description_placeholders=self._animal_placeholders(),
             errors=errors,
         )
+
+    def _animal_placeholders(self) -> dict[str, str]:
+        """The animal step is the last one, so it also says what was left out earlier."""
+        notes = []
+        if not self._cameras:
+            notes.append("No cameras were picked, so no checks run until one is added under Configure → Cameras.")
+        if not self._people:
+            notes.append(
+                ("Nobody was picked to get alerts." if self._phones_found else
+                 "No phones with the Home Assistant app were found, so nobody gets alerts yet.")
+                + " Add people later under Configure → People."
+            )
+        return {"count": str(len(self._animals)), "notes": " ".join(notes)}
 
     def _onboarding_cameras(self) -> list[SelectOptionDict]:
         return [SelectOptionDict(value=c[CONF_SLUG], label=c[CONF_NAME]) for c in self._cameras.values()]
@@ -678,11 +731,15 @@ class WatchOptionsFlow(OptionsFlow):
         choices = [
             SelectOptionDict(value=cid, label=d[CONF_NAME])
             for cid, d in sorted(cams.items(), key=lambda kv: kv[1][CONF_NAME].lower())
-        ] + [SelectOptionDict(value=NEW, label="+ Add a camera")]
+        ] + [SelectOptionDict(value=NEW, label="+ Add a camera")]  # label: fallback for the translation
         return self.async_show_form(
             step_id="cameras",
             data_schema=vol.Schema(
-                {vol.Required("camera"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST))}
+                {
+                    vol.Required("camera"): SelectSelector(
+                        SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST, translation_key="camera_choice")
+                    )
+                }
             ),
         )
 
@@ -701,6 +758,7 @@ class WatchOptionsFlow(OptionsFlow):
         current = cams[editing] if editing else {CONF_CAMERA: self._new_camera, **suggest_camera(self.hass, self._new_camera)}
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, CAMERA_SECTIONS)
             if editing and user_input.get("remove"):
                 cams.pop(editing)
                 return self._save({CONF_CAMERAS: cams})
@@ -726,7 +784,7 @@ class WatchOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="camera",
             data_schema=schema,
-            description_placeholders={"camera": current[CONF_CAMERA]},
+            description_placeholders={"camera": _camera_label(self.hass, current[CONF_CAMERA])},
             errors=errors,
         )
 
@@ -745,7 +803,11 @@ class WatchOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="people",
             data_schema=vol.Schema(
-                {vol.Required("person"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST))}
+                {
+                    vol.Required("person"): SelectSelector(
+                        SelectSelectorConfig(options=choices, mode=SelectSelectorMode.LIST, translation_key="person_choice")
+                    )
+                }
             ),
         )
 
@@ -755,6 +817,7 @@ class WatchOptionsFlow(OptionsFlow):
         editing = self._editing
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, PERSON_SECTIONS)
             if editing and user_input.get("remove"):
                 people.pop(editing)
                 return self._save({CONF_PEOPLE: people})
@@ -940,6 +1003,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, ANIMAL_SECTIONS)
             errors = _validate_animal(user_input, self._taken())
             if not errors:
                 name = user_input[CONF_NAME].strip()
@@ -966,6 +1030,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         subentry = self._get_reconfigure_subentry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, ANIMAL_SECTIONS)
             errors = _validate_animal(user_input, self._taken(subentry.subentry_id))
             if not errors:
                 slug = subentry.data[CONF_SLUG]
@@ -1014,16 +1079,32 @@ def _recipient_schema(hass: HomeAssistant, values: Mapping[str, Any], subjects: 
             vol.Required(CONF_NOTIFY, description={"suggested_value": values.get(CONF_NOTIFY)}): SelectSelector(
                 SelectSelectorConfig(options=_notify_services(hass), custom_value=True)
             ),
-            vol.Optional(CONF_MUTED, default=_pick(list(values.get(CONF_MUTED) or []), subjects)): _names(subjects),
-            vol.Optional(CONF_QUIET_ZONES, default=values.get(CONF_QUIET_ZONES, [])): ZONES,
-            vol.Optional(
-                CONF_QUIET_START, description={"suggested_value": values.get(CONF_QUIET_START)}
-            ): TIME,
-            vol.Optional(CONF_QUIET_END, description={"suggested_value": values.get(CONF_QUIET_END)}): TIME,
-            vol.Required(CONF_QUIET_MODE, default=values.get(CONF_QUIET_MODE, QUIET_NORMAL)): QUIET_MODE,
-            vol.Required(CONF_MISSING_ALERTS, default=values.get(CONF_MISSING_ALERTS, True)): BOOL,
-            vol.Required(CONF_CRITICAL_SOUND, default=values.get(CONF_CRITICAL_SOUND, "default")): TEXT,
-            vol.Required(CONF_CRITICAL_VOLUME, default=values.get(CONF_CRITICAL_VOLUME, 0.7)): VOLUME,
+            vol.Required("critical_alerts"): _section(
+                {
+                    vol.Required(CONF_MISSING_ALERTS, default=values.get(CONF_MISSING_ALERTS, True)): BOOL,
+                    vol.Required(CONF_CRITICAL_SOUND, default=values.get(CONF_CRITICAL_SOUND, "default")): TEXT,
+                    vol.Required(CONF_CRITICAL_VOLUME, default=values.get(CONF_CRITICAL_VOLUME, 0.7)): VOLUME,
+                }
+            ),
+            vol.Required("mutes"): _section(
+                {
+                    vol.Optional(
+                        CONF_MUTED, default=_pick(list(values.get(CONF_MUTED) or []), subjects)
+                    ): _names(subjects),
+                }
+            ),
+            vol.Required("quiet"): _section(
+                {
+                    vol.Optional(CONF_QUIET_ZONES, default=values.get(CONF_QUIET_ZONES, [])): ZONES,
+                    vol.Optional(
+                        CONF_QUIET_START, description={"suggested_value": values.get(CONF_QUIET_START)}
+                    ): TIME,
+                    vol.Optional(
+                        CONF_QUIET_END, description={"suggested_value": values.get(CONF_QUIET_END)}
+                    ): TIME,
+                    vol.Required(CONF_QUIET_MODE, default=values.get(CONF_QUIET_MODE, QUIET_NORMAL)): QUIET_MODE,
+                }
+            ),
         }
     )
 

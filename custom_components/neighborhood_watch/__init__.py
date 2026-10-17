@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import aiohttp
+
 try:  # Home Assistant 2026.10 replaced voluptuous with probatio (same API).
     import probatio as vol
 except ImportError:  # pragma: no cover - older Home Assistant
@@ -124,12 +126,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 call.data["folder"], call.data.get("identify", True), call.data.get("limit", 50)
             )
         except ValueError as err:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="scan_failed",
-                translation_placeholders={"error": str(err)},
-            ) from err
+            if str(err) == "no_detector":  # a setting to fix, not a failure
+                raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_detector") from err
+            raise _scan_failed(err) from err
+        except (TimeoutError, OSError, aiohttp.ClientError) as err:
+            raise _scan_failed(err) from err
         return {"scan_id": sid}
+
+    def _scan_failed(err: Exception) -> HomeAssistantError:
+        """The detector couldn't be reached or refused the scan."""
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="scan_failed",
+            translation_placeholders={"error": str(err) or type(err).__name__},
+        )
 
     async def add_note(call: ServiceCall) -> ServiceResponse:
         watch = engine()

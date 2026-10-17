@@ -8,6 +8,8 @@ from homeassistant.core import HomeAssistant
 
 from . import WatchConfigEntry
 from .const import (
+    CONF_DATASET_DIR,
+    CONF_DETECTOR_URL,
     CONF_NAME,
     CONF_NOTIFY,
     CONF_PEOPLE,
@@ -18,7 +20,7 @@ from .const import (
 )
 from .engine import WatchEngine
 
-TO_REDACT = {CONF_PUBLIC_URL}
+TO_REDACT = {CONF_PUBLIC_URL, CONF_DETECTOR_URL, CONF_DATASET_DIR}
 # People: who they are, their phones and where they are.
 PERSON_REDACT = {CONF_NAME, CONF_NOTIFY, CONF_PERSON, CONF_QUIET_ZONES}
 

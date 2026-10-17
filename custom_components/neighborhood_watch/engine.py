@@ -658,6 +658,9 @@ class WatchEngine:
         self.data.setdefault("critical", {})
         self.data.setdefault("alerts", {})
         self._prune_removed()
+        for record in (self.data.get("scans") or {}).values():
+            if record.get("state") == "scanning":  # a restart ended the watch on it
+                record.update(state="error", error="Interrupted by a restart.")
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
         # Lights a deterrent left on when Home Assistant stopped: their timer is gone.
@@ -1659,20 +1662,26 @@ class WatchEngine:
             self.data.setdefault("deterring", {})[cam.slug] = turned_on
             self._save()
             if cam.deter_lights:
-                await self.hass.services.async_call(
-                    "homeassistant", "turn_on", {"entity_id": cam.deter_lights}, blocking=False
-                )
+                try:
+                    await self.hass.services.async_call(
+                        "homeassistant", "turn_on", {"entity_id": cam.deter_lights}, blocking=False
+                    )
+                except Exception as err:  # noqa: BLE001 - a deterrent never stops the alerts
+                    _LOGGER.warning("%s: deterrent lights failed: %s", cam.name, err)
         if cam.deter_sound and cam.deter_sound.get("entity_id"):
-            await self.hass.services.async_call(
-                "media_player",
-                "play_media",
-                {
-                    "entity_id": cam.deter_sound["entity_id"],
-                    "media_content_id": cam.deter_sound.get("media_content_id"),
-                    "media_content_type": cam.deter_sound.get("media_content_type", "music"),
-                },
-                blocking=False,
-            )
+            try:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "play_media",
+                    {
+                        "entity_id": cam.deter_sound["entity_id"],
+                        "media_content_id": cam.deter_sound.get("media_content_id"),
+                        "media_content_type": cam.deter_sound.get("media_content_type", "music"),
+                    },
+                    blocking=False,
+                )
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("%s: deterrent sound failed: %s", cam.name, err)
 
         async def lights_back(_now: datetime) -> None:
             self._deterring.pop(cam.slug, None)
@@ -1742,7 +1751,11 @@ class WatchEngine:
             status: dict[str, Any] = {}
             for _ in range(6 * 60 * 12):  # up to 12 hours
                 async with asyncio.timeout(30):
-                    status = await (await session.get(f"{url}/scan/{sid}")).json()
+                    response = await session.get(f"{url}/scan/{sid}")
+                    if response.status == 404:  # the detector restarted and forgot this scan
+                        status = {"state": "error", "error": "The detector restarted during the scan."}
+                        break
+                    status = await response.json()
                 record.update(
                     files_total=status.get("files_total"), files_done=status.get("files_done")
                 )

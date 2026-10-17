@@ -24,7 +24,7 @@ import time
 from aiohttp import web
 import numpy as np
 import openvino as ov
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 MODEL_DIR = Path(os.environ.get("NW_MODEL", "/models/megadetector"))
 DEVICE = os.environ.get("NW_DEVICE", "AUTO")
@@ -218,8 +218,10 @@ async def detect_endpoint(request: web.Request) -> web.Response:
     try:
         # Decoding and inference run off the event loop so /health and scans stay responsive.
         detections, ow, oh, ms = await asyncio.get_running_loop().run_in_executor(None, _detect_bytes, body)
-    except Exception as err:  # noqa: BLE001
+    except (UnidentifiedImageError, OSError) as err:
         return web.json_response({"error": f"not an image: {err}"}, status=400)
+    except Exception as err:  # noqa: BLE001 - e.g. the GPU failed
+        return web.json_response({"error": f"detection failed: {err}"}, status=500)
     return web.json_response(
         {
             "width": ow,

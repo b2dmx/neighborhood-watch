@@ -9,7 +9,7 @@ const SECTIONS = [
   { value: "review", label: "To review" },
   { value: "animals", label: "Animals" },
   { value: "wildlife", label: "Wildlife" },
-  { value: "summary", label: "Night summary" },
+  { value: "summary", label: "Last night" },
   { value: "recent", label: "Recent detections" },
   { value: "switches", label: "Critical alerts" },
   { value: "scan", label: "Scan a folder" },
@@ -40,7 +40,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   setConfig(config) {
     this._config = {
       title: "Neighborhood Watch",
-      sections: SECTIONS.map((s) => s.value),
+      // Scanning needs the local detector, so that section is opt-in.
+      sections: SECTIONS.map((s) => s.value).filter((v) => v !== "scan"),
       hide: [],
       columns: 3,
       photo_height: 140,
@@ -49,15 +50,17 @@ class NeighborhoodWatchCard extends HTMLElement {
       order: "recent",
       ...config,
     };
+    this._sectionsSet = !!config && "sections" in config;
     this._sig = null;
     this._signed = this._signed || {};
+    this._broken = this._broken || new Set();
     this._answered = this._answered || new Set();
     if (this._hass) this._render();
   }
 
   connectedCallback() {
-    // A quiet system sends no updates, so redraw each minute to keep "x min ago" true.
-    if (!this._tick) this._tick = setInterval(() => this._render(), 60000);
+    // A quiet system sends no updates, so refresh each minute to keep "x min ago" true.
+    if (!this._tick) this._tick = setInterval(() => this._onTick(), 60000);
     if (!this._onKey) {
       this._onKey = (ev) => {
         if (ev.key !== "Escape" || !this._zoom) return;
@@ -86,6 +89,19 @@ class NeighborhoodWatchCard extends HTMLElement {
     window.removeEventListener("pointerup", this._onRelease);
     window.removeEventListener("pointercancel", this._onRelease);
     this._onRelease = null;
+  }
+
+  _onTick() {
+    // Only the "x min ago" text moves on its own; redraw everything just when data changed.
+    // A full redraw at least hourly too, so photos older than photo_hours go back to the face.
+    const sig = this._signature();
+    const hour = Math.floor(Date.now() / 3600e3);
+    if (this._pending || sig !== this._sig || hour !== this._hour) {
+      this._sig = sig;
+      this._hour = hour;
+      return this._render();
+    }
+    this.shadowRoot?.querySelectorAll("[data-ago]").forEach((el) => (el.textContent = ago(el.dataset.ago)));
   }
 
   set hass(hass) {
@@ -142,7 +158,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         ({
           title: "Title",
           sections: "Show",
-          hide: "Hide these animals, wildlife or cameras",
+          hide: "Hide these animals or cameras",
           order: "Animal order",
           columns: "Animal columns",
           photo_height: "Photo height",
@@ -216,11 +232,12 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _busy() {
-    // Typing, picking from a list, or zoomed into a frame: a redraw now would undo it.
+    // Typing or zoomed into a frame: a redraw now would undo it. (Not a list: closing one
+    // without choosing leaves it focused.)
     const root = this.shadowRoot;
     if (!root) return false;
     const el = root.activeElement;
-    if (el && !el.disabled && el.matches("input, textarea, select")) return true;
+    if (el && !el.disabled && el.matches("input, textarea")) return true;
     return !!(this._zoom && root.querySelector(".lbimg.zoomed"));
   }
 
@@ -237,8 +254,10 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _render(force) {
     if (!this._hass || !this._config) return;
-    // Held back while the user is busy; runs when they leave the field or close the frame.
-    if (!force && this._busy()) {
+    // Held back while the user is busy; runs when they leave the field or close the frame,
+    // or after 30 s regardless (what they typed is carried over).
+    if (!force && this._busy() && !(this._pending && Date.now() - this._pendingSince > 30000)) {
+      if (!this._pending) this._pendingSince = Date.now();
       this._pending = true;
       return;
     }
@@ -261,7 +280,10 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (show.has("summary") && d.hub) side.push(this._summary(d.hub));
     if (show.has("recent") && d.cameras.length) side.push(this._recent(d.cameras));
     if (show.has("switches")) side.push(this._switches(d));
-    if (show.has("scan") && d.hub?.keys.last_scan) side.push(this._scan(d.hub));
+    // Scanning needs a detector: shown when asked for, or (on the default sections) once a scan has run.
+    const scan = this._state(d.hub?.keys.last_scan);
+    const scanned = scan && !["unknown", "unavailable"].includes(scan.state);
+    if (scan && (show.has("scan") || (scanned && !this._sectionsSet))) side.push(this._scan(d.hub));
     const filled = side.filter(Boolean);
     if (filled.length) parts.push(`<div class="side">${filled.join("")}</div>`);
 
@@ -354,7 +376,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._scanFolder = folder;
         scanButton.disabled = true;
         Promise.resolve(this._hass.callService(DOMAIN, "scan", { folder }))
-          .catch((err) => alert(`Scan could not start: ${err.message || err}`))
+          .catch((err) => alert(err.message || err))
           .finally(() => (scanButton.disabled = false));
       });
   }
@@ -373,20 +395,25 @@ class NeighborhoodWatchCard extends HTMLElement {
   _answer(sid, answer) {
     // Remembered so the buttons stay off until the sighting leaves the list.
     this._answered.add(sid);
-    this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid });
+    Promise.resolve(this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid })).catch((err) => {
+      this._answered.delete(sid);
+      this._render(true);
+      alert(`Answer not saved: ${err.message || err}`);
+    });
     // A mistake fixed: offer to tell the AI, where it will use it.
     if (["right", "unsure"].includes(answer)) return;
     const d = this._devices();
     const items = this._state(d.hub?.keys.to_review)?.attributes?.items || [];
     const it = items.find((x) => x.id === sid);
     if (!it) return;
-    const known = new Set(this._names(d));
+    // Notes are about an animal or a camera; wildlife kinds can't hold one.
+    const known = new Set(d.animals.map((x) => x.name));
     const about = [];
     if (answer !== "wrong" && known.has(answer)) about.push(["animal", answer, `${answer}: how to recognise them`]);
     if (known.has(it.animal) && it.animal !== answer) about.push(["animal", it.animal, `${it.animal}: how to tell them apart`]);
     if (d.cameras.some((c) => c.name === it.where)) about.push(["camera", it.where, `${it.where} camera: what's in this view`]);
     if (!about.length) return;
-    this._note = { said: it.animal, was: answer === "wrong" ? "not that" : answer, where: it.where, about, text: "" };
+    this._note = { said: it.animal, was: answer === "wrong" ? "not that" : answer, about, text: "" };
     this._render(true);
   }
 
@@ -411,9 +438,14 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("img[data-frame]").forEach((img) => {
       // "crop": cut to the animal the local detector found; the full frame otherwise.
       const path = `/api/${DOMAIN}/frame/${img.dataset.frame}${img.dataset.crop ? "/crop" : ""}`;
+      // A frame that's gone stays marked broken; it isn't asked for again on every redraw.
+      if (this._broken.has(path)) return img.classList.add("broken");
       // A link that stops working (signature expired or revoked) is signed afresh, once.
       img.addEventListener("error", () => {
-        if (img.dataset.retried) return img.classList.add("broken");
+        if (img.dataset.retried) {
+          this._broken.add(path);
+          return img.classList.add("broken");
+        }
         img.dataset.retried = "1";
         delete this._signed[path];
         this._sign(img, path);
@@ -432,7 +464,9 @@ class NeighborhoodWatchCard extends HTMLElement {
     this._hass
       .callWS({ type: "auth/sign_path", path, expires: 86400 })
       .then((r) => {
-        this._signed[path] = { url: r.path, exp: Date.now() + 86400e3 };
+        const now = Date.now();
+        for (const [p, c] of Object.entries(this._signed)) if (c.exp <= now) delete this._signed[p];
+        this._signed[path] = { url: r.path, exp: now + 86400e3 };
         img.src = r.path;
       })
       .catch(() => img.classList.add("broken"));
@@ -441,8 +475,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   _lightbox() {
     // The full frame, over everything. Tap the picture to zoom in where you tapped.
     if (!this._zoom) return "";
-    return `<div class="lightbox" data-close>
-        <button class="lbclose" data-close title="Close" aria-label="Close">✕</button>
+    return `<div class="lightbox">
+        <button class="lbclose" title="Close" aria-label="Close">✕</button>
         <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}">
       </div>`;
   }
@@ -483,7 +517,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       return `<div class="rev">
           <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
           <div class="revname"><b>${esc(it.animal)}</b> <span class="muted">${esc(it.confidence)}</span></div>
-          <div class="muted small">${esc(it.where)} · ${clock(it.time)} · ${ago(it.time)}</div>
+          <div class="muted small">${esc(it.where)} · ${clock(it.time)} · <span data-ago="${esc(it.time)}">${ago(it.time)}</span></div>
           <div class="acts">
             <button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right"${off}>✓</button>
             <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong" aria-label="Wrong"${off}>✗</button>
@@ -492,7 +526,9 @@ class NeighborhoodWatchCard extends HTMLElement {
           </div>
         </div>`;
     });
-    const more = items.length > limit ? `<div class="muted">${items.length - limit} more after these.</div>` : "";
+    // The sensor lists at most 40; its state is the full count.
+    const total = Number.isFinite(Number(s.state)) ? Number(s.state) : items.length;
+    const more = total > limit ? `<div class="muted">${total - limit} more after these.</div>` : "";
     return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}</div>`;
   }
 
@@ -511,7 +547,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     }
     return `<div class="section"><h2>Scan a folder</h2>
       <div class="status">${status}</div>
-      <div class="acts"><input data-folder placeholder="Folder in the scan share, e.g. trailcam" value="${esc(this._scanFolder || "")}">
+      <div class="acts"><input data-folder placeholder="Folder in the detector's scan folder, e.g. trailcam" value="${esc(this._scanFolder || "")}">
       <button class="chip" data-scan>Scan</button></div></div>`;
   }
 
@@ -550,7 +586,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       let status;
       if (live) status = `<span class="live">● On camera · ${esc(onCam.attributes.camera || "")}</span>`;
       else if (seen && !["unknown", "unavailable"].includes(seen.state))
-        status = `${esc(where?.state)} · ${ago(seen.state)}`;
+        status = `${esc(where?.state)} · <span data-ago="${esc(seen.state)}">${ago(seen.state)}</span>`;
       else status = `Not seen yet`;
       // A sighting photo shows for photo_hours, then the tile goes back to the drawn face.
       const hours = Number(this._config.photo_hours ?? 12);
@@ -584,7 +620,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       const maybe = k.possible ? ` <span class="muted">(possible)</span>` : "";
       rows.push(`<div class="row" data-more="${esc(hub.keys.wildlife)}">
           <span class="rname">${esc(name)}${tag}${maybe}</span>
-          <span class="rinfo">${esc(k.where || "")} · ${ago(k.last_seen)}</span>
+          <span class="rinfo">${esc(k.where || "")} · <span data-ago="${esc(k.last_seen || "")}">${ago(k.last_seen)}</span></span>
           <span class="rcount">${k.tonight ? `${esc(k.tonight)} tonight` : ""}</span>
         </div>`);
     }
@@ -776,7 +812,6 @@ const STYLE = `
   .chip.alarm { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: var(--text-primary-color, #fff); }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--divider-color); cursor: pointer; }
   .row:last-child { border-bottom: none; }
-  .row.is-live .rname { color: var(--success-color, #43a047); }
   .rname { font-weight: 600; min-width: 90px; }
   .rinfo { flex: 1; font-size: .92em; }
   .rcount { font-size: .85em; color: var(--secondary-text-color); white-space: nowrap; }

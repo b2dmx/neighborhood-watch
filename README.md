@@ -59,9 +59,9 @@ Onboarding walks through:
 3. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
 4. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
-6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Skip this step if you only care about pests.
+6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked or no phones were found, so nothing is missed.
 
-Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one:
+Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Critical alerts**, **Mutes** and **Quiet zones and hours**; for an animal: **Looks**, **Rules** and **Last seen**):
 
 - **Cameras**. Besides its sensors and cooldowns, a camera has:
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
@@ -120,7 +120,7 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 | Last photo | The exact frame the AI judged |
 | Reference photo | The photo sent to the AI beside each frame (if set) |
 | Sightings tonight / this week | Counted sightings since the last summary, and over 7 days |
-| Recently absent | On after the absent window without a sighting; while on, the AI must be sure |
+| Recently absent | On after the absent window without a sighting; while on, the AI must be sure. Not for priority animals, which have their own stricter rules |
 
 Every animal has **Alerts**, **Critical alerts** and **Missing mode** switches. Priority animals also get **Last confirmed**. They also get **Confirmed on camera**: on for the on-camera window after a high-confidence sighting only, with the camera as an attribute. **Confirmed today** shows whether that happened today. Use Confirmed on camera to trigger a feeder.
 
@@ -169,12 +169,12 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 
 ## Alerts
 
-The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, a wildlife kind, or one of three catch-alls (**unknown animals**, **other wildlife** you haven't added, and **unsure motion**). Each has two settings:
+The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Wildlife and catch-alls**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
 - **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.
 
-Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera, animal and wildlife kind, and one per catch-all on the Neighborhood Watch device. These all start off. Each person's **"<name> gets critical alerts"** switch starts on.
+Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera and animal, and one per catch-all on the Neighborhood Watch device. These all start off. Each person's **"<name> gets critical alerts"** switch starts on.
 
 Then:
 
@@ -211,7 +211,7 @@ When a pest is seen at a camera with deterrent lights or a sound:
 - The lights that were off turn on for the set time, then turn back off. Lights that were already on are left on.
 - The sound plays on the chosen speaker.
 
-Each kind also has an **On camera** sensor, for your own automations.
+For your own automations, the Neighborhood Watch device has **Pest on camera** (pests only) and **Wildlife on camera** (any wildlife) sensors.
 
 ## Corrections and training data
 
@@ -304,4 +304,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.13.0 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.13.1 by Goobis<br>AI was used to help develop this integration.</p>
