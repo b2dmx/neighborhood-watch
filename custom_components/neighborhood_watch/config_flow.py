@@ -196,6 +196,7 @@ def _number(low: float, high: float, unit: str) -> NumberSelector:
 CAMERA_SECTIONS = ("timing", "critical_alerts", "deterrent")
 PERSON_SECTIONS = ("critical_alerts", "mutes", "quiet")
 ANIMAL_SECTIONS = ("looks", "rules", "last_seen")
+MODELS_SECTIONS = ("first_model_hours",)
 
 
 def _section(fields: dict[Any, Any], collapsed: bool = True) -> section:
@@ -284,12 +285,16 @@ def _models_schema(values: Mapping[str, Any]) -> vol.Schema:
             vol.Required(CONF_FIRST_LOOK, default=values.get(CONF_FIRST_LOOK, [])): AI_MODELS,
             vol.Optional(CONF_SECOND_OPINION, default=values.get(CONF_SECOND_OPINION, [])): AI_MODELS,
             vol.Optional(CONF_PAID, default=values.get(CONF_PAID, [])): AI_MODELS,
-            vol.Optional(
-                CONF_MAIN_START, description={"suggested_value": values.get(CONF_MAIN_START) or None}
-            ): TIME,
-            vol.Optional(
-                CONF_MAIN_END, description={"suggested_value": values.get(CONF_MAIN_END) or None}
-            ): TIME,
+            vol.Required("first_model_hours"): _section(
+                {
+                    vol.Optional(
+                        CONF_MAIN_START, description={"suggested_value": values.get(CONF_MAIN_START) or None}
+                    ): TIME,
+                    vol.Optional(
+                        CONF_MAIN_END, description={"suggested_value": values.get(CONF_MAIN_END) or None}
+                    ): TIME,
+                }
+            ),
         }
     )
 
@@ -338,6 +343,16 @@ def suggest_camera(hass: HomeAssistant, camera_entity: str) -> dict[str, Any]:
         state = hass.states.get(camera_entity)
         name = state.name if state else camera_entity.split(".", 1)[1].replace("_", " ").title()
     return {CONF_NAME: name, CONF_TRIGGERS: triggers, CONF_SKIP_WHEN: skip}
+
+
+def _sensors_note(values: Mapping[str, Any]) -> dict[str, str]:
+    """The camera page's {sensors} placeholder: a hint when nothing starts a check."""
+    if values.get(CONF_TRIGGERS) or values.get(CONF_INTERVAL):
+        return {"sensors": ""}
+    return {
+        "sensors": "\n\nNo motion or animal sensors were found for this camera. Pick one below, "
+        "or open Timing and set Also check every so it is checked on a timer."
+    }
 
 
 def _camera_schema(
@@ -411,20 +426,34 @@ def _camera_data(user_input: Mapping[str, Any], slug: str, camera: str) -> dict[
     }
 
 
+def _species(known: list[str]) -> SelectSelector:
+    """Cat, Dog and any kind already in use; any other kind can be typed."""
+    kinds = list(dict.fromkeys(["cat", "dog", *(k.strip().lower() for k in known if k and k.strip())]))
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[SelectOptionDict(value=k, label=k.title()) for k in kinds],
+            custom_value=True,
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
 def _animal_schema(
     values: Mapping[str, Any],
     cameras: list[SelectOptionDict],
     *,
     reconfigure: bool,
     onboarding: bool,
+    species: list[str] | None = None,
 ) -> vol.Schema:
     """Name, kind, look and photo up top; the finer points in sections. In onboarding the
     name may be left empty, which finishes the step."""
+    kind = (values.get(CONF_SPECIES) or "cat").strip().lower()
     fields: dict[Any, Any] = {
         (vol.Optional if onboarding else vol.Required)(
             CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
         ): TEXT,
-        vol.Required(CONF_SPECIES, default=values.get(CONF_SPECIES, "cat")): TEXT,
+        vol.Required(CONF_SPECIES, default=kind): _species([*(species or []), kind]),
         vol.Optional(CONF_DESCRIPTION, description={"suggested_value": values.get(CONF_DESCRIPTION)}): LONG_TEXT,
         vol.Optional(CONF_REFERENCE_UPLOAD): PHOTO,
     }
@@ -442,8 +471,7 @@ def _animal_schema(
             vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
             vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
             **_alert_fields(values, cameras),
-        },
-        collapsed=False,
+        }
     )
     fields[vol.Required("last_seen")] = _section(
         {
@@ -462,7 +490,7 @@ def _animal_data(user_input: Mapping[str, Any], slug: str, added: str) -> dict[s
     return {
         CONF_NAME: user_input[CONF_NAME].strip(),
         CONF_SLUG: slug,
-        CONF_SPECIES: (user_input.get(CONF_SPECIES) or "cat").strip(),
+        CONF_SPECIES: (user_input.get(CONF_SPECIES) or "").strip().lower() or "cat",
         CONF_DESCRIPTION: (user_input.get(CONF_DESCRIPTION) or "").strip(),
         CONF_TIPS: (user_input.get(CONF_TIPS) or "").strip(),
         CONF_PATTERN: user_input.get(CONF_PATTERN, "na"),
@@ -540,6 +568,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_ai_task")
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, MODELS_SECTIONS)
             errors = _validate_models(user_input)
             if not errors:
                 self._options.update(user_input)
@@ -590,7 +619,10 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="camera",
             data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False),
-            description_placeholders={"camera": _camera_label(self.hass, self._camera_values[CONF_CAMERA])},
+            description_placeholders={
+                "camera": _camera_label(self.hass, self._camera_values[CONF_CAMERA]),
+                **_sensors_note(self._camera_values),
+            },
             errors=errors,
         )
 
@@ -609,6 +641,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         Configure → People."""
         phones = [s for s in _notify_services(self.hass) if s.startswith("mobile_app_")]
         self._phones_found = bool(phones)
+        names = _phone_names(self.hass)
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
                 name = service.removeprefix("mobile_app_").replace("_", " ").title()
@@ -621,7 +654,10 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Optional("phones", default=phones): SelectSelector(
-                        SelectSelectorConfig(options=phones, multiple=True)
+                        SelectSelectorConfig(
+                            options=[SelectOptionDict(value=s, label=names.get(s, s)) for s in phones],
+                            multiple=True,
+                        )
                     )
                 }
             ),
@@ -644,7 +680,8 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_show_form(
                         step_id="animal",
                         data_schema=_animal_schema(
-                            user_input, self._onboarding_cameras(), reconfigure=False, onboarding=True
+                            user_input, self._onboarding_cameras(), reconfigure=False, onboarding=True,
+                            species=self._species(),
                         ),
                         description_placeholders=self._animal_placeholders(),
                         errors=errors,
@@ -661,7 +698,8 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="animal",
             data_schema=_animal_schema(
-                user_input or {}, self._onboarding_cameras(), reconfigure=False, onboarding=True
+                user_input or {}, self._onboarding_cameras(), reconfigure=False, onboarding=True,
+                species=self._species(),
             ),
             description_placeholders=self._animal_placeholders(),
             errors=errors,
@@ -679,6 +717,9 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                 + " Add people later under Configure → People."
             )
         return {"count": str(len(self._animals)), "notes": " ".join(notes)}
+
+    def _species(self) -> list[str]:
+        return [a["data"].get(CONF_SPECIES) or "" for a in self._animals]
 
     def _onboarding_cameras(self) -> list[SelectOptionDict]:
         return [SelectOptionDict(value=c[CONF_SLUG], label=c[CONF_NAME]) for c in self._cameras.values()]
@@ -711,8 +752,9 @@ class WatchOptionsFlow(OptionsFlow):
                 "people",
                 "alerts",
                 "catch_alls",
-                "models",
                 "schedule",
+                "models",
+                # The advanced ones last (their labels say so).
                 "identification",
                 "training",
                 "detector",
@@ -784,7 +826,10 @@ class WatchOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="camera",
             data_schema=schema,
-            description_placeholders={"camera": _camera_label(self.hass, current[CONF_CAMERA])},
+            description_placeholders={
+                "camera": _camera_label(self.hass, current[CONF_CAMERA]),
+                **_sensors_note(current),
+            },
             errors=errors,
         )
 
@@ -837,6 +882,7 @@ class WatchOptionsFlow(OptionsFlow):
     async def async_step_models(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _flatten(user_input, MODELS_SECTIONS)
             errors = _validate_models(user_input)
             if not errors:
                 user_input.setdefault(CONF_SECOND_OPINION, [])
@@ -993,6 +1039,13 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
             return "No reference photo yet."
         return "Current reference photo:\n\n" + f"![reference photo]({picture})"
 
+    def _species(self) -> list[str]:
+        return [
+            s.data.get(CONF_SPECIES) or ""
+            for s in self._get_entry().subentries.values()
+            if s.subentry_type == SUBENTRY_ANIMAL
+        ]
+
     def _taken(self, exclude: str | None = None) -> set[str]:
         return {
             s.data[CONF_NAME].lower()
@@ -1019,7 +1072,8 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="user",
             data_schema=_animal_schema(
-                user_input or {}, _camera_options(self._get_entry()), reconfigure=False, onboarding=False
+                user_input or {}, _camera_options(self._get_entry()), reconfigure=False, onboarding=False,
+                species=self._species(),
             ),
             errors=errors,
         )
@@ -1055,6 +1109,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
                 _camera_options(self._get_entry()),
                 reconfigure=True,
                 onboarding=False,
+                species=self._species(),
             ),
             errors=errors,
         )
@@ -1069,6 +1124,22 @@ def _notify_services(hass: HomeAssistant) -> list[str]:
         for name in hass.services.async_services().get("notify", {})
         if name not in ("notify", "send_message", "persistent_notification")
     )
+
+
+def _phone_names(hass: HomeAssistant) -> dict[str, str]:
+    """Each Home Assistant app's notify service, mapped to its phone's device name."""
+    dev_reg = dr.async_get(hass)
+    names: dict[str, str] = {}
+    for entry in hass.config_entries.async_entries("mobile_app"):
+        device_name = entry.data.get("device_name") or entry.title
+        if not device_name:
+            continue
+        devices = dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+        device = devices[0] if devices else None
+        names[f"mobile_app_{slugify(device_name)}"] = (
+            device and (device.name_by_user or device.name)
+        ) or device_name
+    return names
 
 
 def _recipient_schema(hass: HomeAssistant, values: Mapping[str, Any], subjects: list[str]) -> vol.Schema:

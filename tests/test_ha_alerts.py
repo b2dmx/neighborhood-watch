@@ -243,7 +243,7 @@ async def test_pests_and_wildlife_without_pages(hass, watch, freezer):
     await trigger(hass, "garage")
     await later(freezer, 4)
     await trigger(hass, "garage")
-    assert [m["title"] for m in to(watch["sent"], "bo")] == ["Opossum — Garage", "Opossum — Garage"]
+    assert [m["title"] for m in to(watch["sent"], "bo")] == ["Pest: Opossum — Garage", "Pest: Opossum — Garage"]
     assert [level(m) for m in to(watch["sent"], "bo")] == ["active", "active"]  # a pest alerts every time
     assert hass.states.get("binary_sensor.neighborhood_watch_pest_on_camera").state == "on"
     assert hass.states.get("binary_sensor.neighborhood_watch_pest_on_camera").attributes["camera"] == "Garage"

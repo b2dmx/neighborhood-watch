@@ -6,6 +6,7 @@ handoff's acceptance list can be driven exactly.
 from __future__ import annotations
 
 from collections import defaultdict
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -131,7 +132,7 @@ async def setup(hass: HomeAssistant, tmp_path: Path, freezer):
             animal_sub("Pepper", always_strict=True, known_last_seen=None, known_location=None),
             animal_sub("Ziggy", known_last_seen=None, known_location=None),
             animal_sub("Coco", added=(NIGHT - timedelta(days=30)).isoformat(),
-                       known_last_seen="2026-10-11 21:30:00", known_location="Cat House"),
+                       known_last_seen="2026-10-11 21:30:00", known_location="Shed"),
             animal_sub("Oscar", known_last_seen="2026-09-01 21:30:00"),
         ],
     )
@@ -187,7 +188,9 @@ async def test_milo_sighting_is_tracked_and_announced(hass, setup):
     assert data["location"] == "yard"
     assert data["location_name"] == "Yard"
     assert data["test"] == "no"
-    assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/yard.jpg?t=")
+    assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
+    # In a random folder: /local needs no login, so the name mustn't be guessable.
+    assert re.search(r"/neighborhood_watch/[0-9a-f]{32}/yard\.jpg\?t=\d+$", data["image"])
     assert data["models_used"] == "First Look"
 
     assert state(hass, "sensor.milo_location").state == "Yard"
@@ -204,7 +207,7 @@ async def test_dashboard_photo_is_the_exact_frame_the_ai_judged(hass, setup, has
     watch = setup["watch"]
     photo = await hass.async_add_executor_job(watch.photo_path(watch.animal_by_name("Milo")).read_bytes)
     assert photo == FRAME
-    www = Path(hass.config.path("www", "neighborhood_watch", "yard.jpg")).read_bytes()
+    www = watch.www_path("yard").read_bytes()
     assert www == FRAME
 
 
@@ -424,7 +427,7 @@ async def test_set_reference_photo_from_last_photo(hass, setup):
 
 
 async def test_known_last_seen_seeds_tracking(hass, setup):
-    assert state(hass, "sensor.coco_location").state == "Cat House"
+    assert state(hass, "sensor.coco_location").state == "Shed"
     assert state(hass, "binary_sensor.coco_recently_absent").state == "off"
     assert state(hass, "sensor.coco_last_seen").state.startswith("2026-10-12T04:30:00")  # 21:30 Pacific
     assert state(hass, "binary_sensor.oscar_recently_absent").state == "on"

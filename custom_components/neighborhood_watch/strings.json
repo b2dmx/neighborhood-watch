@@ -3,20 +3,30 @@
     "step": {
       "user": {
         "title": "AI models",
-        "description": "Which AI Task entities look at each camera frame, in order. Each model is tried only when the one before gives no answer (busy, error or out of quota).",
+        "description": "Which AI Task entities look at each camera frame, in order. You only need one model, under First look; everything else here is optional. Each model is tried only when the one before gives no answer (busy, error or out of quota).",
         "data": {
           "first_look": "First look",
           "second_opinion": "Second opinion",
-          "paid_models": "Paid models",
-          "main_start": "First model's hours (from)",
-          "main_end": "First model's hours (until)"
+          "paid_models": "Paid models"
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
           "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
-          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list.",
-          "main_start": "Optional: outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
-          "main_end": "Leave both empty to keep it first all the time."
+          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list."
+        },
+        "sections": {
+          "first_model_hours": {
+            "name": "First model's hours",
+            "description": "Optional: save the first model's daily quota for the busiest hours.",
+            "data": {
+              "main_start": "First model's hours (from)",
+              "main_end": "First model's hours (until)"
+            },
+            "data_description": {
+              "main_start": "Outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
+              "main_end": "Leave both empty to keep it first all the time."
+            }
+          }
         }
       },
       "schedule": {
@@ -45,7 +55,7 @@
       },
       "camera": {
         "title": "Camera: {camera}",
-        "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.",
+        "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.{sensors}",
         "data": {
           "name": "Name",
           "triggers": "Start a check when any of these turn on",
@@ -101,7 +111,8 @@
         },
         "data_description": {
           "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-          "reference_upload": "A clear night photo, sent to the AI beside each frame."
+          "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+          "species": "Pick one or type any other kind."
         },
         "sections": {
           "looks": {
@@ -109,17 +120,17 @@
             "description": "Coat details and tips that help the AI tell it apart.",
             "data": {
               "pattern": "Coat pattern",
-              "base": "Main colour",
+              "base": "Main tone at night (infrared)",
               "tips": "Identification tips"
             },
             "data_description": {
               "pattern": "For a priority animal, both AI models must report this pattern.",
-              "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+              "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
               "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
             }
           },
           "rules": {
-            "name": "Rules",
+            "name": "Alerts and strictness",
             "description": "How carefully it is checked, and where it alerts.",
             "data": {
               "priority": "Priority animal",
@@ -128,8 +139,8 @@
               "critical_at": "Critical alerts only at"
             },
             "data_description": {
-              "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
-              "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
+              "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor.",
+              "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically.",
               "alert_at": "Cameras where it sends an alert. Empty: never.",
               "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
             }
@@ -187,14 +198,14 @@
         "menu_options": {
           "cameras": "Cameras",
           "people": "People (who gets alerts)",
-          "models": "AI models",
-          "schedule": "When to watch",
-          "identification": "Identification",
-          "notifications": "Notification pictures",
           "alerts": "Alerts",
-          "training": "Training data",
-          "detector": "Local detector",
-          "catch_alls": "Wildlife and catch-alls"
+          "catch_alls": "Wildlife and catch-alls",
+          "schedule": "When to watch",
+          "models": "AI models",
+          "identification": "Advanced: AI instructions",
+          "training": "Advanced: training data",
+          "detector": "Advanced: local detector",
+          "notifications": "Advanced: notification pictures"
         }
       },
       "models": {
@@ -203,16 +214,26 @@
         "data": {
           "first_look": "First look",
           "second_opinion": "Second opinion",
-          "paid_models": "Paid models",
-          "main_start": "First model's hours (from)",
-          "main_end": "First model's hours (until)"
+          "paid_models": "Paid models"
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
           "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
-          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list.",
-          "main_start": "Optional: outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
-          "main_end": "Leave both empty to keep it first all the time."
+          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list."
+        },
+        "sections": {
+          "first_model_hours": {
+            "name": "First model's hours",
+            "description": "Optional: save the first model's daily quota for the busiest hours.",
+            "data": {
+              "main_start": "First model's hours (from)",
+              "main_end": "First model's hours (until)"
+            },
+            "data_description": {
+              "main_start": "Outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
+              "main_end": "Leave both empty to keep it first all the time."
+            }
+          }
         }
       },
       "schedule": {
@@ -233,7 +254,7 @@
         }
       },
       "identification": {
-        "title": "Identification",
+        "title": "AI instructions",
         "description": "The AI instructions. {animals} is replaced with each animal's description, {location} with the camera name, {absent} with the recently-absent line, {extra_rules} with the extra rules and {wildlife} with the wildlife list.",
         "data": {
           "instructions": "Instructions",
@@ -268,7 +289,7 @@
         "data_description": {
           "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
           "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data.",
-          "min_confidence": "Less sure answers don't alert; they wait in the review queue. Critical alerts and missing mode ignore this."
+          "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in the review queue. Critical alerts and missing mode ignore this."
         }
       },
       "training": {
@@ -317,7 +338,7 @@
       },
       "camera": {
         "title": "Camera",
-        "description": "Settings for {camera}.",
+        "description": "Settings for {camera}.{sensors}",
         "data": {
           "camera": "Camera",
           "name": "Name",
@@ -385,7 +406,7 @@
         },
         "data_description": {
           "person": "Needed for quiet zones (where they are).",
-          "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
+          "notify_service": "The phone with the Home Assistant app that gets the alerts.",
           "remove": "They stop getting alerts."
         },
         "sections": {
@@ -481,7 +502,8 @@
           },
           "data_description": {
             "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-            "reference_upload": "A clear night photo, sent to the AI beside each frame."
+            "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+            "species": "Pick one or type any other kind."
           },
           "sections": {
             "looks": {
@@ -489,17 +511,17 @@
               "description": "Coat details and tips that help the AI tell it apart.",
               "data": {
                 "pattern": "Coat pattern",
-                "base": "Main colour",
+                "base": "Main tone at night (infrared)",
                 "tips": "Identification tips"
               },
               "data_description": {
                 "pattern": "For a priority animal, both AI models must report this pattern.",
-                "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+                "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
                 "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
               }
             },
             "rules": {
-              "name": "Rules",
+              "name": "Alerts and strictness",
               "description": "How carefully it is checked, and where it alerts.",
               "data": {
                 "priority": "Priority animal",
@@ -508,8 +530,8 @@
                 "critical_at": "Critical alerts only at"
               },
               "data_description": {
-                "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
-                "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
+                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor.",
+                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically.",
                 "alert_at": "Cameras where it sends an alert. Empty: never.",
                 "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
               }
@@ -540,7 +562,8 @@
           "data_description": {
             "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
             "reference_upload": "A clear night photo, sent to the AI beside each frame. Replaces the current one.",
-            "remove_reference": "The AI then judges each frame without one."
+            "remove_reference": "The AI then judges each frame without one.",
+            "species": "Pick one or type any other kind."
           },
           "sections": {
             "looks": {
@@ -548,17 +571,17 @@
               "description": "Coat details and tips that help the AI tell it apart.",
               "data": {
                 "pattern": "Coat pattern",
-                "base": "Main colour",
+                "base": "Main tone at night (infrared)",
                 "tips": "Identification tips"
               },
               "data_description": {
                 "pattern": "For a priority animal, both AI models must report this pattern.",
-                "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+                "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
                 "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
               }
             },
             "rules": {
-              "name": "Rules",
+              "name": "Alerts and strictness",
               "description": "How carefully it is checked, and where it alerts.",
               "data": {
                 "priority": "Priority animal",
@@ -567,8 +590,8 @@
                 "critical_at": "Critical alerts only at"
               },
               "data_description": {
-                "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
-                "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
+                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor.",
+                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically.",
                 "alert_at": "Cameras where it sends an alert. Empty: never.",
                 "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
               }
@@ -782,7 +805,7 @@
       "message": "Choose a camera or an animal for the note."
     },
     "no_detector": {
-      "message": "Set the local detector's address under Configure → Local detector first."
+      "message": "Set the local detector's address under Configure → Advanced: local detector first."
     }
   },
   "services": {

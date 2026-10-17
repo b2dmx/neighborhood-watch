@@ -276,12 +276,12 @@ def test_prompt_without_absent_or_extras():
 
 def test_summary_order_counts_and_places():
     s = logic.summarize(
-        [("Milo", "Yard"), ("Luna", "Garage"), ("Milo", "Cat House"), ("Milo", "Yard"), ("Unknown Cat", "Yard")],
+        [("Milo", "Yard"), ("Luna", "Garage"), ("Milo", "Shed"), ("Milo", "Yard"), ("Unknown Cat", "Yard")],
         ["Luna", "Ziggy", "Milo"],
     )
     assert s.lines == [
         "Luna — 1 sighting (Garage)",
-        "Milo — 3 sightings (Yard, Cat House)",
+        "Milo — 3 sightings (Yard, Shed)",
         "1 Unknown Cat sighting",
     ]
     assert logic.summarize([], ["Luna"]).text == "No sightings last night."
@@ -371,7 +371,7 @@ def switched(name, **changes):
 def test_priority_medium_alerts_tentatively_low_is_silent():
     (a,) = plan(verdict("Luna", "medium"), YARD)
     assert (a.title, a.urgency) == ("Possible Luna — Yard", "normal")
-    assert a.message == "AI thinks this might be Luna at Yard, 9:05 PM.\nConfidence: medium"
+    assert a.message == "AI thinks this might be Luna at Yard, 9:05 PM.\nThe AI is fairly sure."
     assert plan(verdict("Luna", "low"), YARD) == []
 
 
@@ -380,7 +380,7 @@ def test_min_confidence_keeps_low_guesses_off_phones():
     (a,) = plan(verdict("Ziggy", "medium"), GARAGE)
     assert a.title == "Possible Ziggy — Garage"
     (a,) = plan(verdict("Milo"), YARD)
-    assert a.message == "Milo detected at Yard, 9:05 PM.\nConfidence: high"
+    assert a.message == "Milo detected at Yard, 9:05 PM.\nThe AI is very sure."
 
 
 def test_alert_at_limits_where():
@@ -465,6 +465,20 @@ def test_builtins():
 def test_test_prefix():
     (a,) = plan(verdict("Raccoon"), YARD, test=True)
     assert a.title.startswith("TEST · ")
+
+
+def test_pest_alert_says_pest_and_mentions_lights_only_when_they_ran():
+    built = {**BUILT, logic.BUILTIN_PEST: logic.AlertRule(logic.BUILTIN_PEST, repeat_every=True)}
+
+    def pest(**kw):
+        return logic.plan_alerts(verdict("Skunk"), PORCH, ALERTS, built, (), "9:05 PM", pests={"skunk"}, **kw)
+
+    (a,) = pest()
+    assert a.title == "Pest: Skunk — Patio" and "Lights" not in a.message
+    (a,) = pest(deterred=True)
+    assert a.message == "Skunk detected at Patio, 9:05 PM.\nLights turned on to scare it off.\nThe AI is very sure."
+    (a,) = plan(verdict("Nothing", "low"), GARAGE)
+    assert a.message.endswith("\nThe AI is unsure.")
 
 
 def test_verdict_remembers_both_names():

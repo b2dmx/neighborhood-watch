@@ -54,14 +54,14 @@ Copy `custom_components/neighborhood_watch` into your `config/custom_components`
 
 Onboarding walks through:
 
-1. **AI models.** The first look, the second opinion and any paid models, each in order.
+1. **AI models.** The first look, the second opinion and any paid models, each in order. Only one model is needed (for the first look); the rest is optional.
 2. **When to watch.** Start and end times, whether darkness also counts, and when the night summary is built.
 3. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
 4. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
-6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main colour, and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked or no phones were found, so nothing is missed.
+6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main tone at night (infrared shows tones, not colours), and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked or no phones were found, so nothing is missed.
 
-Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Critical alerts**, **Mutes** and **Quiet zones and hours**; for an animal: **Looks**, **Rules** and **Last seen**):
+Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Critical alerts**, **Mutes** and **Quiet zones and hours**; for an animal: **Looks**, **Alerts and strictness** and **Last seen**):
 
 - **Cameras**. Besides its sensors and cooldowns, a camera has:
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
@@ -83,12 +83,12 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Cameras / People | Pick one to change or remove, or add one |
 | Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
 | Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
-| AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
-| Identification | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
-| Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
-| Local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
-| Notification pictures | Public address for picture links (defaults to the external URL) |
+| AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
+| Advanced: AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
+| Advanced: training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
+| Advanced: local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
+| Advanced: notification pictures | Public address for picture links (defaults to the external URL) |
 
 ### AI models
 
@@ -230,7 +230,7 @@ The AI models never learn from your corrections, so the integration keeps what's
   <img src="vision/logo.png" alt="Neighborhood Watch vision" width="320">
 </picture>
 
-The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Local detector**, it looks at every frame before the AI:
+The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Advanced: local detector**, it looks at every frame before the AI:
 
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.

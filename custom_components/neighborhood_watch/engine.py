@@ -1,8 +1,9 @@
 """The watch engine: cameras → snapshot → AI chain → verdict → tracking and the sighting event.
 
-One check runs at a time (the AI quotas are per model and per day, and the lock keeps the
-order of sightings). A camera already waiting its turn is not queued twice; its cooldown is
-judged when its turn comes, as the automation version did.
+Each camera takes its snapshot (and asks the local detector) as soon as it triggers, under a
+lock of its own. The AI calls and the recording then run one check at a time (the AI quotas
+are per model and per day, and the lock keeps the order of sightings). A camera already
+waiting its turn is not queued twice.
 """
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ from datetime import datetime, timedelta
 from functools import partial
 import logging
 from pathlib import Path
+from secrets import token_hex
+import time
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -132,6 +135,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
+IDENTIFY_CAP_SECONDS = 240  # all AI calls of one check together
+STREAM_FRAME_WIDTH = 1920  # a frame taken from the stream is scaled down to this width
+SNAPSHOT_RECHECK_SECONDS = 3600  # how often a camera's snapshot size is measured again
+_SNAPSHOT_SMALL = f"{DOMAIN}_snapshot_small"  # hass.data: {entity_id: (small, measured at)}
 SCAN_VISITS_KEPT = 50  # per stored scan
 
 
@@ -301,28 +308,50 @@ async def async_snapshot(hass: HomeAssistant, entity_id: str) -> bytes:
 
     Some cameras hand Home Assistant a small snapshot (older UniFi Protect cameras give
     640x360) although their stream is 2K or 4K. When the snapshot is well below the
-    stream's size, one frame is taken from the stream instead; if that fails, the
-    snapshot is used as it is.
+    stream's size, one frame is taken from the stream instead (at most 1920 wide); if that
+    fails, the snapshot is used as it is. Whether a camera's snapshot is small is measured
+    once an hour, not on every check.
     """
     image = await camera_component.async_get_image(hass, entity_id, timeout=SNAPSHOT_TIMEOUT)
     state = hass.states.get(entity_id)
     want = (state.attributes.get("width") if state else None) or 0
     if not isinstance(want, int) or want <= 0 or "ffmpeg" not in hass.config.components:
         return image.content
-    if await hass.async_add_executor_job(_image_width, image.content) >= want * 0.6:
+    known: dict[str, tuple[bool, float]] = hass.data.setdefault(_SNAPSHOT_SMALL, {})
+    small, measured = known.get(entity_id, (False, 0.0))
+    if not measured or time.monotonic() - measured > SNAPSHOT_RECHECK_SECONDS:
+        small = await hass.async_add_executor_job(_image_width, image.content) < want * 0.6
+        known[entity_id] = (small, time.monotonic())
+    if not small:
         return image.content
+    size: dict[str, int] = {}
+    high = state.attributes.get("height") if state else None
+    if want > STREAM_FRAME_WIDTH and isinstance(high, int) and high > 0:
+        # ffmpeg's -s needs both sides: keep the stream's shape.
+        size = {"width": STREAM_FRAME_WIDTH, "height": round(STREAM_FRAME_WIDTH * high / want)}
     try:
         from homeassistant.components.ffmpeg import async_get_image as ffmpeg_image
 
         source = await camera_component.async_get_stream_source(hass, entity_id)
         if source:
             async with asyncio.timeout(SNAPSHOT_TIMEOUT):
-                frame = await ffmpeg_image(hass, source)
+                frame = await ffmpeg_image(hass, source, **size)
             if frame:
                 return frame
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("%s: stream frame failed, using the snapshot: %s", entity_id, err)
     return image.content
+
+
+def _write_frames(frame: Path, notification: Path, content: bytes) -> OSError | None:
+    """The frame the AI reads (must be written) and the notification copy (best-effort:
+    its error is returned)."""
+    _write(frame, content)
+    try:
+        _write(notification, content)
+    except OSError as err:
+        return err
+    return None
 
 
 def _rotate_and_write(path: Path, content: bytes) -> None:
@@ -362,7 +391,9 @@ class WatchEngine:
         self.frames: dict[str, Frame] = {}
         self._queued: set[str] = set()
         self.hub_device_id: str | None = None
-        self._lock = asyncio.Lock()
+        self._lock = asyncio.Lock()  # the AI calls and the recording: one check at a time
+        self._camera_locks: dict[str, asyncio.Lock] = {}  # snapshot and detector, per camera
+        self.own_updates = 0  # entry updates made by add_note, which must not reload
         self._unsubs: list[Callable[[], None]] = []
         self._trigger_map: dict[str, list[str]] = {}
         self.references: dict[str, datetime] = {}
@@ -569,8 +600,14 @@ class WatchEngine:
         self._notify()
         return moved
 
+    @property
+    def _www_secret(self) -> str:
+        """A random folder name: /local needs no login, so the picture URLs mustn't be
+        guessable from a camera's name."""
+        return self.data.setdefault("www_secret", token_hex(16))
+
     def www_path(self, slug: str) -> Path:
-        return self._www_root / f"{slug}.jpg"
+        return self._www_root / self._www_secret / f"{slug}.jpg"
 
     def image_url(self, slug: str, at: datetime) -> str:
         base = (self.options.get(CONF_PUBLIC_URL) or "").rstrip("/")
@@ -582,7 +619,7 @@ class WatchEngine:
                     base = get_url(self.hass)
                 except NoURLAvailableError:
                     base = ""
-        return f"{base}/local/{WWW_SUBDIR}/{slug}.jpg?t={int(at.timestamp())}"
+        return f"{base}/local/{WWW_SUBDIR}/{self._www_secret}/{slug}.jpg?t={int(at.timestamp())}"
 
     # --- state helpers ----------------------------------------------------------------
 
@@ -663,6 +700,9 @@ class WatchEngine:
                 record.update(state="error", error="Interrupted by a restart.")
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
+        if "www_secret" not in self.data:
+            self.data["www_secret"] = token_hex(16)
+            self._save()
         # Lights a deterrent left on when Home Assistant stopped: their timer is gone.
         if leftover := self._deterrent_lights():
             self._unsubs.append(async_at_started(self.hass, partial(self._lights_off, leftover)))
@@ -761,6 +801,12 @@ class WatchEngine:
 
     def _load_frames(self) -> None:
         self._scan_references()
+        # Notification pictures from before the secret folder were guessable: they go.
+        try:
+            for old in self._www_root.glob("*.jpg"):
+                old.unlink(missing_ok=True)
+        except OSError as err:
+            _LOGGER.debug("Old notification pictures not removed: %s", err)
         for slug in self.cameras:
             path = self.frame_path(slug)
             content = _read(path)
@@ -848,8 +894,12 @@ class WatchEngine:
         return None
 
     async def async_check(self, slug: str, force: bool = False) -> dict[str, Any] | None:
-        """Check one camera. `force` ignores the cooldown and the skip sensors."""
-        async with self._lock:
+        """Check one camera. `force` ignores the cooldown and the skip sensors.
+
+        The snapshot is taken (and the detector asked) as soon as the camera triggers; only
+        the AI calls and the recording wait for other cameras' checks.
+        """
+        async with self._camera_locks.setdefault(slug, asyncio.Lock()):
             cam = self.cameras.get(slug)
             if cam is None:
                 return None
@@ -866,7 +916,9 @@ class WatchEngine:
             # A failed snapshot STOPS the check: the AI must never judge an old photo.
             try:
                 content = await async_snapshot(self.hass, cam.camera)
-                await self.hass.async_add_executor_job(_write, self.frame_path(slug), content)
+                www_error = await self.hass.async_add_executor_job(
+                    _write_frames, self.frame_path(slug), self.www_path(slug), content
+                )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("%s: snapshot failed, check stopped: %s", cam.name, err)
                 self.camera_state(slug)["last"] = {
@@ -878,10 +930,8 @@ class WatchEngine:
                 self._notify()
                 return None
             self.frames[slug] = Frame(content, now)
-            try:
-                await self.hass.async_add_executor_job(_write, self.www_path(slug), content)
-            except OSError as err:
-                _LOGGER.warning("%s: notification picture not saved: %s", cam.name, err)
+            if www_error:
+                _LOGGER.warning("%s: notification picture not saved: %s", cam.name, www_error)
 
             detector = await self._detect(content)
             skip = (
@@ -890,15 +940,16 @@ class WatchEngine:
                 and detector["animal"] < float(self.options.get(CONF_DETECTOR_MIN, 0.2))
                 and not self.any_missing_mode()  # in missing mode the AI always looks
             )
-            if skip:
-                verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
-                models = "Local detector (no animal)"
-            else:
-                verdict, models = await self._identify(cam)
-            check = Check(cam, verdict, models, content, now, detector=detector)
-            sends = await self._record(check)
-        # Phones are told after the lock is released: a slow notify service must not hold
-        # up the next check.
+            async with self._lock:
+                if skip:
+                    verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
+                    models = "Local detector (no animal)"
+                else:
+                    verdict, models = await self._identify_capped(cam)
+                check = Check(cam, verdict, models, content, now, detector=detector)
+                sends = await self._record(check)
+        # Phones are told after the locks are released: a slow notify service must not
+        # hold up the next check.
         await self._deliver(sends)
         return self._result(check)
 
@@ -1030,6 +1081,17 @@ class WatchEngine:
         if start is None or end is None or start == end:
             return False
         return not logic.in_time_window(dt_util.now().time(), start, end)
+
+    async def _identify_capped(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
+        """_identify with a cap on the whole chain: past it, nobody answered."""
+        try:
+            async with asyncio.timeout(IDENTIFY_CAP_SECONDS):
+                return await self._identify(cam)
+        except TimeoutError:
+            _LOGGER.warning("%s: the AI took over %s s, no answer", cam.name, IDENTIFY_CAP_SECONDS)
+            verdict = logic.decide("", "", self.rules, self.strict_keys())
+            self.data["ai"]["last_models"] = "none answered"
+            return verdict, "none answered"
 
     async def _identify(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
         prompt, attachments = self._prompt(cam)
@@ -1224,10 +1286,8 @@ class WatchEngine:
         data = self.event_data(cam, v, check.models, now, counted=counted)
         data["sighting_id"] = sid
         self.hass.bus.async_fire(EVENT_SIGHTING, data)
-        sends = self._plan_alerts(cam, v, now, sid)
-        if counted and v.animal.lower() in self.pests:
-            await self._deter(cam)
-        return sends
+        deterred = counted and v.animal.lower() in self.pests and await self._deter(cam)
+        return self._plan_alerts(cam, v, now, sid, deterred=deterred)
 
     def event_data(
         self,
@@ -1261,9 +1321,13 @@ class WatchEngine:
         }
 
     def _prune(self, now: datetime) -> None:
-        cutoff = now - timedelta(days=SIGHTING_DAYS)
-        kept = [s for s in self.sightings() if (_dt(s.get("time")) or now) >= cutoff]
-        self.data["sightings"] = kept[-SIGHTING_MAX:]
+        """Sightings are appended in time order with UTC ISO times: the old ones are a
+        prefix, and comparing the strings finds its end."""
+        rows = self.sightings()
+        cutoff = _iso(now - timedelta(days=SIGHTING_DAYS)) or ""
+        old = next((i for i, s in enumerate(rows) if (s.get("time") or cutoff) >= cutoff), len(rows))
+        if drop := max(old, len(rows) - SIGHTING_MAX):
+            del rows[:drop]
 
     # --- timers -------------------------------------------------------------------------------
 
@@ -1536,7 +1600,13 @@ class WatchEngine:
         return same, rule.key
 
     def _plan_alerts(
-        self, cam: CameraConfig, v: logic.Verdict, now: datetime, sid: str | None, test: bool = False
+        self,
+        cam: CameraConfig,
+        v: logic.Verdict,
+        now: datetime,
+        sid: str | None,
+        test: bool = False,
+        deterred: bool = False,
     ) -> list[Send]:
         """Who gets which alert; _deliver sends them."""
         if not self.options.get(CONF_ALERTS, True) or not self.recipients:
@@ -1554,6 +1624,7 @@ class WatchEngine:
             test=test,
             repeat=repeat,
             pests=self.pests,
+            deterred=deterred,
         )
         if visit_key and any(a.kind != "missing" for a in alerts):
             self.camera_state(cam.slug).setdefault("visits", {})[visit_key] = _iso(now)
@@ -1641,17 +1712,17 @@ class WatchEngine:
             if actions:
                 data["actions"] = actions
             payload["data"] = data
-        else:
-            payload["message"] = f"{alert.message}\n{image}"
         try:
             await self.hass.services.async_call("notify", person.notify, payload, blocking=True)
         except Exception as err:  # noqa: BLE001 - one phone failing must not stop the others
             _LOGGER.warning("Alert to %s failed: %s", person.name, err)
 
-    async def _deter(self, cam: CameraConfig) -> None:
-        """Lights on (and a sound) at this camera to scare a pest off."""
+    async def _deter(self, cam: CameraConfig) -> bool:
+        """Lights on (and a sound) at this camera to scare a pest off. True when its
+        lights are on for it."""
         if not cam.deter_lights and not cam.deter_sound:
-            return
+            return False
+        lit = bool(cam.deter_lights)
         if cancel := self._deterring.pop(cam.slug, None):
             cancel()  # already running: restart the timer, keep what we turned on
             turned_on = self.data.setdefault("deterring", {}).get(cam.slug, [])
@@ -1668,6 +1739,7 @@ class WatchEngine:
                     )
                 except Exception as err:  # noqa: BLE001 - a deterrent never stops the alerts
                     _LOGGER.warning("%s: deterrent lights failed: %s", cam.name, err)
+                    lit = False
         if cam.deter_sound and cam.deter_sound.get("entity_id"):
             try:
                 await self.hass.services.async_call(
@@ -1692,6 +1764,7 @@ class WatchEngine:
         self._deterring[cam.slug] = async_call_later(
             self.hass, cam.deter_minutes * 60, lights_back
         )
+        return lit
 
     # --- bulk scanning ----------------------------------------------------------------------
 
@@ -1813,7 +1886,7 @@ class WatchEngine:
         async with self._lock:
             await self.hass.async_add_executor_job(_write, self.frame_path(slug), frame)
             try:
-                verdict, models = await self._identify(cam)
+                verdict, models = await self._identify_capped(cam)
             finally:
                 await self.hass.async_add_executor_job(remove_file, self.frame_path(slug))
         now = dt_util.utcnow()
@@ -1889,25 +1962,39 @@ class WatchEngine:
 
     def add_note(self, note: str, camera: CameraConfig | None = None, animal: str | None = None) -> str:
         """Add a note for the AI where it belongs: a camera's view notes or an animal's
-        identification tips. Returns where it went."""
+        identification tips. Returns where it went.
+
+        The note takes effect at once and is saved in the settings without a reload (a
+        reload turns the deterrent lights off and cuts a running check short).
+        """
         note = note.strip()
         if camera is not None:
             cameras = dict(self.entry.options.get(CONF_CAMERAS) or {})
             data = dict(cameras[camera.subentry_id])
             data[CONF_AI_NOTES] = f"{(data.get(CONF_AI_NOTES) or '').strip()} {note}".strip()
             cameras[camera.subentry_id] = data
-            self.hass.config_entries.async_update_entry(
+            camera.ai_notes = data[CONF_AI_NOTES]
+            self.options[CONF_CAMERAS] = cameras
+            # Counted first: the update listener can run before the update call returns.
+            self.own_updates += 1
+            if not self.hass.config_entries.async_update_entry(
                 self.entry, options={**self.entry.options, CONF_CAMERAS: cameras}
-            )
+            ):
+                self.own_updates -= 1
+            self._notify()
             return camera.name
         subject = self.animal_by_name(animal or "")
         if subject is None:
             raise ValueError(f"unknown animal {animal}")
         subentry = self.entry.subentries[subject.subentry_id]
         old = (subentry.data.get(CONF_TIPS) or "").strip()
-        self.hass.config_entries.async_update_subentry(
-            self.entry, subentry, data={**subentry.data, CONF_TIPS: f"{old} {note}".strip()}
-        )
+        subject.tips = f"{old} {note}".strip()
+        self.own_updates += 1
+        if not self.hass.config_entries.async_update_subentry(
+            self.entry, subentry, data={**subentry.data, CONF_TIPS: subject.tips}
+        ):
+            self.own_updates -= 1
+        self._notify()
         return subject.name
 
     def test_event(self, cam: CameraConfig, animal: str, confidence: str, candidate: str) -> dict[str, Any]:

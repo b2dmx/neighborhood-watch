@@ -1,6 +1,7 @@
 """v0.3: wildlife, alerts, corrections, training data and deterrents in a real Home Assistant."""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -198,10 +199,12 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     await trigger(hass, "yard")
     assert sorted(m["to"] for m in watch["sent"]) == ["ann", "bo"]
     msg = watch["sent"][0]
-    assert msg["title"] == "Raccoon — Yard"
+    assert msg["title"] == "Pest: Raccoon — Yard"
+    assert "Lights" not in msg["message"]  # the yard has no deterrent
     data = msg["data"]
     assert data["push"] == {"interruption-level": "active"}
-    assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/yard.jpg")
+    assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
+    assert data["image"].split("?")[0].endswith(f"/{watch['watch'].data['www_secret']}/yard.jpg")
     titles = [a["title"] for a in data["actions"]]
     assert titles == ["✓ Right", "✗ Wrong", "It's Luna"]
 
@@ -256,6 +259,9 @@ async def test_pest_turns_on_lights_that_were_off_then_back_off(hass, watch, fre
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "garage")
     assert watch["on"][0].data["entity_id"] == ["light.garage_flood", "light.porch"]
+    msg = watch["sent"][0]
+    assert msg["title"] == "Pest: Raccoon — Garage"
+    assert "Lights turned on to scare it off." in msg["message"]
     freezer.tick(timedelta(minutes=3))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
@@ -515,12 +521,13 @@ async def test_camera_notes_reach_only_that_camera(hass, watch):
 
 async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
     entry = watch["entry"]
+    before = entry.runtime_data
     result = await hass.services.async_call(
         DOMAIN, "add_note", {"camera": "Yard", "note": "The dark shape by the fence is a bush."},
         blocking=True, return_response=True,
     )
     assert result == {"added_to": "Yard"}
-    await hass.async_block_till_done()  # a camera note is saved in the options, which reloads
+    await hass.async_block_till_done()  # let the update listener run
     await hass.services.async_call(
         DOMAIN, "add_note", {"animal": "milo", "note": "Looks very bright under strong infrared."},
         blocking=True, return_response=True,
@@ -530,8 +537,15 @@ async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
     assert camera_options(entry, "Yard")["ai_notes"] == "The dark shape by the fence is a bush."
     assert data["Milo"]["tips"].endswith("Looks very bright under strong infrared.")
     w = entry.runtime_data
+    assert w is before and w.own_updates == 0  # saved without a reload
     prompt, _ = w._prompt(w.cameras["yard"])
     assert "bush" in prompt and "very bright under strong infrared" in prompt
+    # A later settings change still reloads.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "alerts": False})
+    await hass.async_block_till_done()
+    assert entry.runtime_data is not before
+    prompt, _ = entry.runtime_data._prompt(entry.runtime_data.cameras["yard"])
+    assert "bush" in prompt
 
     from homeassistant.exceptions import ServiceValidationError
 
@@ -624,6 +638,51 @@ async def test_alerts_go_out_after_the_check_lock_is_released(hass, watch):
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
     assert held and not any(held)  # sent by the time identify returns, without the lock
+
+
+async def test_a_slow_ai_does_not_hold_up_other_cameras_snapshots(hass, watch):
+    w = watch["watch"]
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def slow_ai(call: ServiceCall) -> dict[str, Any]:
+        asked.append(call.data["entity_id"])
+        await release.wait()
+        return {"conversation_id": "x", "data": "Milo|high|na|na|"}
+
+    hass.services.async_register("ai_task", "generate_data", slow_ai, supports_response=SupportsResponse.ONLY)
+
+    async def until(condition) -> None:
+        for _ in range(200):
+            if condition():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("timed out")
+
+    hass.states.async_set("binary_sensor.garage_motion", "on")
+    await until(lambda: asked)  # the garage's AI is thinking
+    assert "yard" not in w.frames
+    hass.states.async_set("binary_sensor.yard_motion", "on")
+    await until(lambda: "yard" in w.frames)  # the yard's snapshot didn't wait for it
+    assert len(asked) == 1 and w._lock.locked()  # its AI call waits its turn
+    release.set()
+    await hass.async_block_till_done()
+    assert len(asked) == 2
+    assert {s["camera"] for s in w.sightings()} == {"garage", "yard"}
+
+
+async def test_the_ai_chain_has_a_total_time_cap(hass, watch):
+    from custom_components.neighborhood_watch import engine
+
+    async def never(call: ServiceCall) -> dict[str, Any]:
+        await asyncio.Event().wait()
+        return {}
+
+    hass.services.async_register("ai_task", "generate_data", never, supports_response=SupportsResponse.ONLY)
+    with patch.object(engine, "IDENTIFY_CAP_SECONDS", 0):  # the test clock is frozen
+        result = await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    assert result["models_used"] == "none answered" and result["animal"] == "Nothing"
+    assert watch["watch"].camera_state("yard")["last"]["models_used"] == "none answered"
 
 
 async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, aioclient_mock, freezer):

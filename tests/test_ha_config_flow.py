@@ -58,11 +58,12 @@ async def ready(hass: HomeAssistant, tmp_path: Path):
 async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["step_id"] == "user"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": []})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": [], "first_model_hours": {}})
     assert result["errors"] == {"first_look": "first_look_required"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini_pro"], "paid_models": []},
+        {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini_pro"], "paid_models": [],
+         "first_model_hours": {"main_start": "06:00:00", "main_end": "22:00:00"}},
     )
     assert result["step_id"] == "schedule"
     result = await hass.config_entries.flow.async_configure(
@@ -163,7 +164,7 @@ async def test_onboarding_without_ai_task_aborts(hass: HomeAssistant, ready):
 
 async def test_onboarding_can_skip_cameras_and_animals(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True, "summary_time": "08:05:00",
@@ -379,7 +380,7 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
 async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
     hass.services.async_register("notify", "mobile_app_sams_phone", lambda call: None)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True, "watch_always": False,
@@ -396,3 +397,92 @@ async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     (sam,) = result["result"].options["people"].values()
     assert (sam["name"], sam["notify_service"]) == ("Sams Phone", "mobile_app_sams_phone")
+
+
+async def test_configure_menu_puts_the_advanced_pages_last(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["menu_options"] == [
+        "cameras", "people", "alerts", "catch_alls", "schedule", "models",
+        "identification", "training", "detector", "notifications",
+    ]
+
+
+async def test_options_models_keeps_the_hours_flat(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    result = await _options(hass, entry, "models")
+    assert "first_model_hours" in {str(k) for k in result["data_schema"].schema}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"first_look": ["ai_task.gemini"], "first_model_hours": {"main_start": "07:00:00", "main_end": "21:00:00"}},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["main_start"] == "07:00:00" and entry.options["main_end"] == "21:00:00"
+    assert "first_model_hours" not in entry.options
+
+
+async def test_species_is_a_list_with_any_kind_allowed(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "animal"), context={"source": config_entries.SOURCE_USER}
+    )
+    key = next(k for k in result["data_schema"].schema if str(k) == "species")
+    assert key.default() == "cat"
+    selector = result["data_schema"].schema[key]
+    assert selector.config["custom_value"] is True
+    assert [o["value"] for o in selector.config["options"]][:2] == ["cat", "dog"]
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Rex", "species": " Fox ", "looks": {}, "rules": {}, "last_seen": {}},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    rex = next(s for s in entry.subentries.values() if s.title == "Rex")
+    assert rex.data["species"] == "fox"
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "animal"), context={"source": config_entries.SOURCE_USER}
+    )
+    key = next(k for k in result["data_schema"].schema if str(k) == "species")
+    assert "fox" in [o["value"] for o in result["data_schema"].schema[key].config["options"]]
+
+
+async def test_camera_without_sensors_points_to_the_timer(hass: HomeAssistant, ready):
+    hass.states.async_set("camera.rtsp_only", "idle")
+    entry = _entry(hass)
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "add_new"})
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "camera.rtsp_only"})
+    assert "Also check every" in result["description_placeholders"]["sensors"]
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "add_new"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"camera": "camera.backyard_cam_high_resolution_channel"}
+    )
+    assert result["description_placeholders"]["sensors"] == ""
+
+
+async def test_onboarding_lists_phones_by_device_name(hass: HomeAssistant, ready):
+    phone = MockConfigEntry(domain="mobile_app", title="Phone A", data={"device_name": "Phone A"})
+    phone.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=phone.entry_id, identifiers={("mobile_app", "a")}, name="Phone A",
+    )
+    dr.async_get(hass).async_update_device(device.id, name_by_user="Kitchen iPad")
+    hass.services.async_register("notify", "mobile_app_phone_a", lambda call: None)
+    hass.services.async_register("notify", "mobile_app_other", lambda call: None)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True, "summary_time": "08:05:00",
+         "on_camera_minutes": 10},
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
+    assert result["step_id"] == "people"
+    key = next(k for k in result["data_schema"].schema if str(k) == "phones")
+    options = result["data_schema"].schema[key].config["options"]
+    assert {o["value"]: o["label"] for o in options} == {
+        "mobile_app_other": "mobile_app_other",
+        "mobile_app_phone_a": "Kitchen iPad",
+    }

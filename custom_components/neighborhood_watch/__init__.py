@@ -328,6 +328,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> bo
 
 
 async def _async_reload(hass: HomeAssistant, entry: WatchConfigEntry) -> None:
+    watch = getattr(entry, "runtime_data", None)
+    if isinstance(watch, WatchEngine) and watch.own_updates:
+        # A note added by the add_note action: already in effect, nothing to reload.
+        watch.own_updates -= 1
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -579,6 +579,7 @@ AUDIENCE_MISSING = "missing"  # people who get missing-mode alerts
 AUDIENCE_NOT_MISSING = "not_missing"  # everyone else (the missing-mode people already had theirs)
 
 _ORDER = {LOW: 0, MEDIUM: 1, HIGH: 2}
+SURE = {HIGH: "very sure", MEDIUM: "fairly sure", LOW: "unsure"}  # how alerts word confidence
 
 
 def cameras(value: Iterable[str] | str | None) -> frozenset[str] | str:
@@ -664,21 +665,24 @@ def plan_alerts(
     test: bool = False,
     repeat: bool = False,
     pests: Iterable[str] = (),
+    deterred: bool = False,
 ) -> list[Alert]:
     """Who hears about a sighting and how loudly.
 
     `missing` = lower-case names of animals in missing mode. `repeat` = this subject
-    already alerted at this camera within its repeat window.
+    already alerted at this camera within its repeat window. `deterred` = the camera's
+    lights were turned on to scare a pest off.
     """
     prefix = "TEST · " if test else ""
     where = camera.name
     conf = v.confidence
+    sure = f"\nThe AI is {SURE[_level(conf)]}."
     alerts: list[Alert] = []
 
     def tentative(name: str) -> tuple[str, str]:
         return (
             f"{prefix}Possible {name} — {where}",
-            f"AI thinks this might be {name} at {where}, {when}.\nConfidence: {conf}",
+            f"AI thinks this might be {name} at {where}, {when}.{sure}",
         )
 
     # Missing mode: ANY possible sighting, either model, any confidence, any camera.
@@ -708,14 +712,18 @@ def plan_alerts(
 
     if is_motion:
         title = f"{prefix}Motion — {where}"
-        message = f"Unidentified motion at {where}, {when}.\nConfidence: {conf}"
+        message = f"Unidentified motion at {where}, {when}.{sure}"
     elif rule.priority:
         title, message = tentative(v.animal)
     else:
         lead = f"{v.animal} detected" if conf == HIGH else f"Possible {v.animal}"
         looks = f"\nLooks like: {v.description}" if v.description else ""
-        title = f"{prefix}{'' if conf == HIGH else 'Possible '}{v.animal} — {where}"
-        message = f"{lead} at {where}, {when}.{looks}\nConfidence: {conf}"
+        if rule.name == BUILTIN_PEST:
+            title = f"{prefix}Pest: {'' if conf == HIGH else 'possible '}{v.animal} — {where}"
+            looks += "\nLights turned on to scare it off." if deterred else ""
+        else:
+            title = f"{prefix}{'' if conf == HIGH else 'Possible '}{v.animal} — {where}"
+        message = f"{lead} at {where}, {when}.{looks}{sure}"
     audience = AUDIENCE_NOT_MISSING if missing_name and missing_name == v.animal else AUDIENCE_ALL
     alerts.append(
         Alert(

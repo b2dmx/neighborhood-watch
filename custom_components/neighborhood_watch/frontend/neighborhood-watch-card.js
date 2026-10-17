@@ -274,6 +274,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     const parts = [];
     if (show.has("review") && d.hub?.keys.to_review) parts.push(this._review(d));
     if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
+    else if (show.has("animals") && d.hub)
+      parts.push(`<div class="section"><h2>Animals</h2><div class="muted">Add your animals with Add animal on the Neighborhood Watch integration page.</div></div>`);
     // The shorter sections sit side by side on wide screens instead of each taking a row.
     const side = [];
     if (show.has("wildlife") && d.hub?.keys.wildlife) side.push(this._wildlife(d.hub));
@@ -304,7 +306,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       <ha-card>
         <div class="whole">
           <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
-          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet.</div>`}</div>
+          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet. Add cameras and animals under Settings → Devices &amp; services → Neighborhood Watch → Configure.</div>`}</div>
         </div>
       </ha-card>${this._lightbox()}`;
     // Every section folds: tap its title. "To review" starts folded; choices are remembered.
@@ -631,7 +633,9 @@ class NeighborhoodWatchCard extends HTMLElement {
   _summary(hub) {
     const s = this._state(hub.keys.night_summary);
     const lines = s?.attributes?.lines || [];
-    const body = lines.length ? lines.map((l) => `<div>${esc(l)}</div>`).join("") : `<div class="muted">No sightings last night.</div>`;
+    // A fresh install has no summary yet: say when the first one comes.
+    const first = s?.attributes?.built_at ? "" : " The first summary arrives in the morning.";
+    const body = lines.length ? lines.map((l) => `<div>${esc(l)}</div>`).join("") : `<div class="muted">No sightings last night.${first}</div>`;
     return `<div class="section"><h2>Last night</h2>${body}</div>`;
   }
 
@@ -651,7 +655,7 @@ class NeighborhoodWatchCard extends HTMLElement {
             : "";
         return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
       });
-    return `<div class="section"><h2>Recent detections</h2>${rows.join("") || `<div class="muted">Nothing yet.</div>`}</div>`;
+    return `<div class="section"><h2>Recent detections</h2>${rows.join("") || `<div class="muted">Nothing yet — checks run when a camera sees motion.</div>`}</div>`;
   }
 
   _switches(d) {
@@ -667,7 +671,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       if (s) chips.push(`<button class="chip ${s.state === "on" ? "alarm" : ""}" data-toggle="${esc(hub[key])}">${label}</button>`);
     }
     if (!chips.length) return "";
-    return `<div class="section"><h2>Critical alerts</h2><div class="chips">${chips.join("")}</div></div>`;
+    return `<div class="section"><h2>Critical alerts</h2><div class="muted small">On = alerts ring even in silent mode.</div><div class="chips">${chips.join("")}</div></div>`;
   }
 }
 

@@ -261,21 +261,23 @@ class DetectorAgreement(WatchEntity, SensorEntity):
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "detector_agreement")
 
-    def _rows(self) -> list[dict[str, Any]]:
+    _rows: list[dict[str, Any]] = []
+
+    def _refresh(self) -> None:
         since = dt_util.utcnow() - timedelta(days=7)
         rows = self.watch.data.get("detector", {}).get("log", [])
-        return [r for r in rows if (_dt(r.get("time")) or since) >= since]
+        self._rows = [r for r in rows if (_dt(r.get("time")) or since) >= since]
 
     @property
     def native_value(self) -> float | None:
-        rows = self._rows()
+        rows = self._rows
         if not rows:
             return None
         return round(100 * sum(r["kind"] == "agree" for r in rows) / len(rows), 1)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        rows = self._rows()
+        rows = self._rows
         return {
             "compared": len(rows),
             "misses": sum(r["kind"] == "miss" for r in rows),
