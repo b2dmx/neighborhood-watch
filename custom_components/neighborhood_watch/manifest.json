@@ -2,6 +2,7 @@
   "domain": "neighborhood_watch",
   "name": "Neighborhood Watch",
   "after_dependencies": [
+    "ffmpeg",
     "frontend",
     "sun"
   ],
@@ -25,5 +26,5 @@
     "pillow-heif==1.8.1"
   ],
   "single_config_entry": true,
-  "version": "0.12.4"
+  "version": "0.12.5"
 }

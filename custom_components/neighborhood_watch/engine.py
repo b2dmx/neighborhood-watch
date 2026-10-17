@@ -278,6 +278,47 @@ def _read(path: Path) -> bytes | None:
         return None
 
 
+def _image_width(content: bytes) -> int:
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(content)) as img:
+            return img.width
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+async def async_snapshot(hass: HomeAssistant, entity_id: str) -> bytes:
+    """A camera's snapshot at full resolution.
+
+    Some cameras hand Home Assistant a small snapshot (older UniFi Protect cameras give
+    640x360) although their stream is 2K or 4K. When the snapshot is well below the
+    stream's size, one frame is taken from the stream instead; if that fails, the
+    snapshot is used as it is.
+    """
+    image = await camera_component.async_get_image(hass, entity_id, timeout=SNAPSHOT_TIMEOUT)
+    state = hass.states.get(entity_id)
+    want = (state.attributes.get("width") if state else None) or 0
+    if not isinstance(want, int) or want <= 0 or "ffmpeg" not in hass.config.components:
+        return image.content
+    if await hass.async_add_executor_job(_image_width, image.content) >= want * 0.6:
+        return image.content
+    try:
+        from homeassistant.components.ffmpeg import async_get_image as ffmpeg_image
+
+        source = await camera_component.async_get_stream_source(hass, entity_id)
+        if source:
+            async with asyncio.timeout(SNAPSHOT_TIMEOUT):
+                frame = await ffmpeg_image(hass, source)
+            if frame:
+                return frame
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("%s: stream frame failed, using the snapshot: %s", entity_id, err)
+    return image.content
+
+
 def _rotate_and_write(path: Path, content: bytes) -> None:
     """Keep the previous photo so a wrong identification can be undone."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -774,10 +815,8 @@ class WatchEngine:
 
             # A failed snapshot STOPS the check: the AI must never judge an old photo.
             try:
-                image = await camera_component.async_get_image(
-                    self.hass, cam.camera, timeout=SNAPSHOT_TIMEOUT
-                )
-                await self.hass.async_add_executor_job(_write, self.frame_path(slug), image.content)
+                content = await async_snapshot(self.hass, cam.camera)
+                await self.hass.async_add_executor_job(_write, self.frame_path(slug), content)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("%s: snapshot failed, check stopped: %s", cam.name, err)
                 self.camera_state(slug)["last"] = {
@@ -788,13 +827,13 @@ class WatchEngine:
                 self._save()
                 self._notify()
                 return None
-            self.frames[slug] = Frame(image.content, now)
+            self.frames[slug] = Frame(content, now)
             try:
-                await self.hass.async_add_executor_job(_write, self.www_path(slug), image.content)
+                await self.hass.async_add_executor_job(_write, self.www_path(slug), content)
             except OSError as err:
                 _LOGGER.warning("%s: notification picture not saved: %s", cam.name, err)
 
-            detector = await self._detect(image.content)
+            detector = await self._detect(content)
             skip = (
                 detector is not None
                 and self.options.get(CONF_DETECTOR_MODE) == DETECTOR_SKIP
@@ -806,7 +845,7 @@ class WatchEngine:
                 models = "Local detector (no animal)"
             else:
                 verdict, models = await self._identify(cam)
-            check = Check(cam, verdict, models, image.content, now, detector=detector)
+            check = Check(cam, verdict, models, content, now, detector=detector)
             await self._record(check)
             return self._result(check)
 
@@ -1732,8 +1771,7 @@ class WatchEngine:
     async def async_set_reference(self, animal: AnimalConfig, camera: CameraConfig | None) -> str:
         """Use the animal's last photo (or a fresh snapshot) as its reference photo."""
         if camera is not None:
-            image = await camera_component.async_get_image(self.hass, camera.camera, timeout=SNAPSHOT_TIMEOUT)
-            content: bytes | None = image.content
+            content: bytes | None = await async_snapshot(self.hass, camera.camera)
         else:
             content = await self.hass.async_add_executor_job(_read, self.photo_path(animal))
         if not content:
