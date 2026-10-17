@@ -197,6 +197,8 @@ CAMERA_SECTIONS = ("timing", "critical_alerts", "deterrent")
 PERSON_SECTIONS = ("critical_alerts", "mutes", "quiet")
 ANIMAL_SECTIONS = ("looks", "rules", "last_seen")
 MODELS_SECTIONS = ("first_model_hours",)
+SCHEDULE_SECTIONS = ("more",)
+CATCH_ALL_SECTIONS = tuple(BUILTIN_KEYS.values())  # pest, other, unknown, motion
 
 
 def _section(fields: dict[Any, Any], collapsed: bool = True) -> section:
@@ -306,8 +308,12 @@ def _schedule_schema(values: Mapping[str, Any]) -> vol.Schema:
             vol.Required(CONF_NIGHT_END, default=values[CONF_NIGHT_END]): TIME,
             vol.Required(CONF_USE_DARK, default=values[CONF_USE_DARK]): BOOL,
             vol.Required(CONF_ALWAYS, default=values.get(CONF_ALWAYS, False)): BOOL,
-            vol.Required(CONF_SUMMARY_TIME, default=values[CONF_SUMMARY_TIME]): TIME,
-            vol.Required(CONF_ON_CAMERA_MINUTES, default=values[CONF_ON_CAMERA_MINUTES]): _number(1, 120, "min"),
+            vol.Required("more", default={}): _section(
+                {
+                    vol.Required(CONF_SUMMARY_TIME, default=values[CONF_SUMMARY_TIME]): TIME,
+                    vol.Required(CONF_ON_CAMERA_MINUTES, default=values[CONF_ON_CAMERA_MINUTES]): _number(1, 120, "min"),
+                }
+            ),
         }
     )
 
@@ -581,7 +587,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_schedule(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            self._options.update(user_input)
+            self._options.update(_flatten(user_input, SCHEDULE_SECTIONS))
             return await self.async_step_cameras()
         return self.async_show_form(step_id="schedule", data_schema=_schedule_schema(self._options))
 
@@ -644,7 +650,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         names = _phone_names(self.hass)
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
-                name = service.removeprefix("mobile_app_").replace("_", " ").title()
+                name = names.get(service) or service.removeprefix("mobile_app_").replace("_", " ").title()
                 self._people[uuid4().hex] = _recipient_data(
                     {CONF_NAME: name, CONF_NOTIFY: service, CONF_MISSING_ALERTS: True}
                 )
@@ -896,7 +902,7 @@ class WatchOptionsFlow(OptionsFlow):
 
     async def async_step_schedule(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            return self._save(user_input)
+            return self._save(_flatten(user_input, SCHEDULE_SECTIONS))
         return self.async_show_form(step_id="schedule", data_schema=_schedule_schema(self._values))
 
     async def async_step_identification(
@@ -952,6 +958,7 @@ class WatchOptionsFlow(OptionsFlow):
     async def async_step_catch_alls(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Unknown animals, other wildlife and unsure motion: where each alerts."""
         if user_input is not None:
+            user_input = _flatten(user_input, CATCH_ALL_SECTIONS)
             data: dict[str, Any] = {
                 CONF_PESTS: [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()]
             }
@@ -959,11 +966,13 @@ class WatchOptionsFlow(OptionsFlow):
                 data.update(_alert_data(user_input, f"{key}_"))
             return self._save(data)
         cameras = _camera_options(self.config_entry)
-        fields: dict[Any, Any] = {
-            vol.Optional(CONF_PESTS, default=list(self._values.get(CONF_PESTS) or [])): PESTS
-        }
-        for key in BUILTIN_KEYS.values():
-            fields.update(_alert_fields(self._values, cameras, f"{key}_"))
+        # One folded group each, in the order the page describes them.
+        fields: dict[Any, Any] = {}
+        for key in ("pest", "unknown", "other", "motion"):
+            group = _alert_fields(self._values, cameras, f"{key}_")
+            if key == "pest":
+                group = {vol.Optional(CONF_PESTS, default=list(self._values.get(CONF_PESTS) or [])): PESTS, **group}
+            fields[vol.Required(key, default={})] = _section(group)
         return self.async_show_form(step_id="catch_alls", data_schema=vol.Schema(fields))
 
     async def async_step_training(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -1015,6 +1024,7 @@ class WatchOptionsFlow(OptionsFlow):
             return self._save(user_input)
         return self.async_show_form(
             step_id="notifications",
+            description_placeholders={"example": "https://example.duckdns.org:8123"},
             data_schema=vol.Schema(
                 {
                     vol.Optional(
@@ -1143,12 +1153,16 @@ def _phone_names(hass: HomeAssistant) -> dict[str, str]:
 
 
 def _recipient_schema(hass: HomeAssistant, values: Mapping[str, Any], subjects: list[str]) -> vol.Schema:
+    names = _phone_names(hass)
     return vol.Schema(
         {
             vol.Required(CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}): TEXT,
             vol.Optional(CONF_PERSON, description={"suggested_value": values.get(CONF_PERSON)}): PERSON,
             vol.Required(CONF_NOTIFY, description={"suggested_value": values.get(CONF_NOTIFY)}): SelectSelector(
-                SelectSelectorConfig(options=_notify_services(hass), custom_value=True)
+                SelectSelectorConfig(
+                    options=[SelectOptionDict(value=s, label=names.get(s, s)) for s in _notify_services(hass)],
+                    custom_value=True,
+                )
             ),
             vol.Required("critical_alerts", default={}): _section(
                 {

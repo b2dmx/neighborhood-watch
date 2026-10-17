@@ -15,6 +15,8 @@ from .engine import WatchEngine, _dt
 from .entity import WatchEntity
 
 STATE_LIMIT = 255
+# What the AI said and the detector's boxes: too big to keep in the recorder's history.
+_BULKY_DETECTION = frozenset({"description", "first_look_said", "second_opinion_said", "detector"})
 
 
 async def async_setup_entry(
@@ -75,6 +77,7 @@ class Wildlife(WatchEntity, SensorEntity):
     """Every wildlife kind seen, tracked here instead of a device per animal."""
 
     _attr_icon = "mdi:paw-outline"
+    _unrecorded_attributes = frozenset({"kinds"})
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "wildlife")
@@ -97,6 +100,7 @@ class Wildlife(WatchEntity, SensorEntity):
 
 class LastSighting(WatchEntity, SensorEntity):
     _attr_icon = "mdi:paw"
+    _unrecorded_attributes = _BULKY_DETECTION
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "last_sighting")
@@ -115,6 +119,7 @@ class LastSighting(WatchEntity, SensorEntity):
 
 class AiCalls(WatchEntity, SensorEntity):
     _attr_icon = "mdi:robot-outline"
+    _unrecorded_attributes = frozenset({"models"})
     _attr_native_unit_of_measurement = "calls"
 
     def __init__(self, watch: WatchEngine) -> None:
@@ -147,6 +152,7 @@ class CameraAnimal(WatchEntity, SensorEntity):
 
 class LastDetection(WatchEntity, SensorEntity):
     _attr_icon = "mdi:history"
+    _unrecorded_attributes = _BULKY_DETECTION
 
     @property
     def native_value(self) -> str | None:
@@ -229,6 +235,7 @@ class ToReview(WatchEntity, SensorEntity):
     """Sightings waiting for a person's answer (the card lists them with their photos)."""
 
     _attr_icon = "mdi:clipboard-check-outline"
+    _unrecorded_attributes = frozenset({"items"})
     _attr_native_unit_of_measurement = "sightings"
 
     def __init__(self, watch: WatchEngine) -> None:
@@ -256,6 +263,7 @@ class DetectorAgreement(WatchEntity, SensorEntity):
     """How often the local detector agrees with the AI on "is an animal there" (last 7 days)."""
 
     _attr_icon = "mdi:radar"
+    _unrecorded_attributes = frozenset({"recent_misses"})
     _attr_native_unit_of_measurement = "%"
 
     def __init__(self, watch: WatchEngine) -> None:
@@ -291,6 +299,7 @@ class LastScan(WatchEntity, SensorEntity):
     """The latest bulk scan: its state while running, then how many visits it found."""
 
     _attr_icon = "mdi:folder-search-outline"
+    _unrecorded_attributes = frozenset({"visits", "tally", "report"})
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "last_scan")

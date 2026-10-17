@@ -14,6 +14,12 @@ const SECTIONS = [
   { value: "switches", label: "Critical alerts" },
   { value: "scan", label: "Scan a folder" },
 ];
+// The entities whose state the card shows; anything else changing needs no redraw.
+const SHOWN = new Set([
+  "night_summary", "to_review", "wildlife", "last_scan", "pest_critical", "other_critical", "unknown_critical", "motion_critical",
+  "last_seen", "last_photo", "location", "on_camera", "sightings_tonight", "recently_absent", "alerts", "critical_alerts", "missing_mode",
+  "last_detection",
+]);
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -157,7 +163,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       computeLabel: (s) =>
         ({
           title: "Title",
-          sections: "Show",
+          sections: "Sections",
           hide: "Hide these animals or cameras",
           order: "Animal order",
           columns: "Animal columns",
@@ -219,7 +225,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!this._ids || entities !== this._entitiesRef) {
       this._entitiesRef = entities;
       this._ids = Object.values(entities || {})
-        .filter((e) => e.platform === DOMAIN)
+        .filter((e) => e.platform === DOMAIN && SHOWN.has(e.translation_key))
         .map((e) => e.entity_id);
     }
     // Image entities get a new access token every few minutes; only a new picture (its state) counts.
@@ -275,7 +281,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (show.has("review") && d.hub?.keys.to_review) parts.push(this._review(d));
     if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
     else if (show.has("animals") && d.hub)
-      parts.push(`<div class="section"><h2>Animals</h2><div class="muted">Add your animals with Add animal on the Neighborhood Watch integration page.</div></div>`);
+      parts.push(`<div class="section"><h2>Animals</h2><div class="muted">Add animals with Add animal on the Neighborhood Watch integration page.</div></div>`);
     // The shorter sections sit side by side on wide screens instead of each taking a row.
     const side = [];
     if (show.has("wildlife") && d.hub?.keys.wildlife) side.push(this._wildlife(d.hub));
@@ -294,6 +300,13 @@ class NeighborhoodWatchCard extends HTMLElement {
       // Leaving a field mid-press (tapping Scan or Save) waits for the click to land first.
       this.shadowRoot.addEventListener("pointerdown", () => (this._pressing = true));
       this.shadowRoot.addEventListener("focusout", () => setTimeout(() => this._resume()));
+      // Enter or Space on a tappable picture, row or title works like a tap.
+      this.shadowRoot.addEventListener("keydown", (ev) => {
+        const el = ev.target;
+        if ((ev.key !== "Enter" && ev.key !== " ") || el.tagName === "BUTTON" || el.getAttribute?.("role") !== "button") return;
+        ev.preventDefault();
+        el.click();
+      });
     }
     const cols = this._config.columns || 3;
     const ph = this._config.photo_height || 140;
@@ -306,25 +319,32 @@ class NeighborhoodWatchCard extends HTMLElement {
       <ha-card>
         <div class="whole">
           <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
-          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet. Add cameras and animals under Settings → Devices &amp; services → Neighborhood Watch → Configure.</div>`}</div>
+          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.</div>`}</div>
         </div>
       </ha-card>${this._lightbox()}`;
     // Every section folds: tap its title. "To review" starts folded; choices are remembered.
+    const tappable = (el) => {
+      el.tabIndex = 0;
+      el.setAttribute("role", "button");
+    };
     this.shadowRoot.querySelectorAll(".section > h2, .whole > h2").forEach((h) => {
       const key = h.textContent.split(" · ")[0].trim();
       if (this._folded().has(key)) h.parentElement.classList.add("folded");
+      tappable(h);
+      h.setAttribute("aria-expanded", String(!this._folded().has(key)));
       h.addEventListener("click", () => {
         const folded = this._folded();
         folded.has(key) ? folded.delete(key) : folded.add(key);
         try {
           localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
         } catch (e) {}
-        h.parentElement.classList.toggle("folded");
+        h.setAttribute("aria-expanded", String(!h.parentElement.classList.toggle("folded")));
       });
     });
-    this.shadowRoot.querySelectorAll("[data-more]").forEach((el) =>
-      el.addEventListener("click", () => this._more(el.dataset.more))
-    );
+    this.shadowRoot.querySelectorAll("[data-more]").forEach((el) => {
+      tappable(el);
+      el.addEventListener("click", () => this._more(el.dataset.more));
+    });
     this.shadowRoot.querySelectorAll("[data-toggle]").forEach((el) =>
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -477,22 +497,25 @@ class NeighborhoodWatchCard extends HTMLElement {
   _lightbox() {
     // The full frame, over everything. Tap the picture to zoom in where you tapped.
     if (!this._zoom) return "";
-    return `<div class="lightbox">
+    return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
         <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}">
       </div>`;
   }
 
   _wireLightbox() {
-    this.shadowRoot.querySelectorAll("[data-zoom]").forEach((el) =>
+    this.shadowRoot.querySelectorAll("[data-zoom]").forEach((el) => {
+      el.tabIndex = 0;
+      el.setAttribute("role", "button");
       el.addEventListener("click", () => {
         this._zoom = el.dataset.zoom;
         this._zoomAlt = el.alt;
         this._render(true);
-      })
-    );
+      });
+    });
     const box = this.shadowRoot.querySelector(".lightbox");
     if (!box) return;
+    box.querySelector(".lbclose").focus();
     box.addEventListener("click", (ev) => {
       const img = box.querySelector(".lbimg");
       if (ev.target === img && !img.classList.contains("zoomed")) {
@@ -555,18 +578,18 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _toggles(k) {
     // Icon toggles for an animal's Alerts, Critical alerts and Missing mode switches.
-    const t = (id, icon, offIcon, label, alarm) => {
+    // The name says what it is; aria-pressed says whether it's on.
+    const t = (id, icon, offIcon, label, name, alarm) => {
       const s = id && this._state(id);
       if (!s) return "";
       const isOn = s.state === "on";
-      const tip = `${label}: ${isOn ? "on" : "off"}`;
-      return `<button class="tog ${isOn ? (alarm ? "alarm" : "on") : ""}" data-toggle="${esc(id)}" title="${tip}" aria-label="${tip}" aria-pressed="${isOn}">
+      return `<button class="tog ${isOn ? (alarm ? "alarm" : "on") : ""}" data-toggle="${esc(id)}" title="${name}" aria-label="${name}" aria-pressed="${isOn}">
           <ha-icon icon="${isOn ? icon : offIcon}"></ha-icon><span>${label}</span></button>`;
     };
     return (
-      t(k.alerts, "mdi:bell", "mdi:bell-off-outline", "Alerts") +
-      t(k.critical_alerts, "mdi:bell-ring", "mdi:bell-ring-outline", "Critical", true) +
-      t(k.missing_mode, "mdi:map-marker-alert", "mdi:map-marker-question-outline", "Missing", true)
+      t(k.alerts, "mdi:bell", "mdi:bell-off-outline", "Alerts", "Alerts") +
+      t(k.critical_alerts, "mdi:bell-ring", "mdi:bell-ring-outline", "Critical", "Critical alerts", true) +
+      t(k.missing_mode, "mdi:map-marker-alert", "mdi:map-marker-question-outline", "Missing", "Missing mode", true)
     );
   }
 
@@ -663,12 +686,12 @@ class NeighborhoodWatchCard extends HTMLElement {
       .filter((c) => c.keys.critical_alerts)
       .map((c) => {
         const s = this._state(c.keys.critical_alerts);
-        return `<button class="chip ${s?.state === "on" ? "alarm" : ""}" data-toggle="${esc(c.keys.critical_alerts)}">${esc(c.name)}</button>`;
+        return `<button class="chip ${s?.state === "on" ? "alarm" : ""}" data-toggle="${esc(c.keys.critical_alerts)}" aria-pressed="${s?.state === "on"}">${esc(c.name)}</button>`;
       });
     const hub = d.hub?.keys || {};
     for (const [key, label] of [["pest_critical", "Pests"], ["other_critical", "Other wildlife"], ["unknown_critical", "Unknown animals"], ["motion_critical", "Unsure motion"]]) {
       const s = hub[key] && this._state(hub[key]);
-      if (s) chips.push(`<button class="chip ${s.state === "on" ? "alarm" : ""}" data-toggle="${esc(hub[key])}">${label}</button>`);
+      if (s) chips.push(`<button class="chip ${s.state === "on" ? "alarm" : ""}" data-toggle="${esc(hub[key])}" aria-pressed="${s.state === "on"}">${label}</button>`);
     }
     if (!chips.length) return "";
     return `<div class="section"><h2>Critical alerts</h2><div class="muted small">On = alerts ring even in silent mode.</div><div class="chips">${chips.join("")}</div></div>`;
@@ -768,12 +791,12 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
 }
 
 const STYLE = `
+  :host { display: block; container-type: inline-size; }
   .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
   .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
   .section.folded > h2::after { transform: rotate(-90deg); }
   .section.folded > :not(h2) { display: none; }
   ha-card { padding: 16px; }
-  .title { font-size: 1.4em; font-weight: 500; margin: 0 0 12px; }
   h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   .section + .section, .section + .side, .side + .section { margin-top: 18px; }
   .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; align-items: start; }
@@ -791,11 +814,11 @@ const STYLE = `
     background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
   .nophoto + .over { color: var(--primary-text-color); background: none; }
   .over .name { font-weight: 600; font-size: 1.1em; }
-  .over .status { font-size: .85em; opacity: .9; }
+  .over .status { font-size: .85em; opacity: .9; color: inherit; }
   .over .live { color: var(--success-color, #7CFC9A); }
   .badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
   .badge { font-size: .72em; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
-  .badge.dim { opacity: .8; }
+  .badge.dim { opacity: .8; color: #fff; }
   .badge.alarm { background: var(--error-color, #db4437); font-weight: 600; }
   .toggles { display: flex; gap: 4px; padding: 6px; }
   .tog { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; border: none; border-radius: 12px;
@@ -806,7 +829,6 @@ const STYLE = `
   .whole > h2.title { font-size: 1.3em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--primary-text-color); margin: 0; }
   .whole > .inner { margin-top: 12px; }
   .whole.folded > .inner { display: none; }
-  .name { font-weight: 600; font-size: 1.05em; }
   .status { font-size: .9em; margin-top: 2px; color: var(--primary-text-color); }
   .muted, .dim { color: var(--secondary-text-color); }
   .live { color: var(--success-color, #43a047); font-weight: 600; }
@@ -829,7 +851,6 @@ const STYLE = `
   .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .small { font-size: .8em; }
   .rev .acts { gap: 4px; }
-  .rev .mini { width: 36px; height: 36px; }
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -841,7 +862,7 @@ const STYLE = `
   input[data-folder] { flex: 1; min-width: 180px; font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
   select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; min-height: 32px; }
   select option { background: var(--card-background-color, #1c1c1f); color: var(--primary-text-color); }
-  @media (max-width: 500px) { .grid { grid-template-columns: repeat(__SMALLCOLS__, minmax(0, 1fr)); } }
+  @container (max-width: 500px) { .grid { grid-template-columns: repeat(__SMALLCOLS__, minmax(0, 1fr)); } }
 `;
 
 customElements.define("neighborhood-watch-card", NeighborhoodWatchCard);

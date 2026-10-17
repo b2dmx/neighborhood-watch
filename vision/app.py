@@ -303,9 +303,16 @@ async def scan_report(request: web.Request) -> web.Response:
     job = SCANS.get(request.match_info["id"])
     if job is None or job.state != "done":
         return web.json_response({"error": "scan not finished"}, status=409)
-    names = (await request.json()).get("names", {})
+    try:
+        body = await request.json()
+        names = body.get("names") or {}
+        if not isinstance(names, dict):
+            raise TypeError("names is not an object")
+    except (ValueError, TypeError, AttributeError):
+        return web.json_response({"error": "bad request"}, status=400)
     for visit in job.visits:
-        named = names.get(str(visit.n)) or {}
+        named = names.get(str(visit.n))
+        named = named if isinstance(named, dict) else {}
         visit.animal = named.get("animal") or visit.animal
         visit.label_confidence = named.get("confidence") or visit.label_confidence
     folder = _folder(job.path)

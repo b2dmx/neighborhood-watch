@@ -36,14 +36,24 @@
           "night_start": "Start",
           "night_end": "End",
           "use_dark": "Also watch whenever it is dark",
-          "summary_time": "Night summary time",
-          "on_camera_minutes": "On camera for",
           "watch_always": "Watch all day"
         },
         "data_description": {
-          "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
-          "on_camera_minutes": "How long an animal shows as on camera after a sighting.",
           "watch_always": "For daytime visitors too. Every check uses AI quota, so this uses more."
+        },
+        "sections": {
+          "more": {
+            "name": "More",
+            "description": "When the night summary is built, and how long an animal shows as on camera.",
+            "data": {
+              "summary_time": "Night summary time",
+              "on_camera_minutes": "On camera for"
+            },
+            "data_description": {
+              "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
+              "on_camera_minutes": "How long an animal shows as on camera after a sighting."
+            }
+          }
         }
       },
       "cameras": {
@@ -94,7 +104,7 @@
               "deterrent_sound": "Sound that scares pests off"
             },
             "data_description": {
-              "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+              "deterrent_lights": "Turned on when a pest is seen here, then back off.",
               "deterrent_sound": "Played when a pest is seen here."
             }
           }
@@ -243,14 +253,24 @@
           "night_start": "Start",
           "night_end": "End",
           "use_dark": "Also watch whenever it is dark",
-          "summary_time": "Night summary time",
-          "on_camera_minutes": "On camera for",
           "watch_always": "Watch all day"
         },
         "data_description": {
-          "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
-          "on_camera_minutes": "How long an animal shows as on camera after a sighting.",
           "watch_always": "For daytime visitors too. Every check uses AI quota, so this uses more."
+        },
+        "sections": {
+          "more": {
+            "name": "More",
+            "description": "When the night summary is built, and how long an animal shows as on camera.",
+            "data": {
+              "summary_time": "Night summary time",
+              "on_camera_minutes": "On camera for"
+            },
+            "data_description": {
+              "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
+              "on_camera_minutes": "How long an animal shows as on camera after a sighting."
+            }
+          }
         }
       },
       "identification": {
@@ -276,6 +296,9 @@
         "description": "Each sighting event carries a picture link that phones can open. Leave empty to use this Home Assistant's external URL.",
         "data": {
           "public_url": "Public address"
+        },
+        "data_description": {
+          "public_url": "The address phones reach this Home Assistant at from outside, e.g. {example}."
         }
       },
       "alerts": {
@@ -321,19 +344,43 @@
       "catch_alls": {
         "title": "Wildlife and catch-alls",
         "description": "Every animal that isn't one of yours is recognised and tracked as wildlife, without adding it. Pests are the kinds you list here; everything else is other wildlife. Unknown animals: a cat or dog that isn't one of yours. Unsure motion: the AI saw movement but couldn't say what. Each one has a Critical alerts switch on the Neighborhood Watch device, and its \"critical alerts only at\" field limits where that rings. Empty: wherever it alerts.",
-        "data": {
-          "pests": "Pests",
-          "pest_alert_at": "Pests: alert at",
-          "pest_critical_at": "Pests: critical alerts only at",
-          "unknown_alert_at": "Unknown animals: alert at",
-          "unknown_critical_at": "Unknown animals: critical alerts only at",
-          "other_alert_at": "Other wildlife: alert at",
-          "other_critical_at": "Other wildlife: critical alerts only at",
-          "motion_alert_at": "Unsure motion: alert at",
-          "motion_critical_at": "Unsure motion: critical alerts only at"
-        },
-        "data_description": {
-          "pests": "Alert every time they come back, and are scared off with a camera's lights and sound."
+        "sections": {
+          "pest": {
+            "name": "Pests",
+            "description": "The kinds you list here alert every time they come back.",
+            "data": {
+              "pests": "Pests",
+              "pest_alert_at": "Alert at",
+              "pest_critical_at": "Critical alerts only at"
+            },
+            "data_description": {
+              "pests": "Alert every time they come back, and are scared off with a camera's lights and sound."
+            }
+          },
+          "unknown": {
+            "name": "Unknown animals",
+            "description": "A cat or dog that isn't one of yours.",
+            "data": {
+              "unknown_alert_at": "Alert at",
+              "unknown_critical_at": "Critical alerts only at"
+            }
+          },
+          "other": {
+            "name": "Other wildlife",
+            "description": "Any other animal that isn't a pest.",
+            "data": {
+              "other_alert_at": "Alert at",
+              "other_critical_at": "Critical alerts only at"
+            }
+          },
+          "motion": {
+            "name": "Unsure motion",
+            "description": "The AI saw movement but couldn't say what.",
+            "data": {
+              "motion_alert_at": "Alert at",
+              "motion_critical_at": "Critical alerts only at"
+            }
+          }
         }
       },
       "camera": {
@@ -390,7 +437,7 @@
               "deterrent_sound": "Sound that scares pests off"
             },
             "data_description": {
-              "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
+              "deterrent_lights": "Turned on when a pest is seen here, then back off.",
               "deterrent_sound": "Played when a pest is seen here."
             }
           }

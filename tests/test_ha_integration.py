@@ -233,6 +233,50 @@ async def test_start_removes_old_notification_folders_only(hass, setup):
     assert current.exists() and outside.exists()
 
 
+async def test_start_cleanup_skips_links_and_survives_a_failed_removal(hass, setup):
+    import shutil
+
+    setup["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    watch = setup["watch"]
+    root = watch.www_path("yard").parent.parent
+    target = root.parent / "linked_target"  # outside our folder: must survive
+
+    def plant() -> bool:
+        target.mkdir()
+        (target / "keep.jpg").write_bytes(FRAME)
+        for name in ("aaaa", "bbbb"):
+            (root / name).mkdir()
+            (root / name / "yard.jpg").write_bytes(FRAME)
+        try:
+            (root / "link").symlink_to(target, target_is_directory=True)
+        except OSError:  # creating symlinks needs a privilege on Windows: a junction doesn't
+            try:
+                import _winapi  # noqa: PLC0415
+
+                _winapi.CreateJunction(str(target), str(root / "link"))
+            except (ImportError, OSError):
+                return False
+        return True
+
+    linked = await hass.async_add_executor_job(plant)
+    real_rmtree = shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        if Path(path).name == "aaaa":
+            raise PermissionError("in use")
+        return real_rmtree(path, *args, **kwargs)
+
+    with patch("custom_components.neighborhood_watch.engine.shutil.rmtree", rmtree):
+        await hass.async_add_executor_job(watch._load_frames)
+    left = await hass.async_add_executor_job(lambda: {p.name for p in root.iterdir()})
+    assert "aaaa" in left and "bbbb" not in left  # one failure doesn't stop the rest
+    assert (target / "keep.jpg").exists()
+    if not linked:
+        pytest.skip("neither a symlink nor a junction can be created here")
+    assert "link" in left
+
+
 async def test_on_camera_clears_after_the_window(hass, setup, freezer):
     setup["ai"].say(FIRST, "Milo|high|uniform|black|")
     await trigger(hass, "yard")

@@ -259,7 +259,7 @@ Its editor picks the sections and the devices to hide, and sets the rest:
 | Option | What it does (default) |
 |---|---|
 | `title` | The card's title (Neighborhood Watch) |
-| `sections` | Which sections to show: `review`, `animals`, `wildlife`, `summary`, `recent`, `switches`, `scan` (all) |
+| `sections` | Which sections to show: `review`, `animals`, `wildlife`, `summary`, `recent`, `switches`, `scan` (all except `scan`, which needs the [local detector](#local-detector-optional); it also shows once a scan has run) |
 | `hide` | Devices to leave out |
 | `order` | Animal order: `recent` puts animals on camera now first, then the most recently seen, ties by name; `name` is alphabetical (`recent`) |
 | `columns` | Animal columns (3) |
@@ -269,7 +269,7 @@ Its editor picks the sections and the devices to hide, and sets the rest:
 
 ```yaml
 type: custom:neighborhood-watch-card
-sections: [review, animals, wildlife, summary, recent, switches, scan]
+sections: [review, animals, wildlife, summary, recent, switches, scan]  # scan is opt-in
 order: recent
 columns: 3
 ```

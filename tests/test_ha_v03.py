@@ -758,6 +758,80 @@ async def test_at_the_time_cap_what_the_ai_had_said_still_counts(hass, watch):
     assert "+" not in result["models_used"]
 
 
+async def test_the_cap_during_a_priority_second_opinion_keeps_the_first_answer(hass, watch):
+    from custom_components.neighborhood_watch import engine
+
+    real_timeout = asyncio.timeout
+    caps: list[asyncio.Timeout] = []
+
+    def timeout(delay):
+        if delay != 12345:
+            return real_timeout(delay)
+        caps.append(real_timeout(None))
+        return caps[-1]
+
+    async def answer(call: ServiceCall) -> dict[str, Any]:
+        if call.data["entity_id"] == FIRST:
+            return {"conversation_id": "x", "data": "Luna|high|blotchy|white|"}
+        caps[-1].reschedule(asyncio.get_running_loop().time())  # the cap runs out now
+        await asyncio.Event().wait()
+        return {}
+
+    hass.services.async_register("ai_task", "generate_data", answer, supports_response=SupportsResponse.ONLY)
+    w = watch["watch"]
+    with patch.object(engine, "IDENTIFY_CAP_SECONDS", 12345), patch.object(engine.asyncio, "timeout", timeout):
+        result = await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    # The priority double-check never finished: the main model's Luna stands, at medium.
+    assert result["animal"] == "Luna" and result["confidence"] == "medium"
+    assert "+" not in result["models_used"] and result["models_used"] != "none answered"
+    second = w.data["ai"]["models"][SECOND]
+    assert second["errors"] == 1 and second["last_error"] == "Cut off by the time limit"
+
+
+async def test_add_note_rejects_a_blank_note_and_skips_a_repeat(hass, watch):
+    import voluptuous as vol
+
+    entry = watch["entry"]
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            DOMAIN, "add_note", {"camera": "Yard", "note": "   "}, blocking=True, return_response=True
+        )
+    for note in ("The bins are by the gate.", "  the bins are by the gate. "):
+        result = await hass.services.async_call(
+            DOMAIN, "add_note", {"camera": "Yard", "note": note}, blocking=True, return_response=True
+        )
+        assert result == {"added_to": "Yard"}
+        await hass.async_block_till_done()
+    assert camera_options(entry, "Yard")["ai_notes"] == "The bins are by the gate."
+    tip = "Has a short tail."
+    for _ in range(2):
+        result = await hass.services.async_call(
+            DOMAIN, "add_note", {"animal": "Milo", "note": tip}, blocking=True, return_response=True
+        )
+        assert result == {"added_to": "Milo"}
+        await hass.async_block_till_done()
+    tips = next(s.data for s in entry.subentries.values() if s.title == "Milo")["tips"]
+    assert tips.count(tip) == 1
+
+
+async def test_sighting_windows_stop_at_their_cutoff(hass, watch):
+    w = watch["entry"].runtime_data
+    milo = w.animal_by_name("Milo")
+    now = dt_util.utcnow()
+    rows = w.sightings()
+    rows.clear()
+    for days, sid in ((9, "old"), (3, "mid"), (0, "new")):
+        t = (now - timedelta(days=days, minutes=1)).isoformat()
+        rows.append({"id": sid, "day": t[:10], "time": t, "animal": "Milo", "where": "Yard", "counted": True})
+    since = dt_util.as_local(now - timedelta(days=7))  # a local time still compares right
+    assert [s["id"] for s in w.counted_sightings(milo, since)] == ["mid", "new"]
+    assert [s["id"] for s in w.counted_sightings(milo)] == ["old", "mid", "new"]
+    assert [s["id"] for s in w.review_queue()] == ["new", "mid"]
+    rows.insert(0, {"id": "timeless", "animal": "Milo"})  # a row without a time can't stall pruning
+    w._prune(now)
+    assert [s["id"] for s in rows] == ["old", "mid", "new"]
+
+
 async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, aioclient_mock, freezer):
     await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.5)
     w = watch["entry"].runtime_data

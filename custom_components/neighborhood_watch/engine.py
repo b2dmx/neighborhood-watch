@@ -8,7 +8,7 @@ waiting its turn is not queued twice.
 from __future__ import annotations
 
 import asyncio
-from bisect import insort
+from bisect import bisect_left, bisect_right, insort
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -258,6 +258,11 @@ def _iso(t: datetime | None) -> str | None:
     return t.isoformat() if t else None
 
 
+def _row_time(row: dict[str, Any]) -> str:
+    """A sighting's sort key: its UTC ISO time ("" sorts a row without one first)."""
+    return row.get("time") or ""
+
+
 def _dt(value: Any) -> datetime | None:
     if not value:
         return None
@@ -356,6 +361,11 @@ def _write_frames(frame: Path, notification: Path, content: bytes) -> OSError | 
     return None
 
 
+def _already_noted(note: str, existing: str | None) -> bool:
+    """A note the AI is already given (a repeated tap of an alert's button) isn't added again."""
+    return note.casefold() in (existing or "").casefold()
+
+
 def _rotate_and_write(path: Path, content: bytes) -> None:
     """Keep the previous photo so a wrong identification can be undone."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -395,6 +405,7 @@ class WatchEngine:
         self.hub_device_id: str | None = None
         self._lock = asyncio.Lock()  # the AI calls and the recording: one check at a time
         self._camera_locks: dict[str, asyncio.Lock] = {}  # snapshot and detector, per camera
+        self._photo_locks: dict[str, asyncio.Lock] = {}  # an animal's photo and its .prev, per animal
         self.own_updates = 0  # entry updates made by add_note, which must not reload
         self._unsubs: list[Callable[[], None]] = []
         self._trigger_map: dict[str, list[str]] = {}
@@ -587,6 +598,10 @@ class WatchEngine:
     def photo_path(self, animal: AnimalConfig) -> Path:
         return self._photo_root / "photos" / f"{animal.slug}.jpg"
 
+    def _photo_lock(self, animal: AnimalConfig) -> asyncio.Lock:
+        """A new photo and a correction's undo never touch one animal's files at once."""
+        return self._photo_locks.setdefault(animal.slug, asyncio.Lock())
+
     @property
     def dataset_root(self) -> Path:
         custom = (self.options.get(CONF_DATASET_DIR) or "").strip()
@@ -671,13 +686,13 @@ class WatchEngine:
     def counted_sightings(
         self, animal: AnimalConfig, since: datetime | None = None
     ) -> list[dict]:
+        rows = self.sightings()
+        if since is not None:  # time-ordered UTC ISO rows: skip straight past the old ones
+            rows = rows[bisect_right(rows, _iso(dt_util.as_utc(since)) or "", key=_row_time):]
         return [
             s
-            for s in self.sightings()
-            if s.get("animal") == animal.name
-            and s.get("counted")
-            and not s.get("wrong")
-            and (since is None or (_dt(s.get("time")) or since) > since)
+            for s in rows
+            if s.get("animal") == animal.name and s.get("counted") and not s.get("wrong")
         ]
 
     def night_start(self) -> datetime | None:
@@ -807,7 +822,12 @@ class WatchEngine:
         # Notification pictures from before the secret folder were guessable, and any
         # other folder (an old secret's) still answers its links: they all go.
         try:
-            for old in self._www_root.iterdir():
+            olds = list(self._www_root.iterdir())
+        except OSError as err:
+            olds = []
+            _LOGGER.debug("Old notification pictures not listed: %s", err)
+        for old in olds:  # one that can't go doesn't keep the rest
+            try:
                 if old.is_symlink() or old.is_junction():
                     continue  # never follow a link out of the folder
                 if old.is_dir():
@@ -815,8 +835,8 @@ class WatchEngine:
                         shutil.rmtree(old)
                 elif old.suffix == ".jpg":
                     old.unlink(missing_ok=True)
-        except OSError as err:
-            _LOGGER.debug("Old notification pictures not removed: %s", err)
+            except OSError as err:
+                _LOGGER.debug("Old notification picture %s not removed: %s", old.name, err)
         for slug in self.cameras:
             path = self.frame_path(slug)
             content = _read(path)
@@ -1199,6 +1219,11 @@ class WatchEngine:
                     blocking=True,
                     return_response=True,
                 )
+        except asyncio.CancelledError:  # the identify cap (or shutdown) stopped the chain
+            stats["errors"] += 1
+            stats["last_error"] = "Cut off by the time limit"
+            stats["last_error_at"] = _iso(dt_util.utcnow())
+            raise
         except Exception as err:  # noqa: BLE001 - every failure falls through to the next model
             stats["errors"] += 1
             stats["last_error"] = str(err)[:200] or type(err).__name__
@@ -1301,9 +1326,10 @@ class WatchEngine:
             state["on_camera_where"] = cam.name
             if check.frame:
                 try:
-                    await self.hass.async_add_executor_job(
-                        _rotate_and_write, self.photo_path(animal), check.frame
-                    )
+                    async with self._photo_lock(animal):
+                        await self.hass.async_add_executor_job(
+                            _rotate_and_write, self.photo_path(animal), check.frame
+                        )
                     state["photo_at"] = _iso(now)
                 except OSError as err:
                     _LOGGER.warning("Photo for %s not saved: %s", animal.name, err)
@@ -1355,14 +1381,14 @@ class WatchEngine:
     def _add_sighting(self, row: dict[str, Any]) -> None:
         """Rows are kept in time order. Every time is the same UTC ISO format, so the
         strings sort like the times."""
-        insort(self.sightings(), row, key=lambda s: s.get("time") or "")
+        insort(self.sightings(), row, key=_row_time)
 
     def _prune(self, now: datetime) -> None:
         """Sightings are kept in time order with UTC ISO times: the old ones are a
         prefix, and comparing the strings finds its end."""
         rows = self.sightings()
         cutoff = _iso(now - timedelta(days=SIGHTING_DAYS)) or ""
-        old = next((i for i, s in enumerate(rows) if (s.get("time") or cutoff) >= cutoff), len(rows))
+        old = next((i for i, s in enumerate(rows) if _row_time(s) >= cutoff), len(rows))
         if drop := max(old, len(rows) - SIGHTING_MAX):
             del rows[:drop]
 
@@ -1444,14 +1470,15 @@ class WatchEngine:
     def review_queue(self, days: int = 7) -> list[dict[str, Any]]:
         """Sightings nobody has answered yet, newest first: anything with an animal in it
         (a confident "nothing" is left out) whose photo was kept."""
-        cutoff = dt_util.utcnow() - timedelta(days=days)
+        rows = self.sightings()
+        cutoff = _iso(dt_util.utcnow() - timedelta(days=days)) or ""
+        recent = rows[bisect_left(rows, cutoff, key=_row_time):]  # rows are time-ordered
         return [
             s
-            for s in reversed(self.sightings())
+            for s in reversed(recent)
             if not s.get("user")
             and s.get("day")
             and not (s.get("animal") == logic.NOTHING and s.get("confidence") == logic.HIGH)
-            and (_dt(s.get("time")) or cutoff) >= cutoff
         ]
 
     def find_sighting(self, sid: str | None, camera: CameraConfig | None) -> dict[str, Any] | None:
@@ -1552,7 +1579,8 @@ class WatchEngine:
             if state.get("photo_at") == row.get("time"):
                 state["on_camera_until"] = None
                 state["confirmed_until"] = None
-                restored = await self.hass.async_add_executor_job(_restore_previous, photo)
+                async with self._photo_lock(subject):
+                    restored = await self.hass.async_add_executor_job(_restore_previous, photo)
                 state["photo_at"] = (latest["time"] if latest else None) if restored else None
             cam_state = self.camera_state(row.get("camera", ""))
             if cam_state.get("current") == subject.name:
@@ -1562,7 +1590,8 @@ class WatchEngine:
                 dataset.read_frame, self.dataset_root, row["day"], row["id"]
             )
             if frame:
-                await self.hass.async_add_executor_job(_rotate_and_write, photo, frame)
+                async with self._photo_lock(subject):
+                    await self.hass.async_add_executor_job(_rotate_and_write, photo, frame)
                 state["photo_at"] = row["time"]
 
     @callback
@@ -2011,6 +2040,8 @@ class WatchEngine:
         if camera is not None:
             cameras = dict(self.entry.options.get(CONF_CAMERAS) or {})
             data = dict(cameras[camera.subentry_id])
+            if _already_noted(note, data.get(CONF_AI_NOTES)):
+                return camera.name
             data[CONF_AI_NOTES] = f"{(data.get(CONF_AI_NOTES) or '').strip()} {note}".strip()
             cameras[camera.subentry_id] = data
             camera.ai_notes = data[CONF_AI_NOTES]
@@ -2028,6 +2059,8 @@ class WatchEngine:
             raise ValueError(f"unknown animal {animal}")
         subentry = self.entry.subentries[subject.subentry_id]
         old = (subentry.data.get(CONF_TIPS) or "").strip()
+        if _already_noted(note, old):
+            return subject.name
         subject.tips = f"{old} {note}".strip()
         self.own_updates += 1
         if not self.hass.config_entries.async_update_subentry(

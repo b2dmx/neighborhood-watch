@@ -178,7 +178,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             {
                 vol.Optional("camera"): cv.string,
                 vol.Optional("animal"): cv.string,
-                vol.Required("note"): vol.All(cv.string, vol.Length(min=1)),
+                vol.Required("note"): vol.All(cv.string, str.strip, vol.Length(min=1)),
             }
         ),
         supports_response=SupportsResponse.OPTIONAL,
