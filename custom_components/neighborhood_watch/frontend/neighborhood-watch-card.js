@@ -213,7 +213,10 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _names(d) {
-    // Everything a sighting can be: the animals, then the wildlife kinds on the hub's sensor.
+    // Everything a sighting can be: the hub lists your animals and every wildlife kind;
+    // older versions fall back to the animals and the wildlife seen so far.
+    const choices = d.hub?.keys.to_review ? this._state(d.hub.keys.to_review)?.attributes?.choices : null;
+    if (Array.isArray(choices) && choices.length) return choices;
     const kinds = d.hub?.keys.wildlife ? this._state(d.hub.keys.wildlife)?.attributes?.kinds || {} : {};
     return [...new Set([...d.animals.map((x) => x.name), ...Object.keys(kinds)])];
   }
@@ -523,7 +526,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   _review(d) {
     const s = this._state(d.hub.keys.to_review);
     const items = s?.attributes?.items || [];
-    if (!items.length) return `<div class="section"><h2>To review</h2>${this._noteBox()}<div class="muted">All caught up.</div></div>`;
+    // Nothing to review: no section at all (unless the note box from the last answer is open).
+    if (!items.length) return this._note ? `<div class="section"><h2>To review</h2>${this._noteBox()}</div>` : "";
     const limit = this._config.review_limit || 6;
     const options = ["Nothing", ...this._names(d)].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
     const rows = items.slice(0, limit).map((it) => {
@@ -535,7 +539,6 @@ class NeighborhoodWatchCard extends HTMLElement {
           <div class="muted small">${esc(it.where)} · ${clock(it.time)} · <span data-ago="${esc(it.time)}">${ago(it.time)}</span></div>
           <div class="acts">
             <button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right"${off}>✓</button>
-            <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong" aria-label="Wrong"${off}>✗</button>
             <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure"${off}>?</button>
             <select data-sid="${sid}" aria-label="It was"${off}><option value="">It was…</option>${options}</select>
           </div>
@@ -664,7 +667,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         const off = this._answered.has(String(sid)) ? " disabled" : "";
         const buttons =
           sid && !nothing
-            ? `<button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button><button class="mini" data-answer="wrong" data-sid="${esc(sid)}" title="Wrong" aria-label="Wrong"${off}>✗</button>`
+            ? `<button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button><button class="mini" data-answer="unsure" data-sid="${esc(sid)}" title="Not sure" aria-label="Not sure"${off}>?</button>`
             : "";
         return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
       });

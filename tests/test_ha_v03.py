@@ -209,7 +209,7 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
     assert data["image"].split("?")[0].endswith(f"/{watch['watch'].data['www_secret']}/yard.jpg")
     titles = [a["title"] for a in data["actions"]]
-    assert titles == ["✓ Right", "✗ Wrong", "It's Luna"]
+    assert titles == ["✓ Right", "? Not sure", "It's Luna"]
 
 
 async def test_critical_switch_but_quiet_zone_mutes_it(hass, watch):
@@ -399,6 +399,10 @@ async def test_review_queue_and_unsure(hass, watch, freezer):
     assert queue.state == "2"
     items = queue.attributes["items"]
     assert [i["animal"] for i in items] == ["Raccoon", "Milo"]
+    # "It was…" offers your animals and every wildlife kind, not only ones seen so far.
+    choices = queue.attributes["choices"]
+    assert {"Milo", "Raccoon", "Fox", "Deer"} <= set(choices)
+    assert len(choices) == len(set(choices))
     await hass.services.async_call(DOMAIN, "correct", {"answer": "unsure", "sighting_id": items[0]["id"]}, blocking=True, return_response=True)
     await hass.services.async_call(DOMAIN, "correct", {"answer": "right", "sighting_id": items[1]["id"]}, blocking=True, return_response=True)
     assert state(hass, "sensor.neighborhood_watch_to_review").state == "0"

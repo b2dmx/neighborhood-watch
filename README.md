@@ -81,7 +81,7 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Page | Settings (defaults) |
 |---|---|
 | Cameras / People | Pick one to change or remove, or add one |
-| Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
+| Alerts | Send alerts (on); alert from confidence (medium); Right / Not sure buttons on alerts (on) |
 | Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
@@ -184,7 +184,7 @@ Then:
 - **Missing mode** (any named animal) beats everything: any possible sighting, from either model at any confidence on any camera, sends a critical alert at full volume to the people who get missing-mode alerts. The AI always takes a second look.
 - **Per person.** Muted animals are skipped. In a quiet zone or quiet hours, critical alerts arrive as normal ones, or not at all; missing-mode alerts always arrive.
 
-Each alert carries the frame the AI judged and three buttons: **✓ Right**, **✗ Wrong** and **It's Luna**.
+Each alert carries the frame the AI judged and three buttons: **✓ Right**, **? Not sure** and **It's Luna**. If it was something else, pick what it was under "It was…" on the card.
 
 You can turn the alerts off and use the event in your own automations instead:
 
@@ -215,7 +215,7 @@ For your own automations, the Neighborhood Watch device has **Pest on camera** (
 
 ## Corrections and training data
 
-**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ✗ Wrong, ? Not sure and "It was…". The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. After a ✗ or "It was…", the card offers **Add a note so it doesn't happen again**, which saves it to that camera's view notes or that animal's tips, where the AI will see it (also the `add_note` action). "It was…" accepts any animal: your own animals and wildlife kinds move tracking; anything else (a groundhog, a heron) is labelled for training, just not tracked.
+**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ? Not sure and "It was…" (every animal and wildlife kind); it disappears when there is nothing to review. The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. After "It was…", the card offers **Add a note so it doesn't happen again**, which saves it to that camera's view notes or that animal's tips, where the AI will see it (also the `add_note` action). "It was…" accepts any animal: your own animals and wildlife kinds move tracking; anything else (a groundhog, a heron) is labelled for training, just not tracked.
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
@@ -304,4 +304,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.13.3 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.13.4 by Goobis<br>AI was used to help develop this integration.</p>

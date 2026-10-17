@@ -1596,7 +1596,7 @@ class WatchEngine:
 
     @callback
     def _on_phone_action(self, event: Event) -> None:
-        """Right / Wrong / It's <animal> buttons on an alert."""
+        """Right / Not sure / It's <animal> buttons on an alert."""
         parts = str(event.data.get("action", "")).split("|")
         if len(parts) < 3 or parts[0] != ACTION_PREFIX:
             return
@@ -1604,7 +1604,7 @@ class WatchEngine:
         if verb == "is" and len(parts) > 3:
             target = self.animal_by_name(parts[3])
             answer = target.name if target else parts[3]
-        elif verb in ("right", "wrong"):
+        elif verb in ("right", "wrong", "unsure"):
             answer = verb
         else:
             return
@@ -1702,7 +1702,7 @@ class WatchEngine:
         if sid and self.options.get(CONF_BUTTONS, True):
             actions = [
                 {"action": f"{ACTION_PREFIX}|right|{sid}", "title": "✓ Right"},
-                {"action": f"{ACTION_PREFIX}|wrong|{sid}", "title": "✗ Wrong"},
+                {"action": f"{ACTION_PREFIX}|unsure|{sid}", "title": "? Not sure"},
             ]
             for a in self.animals.values():
                 if (a.priority or a.key in missing) and a.name != v.animal:

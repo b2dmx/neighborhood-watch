@@ -235,7 +235,7 @@ class ToReview(WatchEntity, SensorEntity):
     """Sightings waiting for a person's answer (the card lists them with their photos)."""
 
     _attr_icon = "mdi:clipboard-check-outline"
-    _unrecorded_attributes = frozenset({"items"})
+    _unrecorded_attributes = frozenset({"items", "choices"})
     _attr_native_unit_of_measurement = "sightings"
 
     def __init__(self, watch: WatchEngine) -> None:
@@ -255,7 +255,11 @@ class ToReview(WatchEntity, SensorEntity):
             "items": [
                 {k: s.get(k) for k in ("id", "time", "where", "animal", "confidence")}
                 for s in self._queue[:40]
-            ]
+            ],
+            # What a sighting can be corrected to: your animals, then every wildlife kind.
+            "choices": list(
+                dict.fromkeys([*(a.name for a in self.watch.animals.values()), *self.watch.wildlife])
+            ),
         }
 
 
