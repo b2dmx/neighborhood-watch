@@ -12,12 +12,12 @@ except ImportError:  # pragma: no cover - older Home Assistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
-from .const import DOMAIN, NAME
+from .const import CONF_CAMERA, CONF_CAMERAS, DOMAIN, NAME
 from .engine import AnimalConfig, CameraConfig, WatchEngine
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.IMAGE, Platform.SENSOR, Platform.SWITCH]
@@ -95,6 +95,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         )
         if result == "no_photo":
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_photo")
+        if result == "snapshot_failed":
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="snapshot_failed",
+                translation_placeholders={"camera": call.data["camera"]},
+            )
 
     async def correct(call: ServiceCall) -> ServiceResponse:
         watch = engine()
@@ -130,7 +136,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         cam = camera(watch, call.data.get("camera"), required=False)
         if cam is None and not call.data.get("animal"):
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="note_needs_target")
-        if cam is None and watch.subject(call.data["animal"]) is None:
+        if cam is None and watch.animal_by_name(call.data["animal"]) is None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="unknown_animal",
@@ -268,6 +274,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> b
         hass.config_entries.async_update_entry(entry, options=options, minor_version=3)
         for sid in gone:
             hass.config_entries.async_remove_subentry(entry, sid)
+        _drop_duplicate_camera_devices(hass, entry)
     return True
 
 
@@ -286,22 +293,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> boo
     await watch.async_start()
     entry.runtime_data = watch
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    _drop_duplicate_camera_devices(hass, watch)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
 
-def _drop_duplicate_camera_devices(hass: HomeAssistant, watch: WatchEngine) -> None:
+def _drop_duplicate_camera_devices(hass: HomeAssistant, entry: WatchConfigEntry) -> None:
     """Before 0.11 each camera had a device of ours; its entities now live on the camera's
     own device, so ours goes."""
     from .entity import camera_device  # noqa: PLC0415
 
     registry = dr.async_get(hass)
-    for cam in watch.cameras.values():
-        ours = registry.async_get_device_by_identifier(
-            (DOMAIN, f"camera_{cam.subentry_id}"), watch.entry.entry_id
-        )
-        if ours is not None and camera_device(hass, cam.camera) is not None:
+    for cid, cam in (entry.options.get(CONF_CAMERAS) or {}).items():
+        ours = registry.async_get_device_by_identifier((DOMAIN, f"camera_{cid}"), entry.entry_id)
+        if ours is not None and camera_device(hass, cam[CONF_CAMERA]) is not None:
             registry.async_remove_device(ours.id)
 
 

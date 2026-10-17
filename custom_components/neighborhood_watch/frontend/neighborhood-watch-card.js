@@ -11,7 +11,7 @@ const SECTIONS = [
   { value: "wildlife", label: "Wildlife" },
   { value: "summary", label: "Night summary" },
   { value: "recent", label: "Recent detections" },
-  { value: "switches", label: "Alert switches" },
+  { value: "switches", label: "Critical alerts" },
   { value: "scan", label: "Scan a folder" },
 ];
 
@@ -51,7 +51,41 @@ class NeighborhoodWatchCard extends HTMLElement {
     };
     this._sig = null;
     this._signed = this._signed || {};
+    this._answered = this._answered || new Set();
     if (this._hass) this._render();
+  }
+
+  connectedCallback() {
+    // A quiet system sends no updates, so redraw each minute to keep "x min ago" true.
+    if (!this._tick) this._tick = setInterval(() => this._render(), 60000);
+    if (!this._onKey) {
+      this._onKey = (ev) => {
+        if (ev.key !== "Escape" || !this._zoom) return;
+        this._zoom = null;
+        this._render(true);
+      };
+      window.addEventListener("keydown", this._onKey);
+    }
+    if (!this._onRelease) {
+      // The press may end outside the card; the click (if any) fires before this timeout.
+      this._onRelease = () => {
+        if (!this._pressing) return;
+        this._pressing = false;
+        setTimeout(() => this._resume());
+      };
+      window.addEventListener("pointerup", this._onRelease);
+      window.addEventListener("pointercancel", this._onRelease);
+    }
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._tick);
+    this._tick = null;
+    window.removeEventListener("keydown", this._onKey);
+    this._onKey = null;
+    window.removeEventListener("pointerup", this._onRelease);
+    window.removeEventListener("pointercancel", this._onRelease);
+    this._onRelease = null;
   }
 
   set hass(hass) {
@@ -128,7 +162,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       (byDevice[entry.device_id] ||= {})[entry.translation_key] = entry.entity_id;
     }
     const hidden = new Set(this._config.hide || []);
-    const out = { animals: [], wildlife: [], cameras: [], hub: null };
+    const out = { animals: [], cameras: [], hub: null };
     for (const [id, keys] of Object.entries(byDevice)) {
       const device = hass.devices?.[id];
       if (!device) continue;
@@ -143,7 +177,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       else if (keys.last_seen) out.animals.push(item);
       // Anything else (a phone carrying a person's critical switch) isn't shown here.
     }
-    for (const list of [out.animals, out.wildlife, out.cameras]) list.sort((a, b) => a.name.localeCompare(b.name));
+    for (const list of [out.animals, out.cameras]) list.sort((a, b) => a.name.localeCompare(b.name));
     if (this._config.order !== "name") {
       // On camera now first, then the most recently seen; never-seen animals last.
       const rank = (a) => {
@@ -156,13 +190,43 @@ class NeighborhoodWatchCard extends HTMLElement {
     return out;
   }
 
+  _names(d) {
+    // Everything a sighting can be: the animals, then the wildlife kinds on the hub's sensor.
+    const kinds = d.hub?.keys.wildlife ? this._state(d.hub.keys.wildlife)?.attributes?.kinds || {} : {};
+    return [...new Set([...d.animals.map((x) => x.name), ...Object.keys(kinds)])];
+  }
+
   _signature() {
     if (!this._hass) return "";
-    const ids = [];
-    for (const entry of Object.values(this._hass.entities || {})) {
-      if (entry.platform === DOMAIN) ids.push(entry.entity_id);
+    // The registry only changes when entities come or go: rebuild our list just then.
+    const entities = this._hass.entities;
+    if (!this._ids || entities !== this._entitiesRef) {
+      this._entitiesRef = entities;
+      this._ids = Object.values(entities || {})
+        .filter((e) => e.platform === DOMAIN)
+        .map((e) => e.entity_id);
     }
-    return ids.map((id) => `${id}:${this._hass.states[id]?.last_updated}`).join("|") + `|${Math.floor(Date.now() / 60000)}`;
+    // Image entities get a new access token every few minutes; only a new picture (its state) counts.
+    return this._ids
+      .map((id) => {
+        const s = this._hass.states[id];
+        return `${id}:${id.startsWith("image.") ? s?.state : s?.last_updated}`;
+      })
+      .join("|");
+  }
+
+  _busy() {
+    // Typing, picking from a list, or zoomed into a frame: a redraw now would undo it.
+    const root = this.shadowRoot;
+    if (!root) return false;
+    const el = root.activeElement;
+    if (el && !el.disabled && el.matches("input, textarea, select")) return true;
+    return !!(this._zoom && root.querySelector(".lbimg.zoomed"));
+  }
+
+  _resume() {
+    // Run the redraw that was held back, once nothing is focused or being pressed.
+    if (this._pending && !this._pressing) this._render();
   }
 
   _state(id) {
@@ -171,10 +235,21 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   // --- render ----------------------------------------------------------------------
 
-  _render() {
+  _render(force) {
     if (!this._hass || !this._config) return;
-    const typing = this.shadowRoot?.querySelector("[data-note-text]");
+    // Held back while the user is busy; runs when they leave the field or close the frame.
+    if (!force && this._busy()) {
+      this._pending = true;
+      return;
+    }
+    this._pending = false;
+    const root = this.shadowRoot;
+    const typing = root?.querySelector("[data-note-text]");
     if (typing && this._note) this._note.text = typing.value;
+    const about = root?.querySelector("[data-note-about]");
+    if (about && this._note) this._note.pick = about.value;
+    const folderInput = root?.querySelector("input[data-folder]");
+    if (folderInput) this._scanFolder = folderInput.value;
     const show = new Set(this._config.sections || []);
     const d = this._devices();
     const parts = [];
@@ -182,7 +257,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
     // The shorter sections sit side by side on wide screens instead of each taking a row.
     const side = [];
-    if (show.has("wildlife") && (d.wildlife.length || d.hub?.keys.wildlife)) side.push(this._wildlife(d.wildlife, d.hub));
+    if (show.has("wildlife") && d.hub?.keys.wildlife) side.push(this._wildlife(d.hub));
     if (show.has("summary") && d.hub) side.push(this._summary(d.hub));
     if (show.has("recent") && d.cameras.length) side.push(this._recent(d.cameras));
     if (show.has("switches")) side.push(this._switches(d));
@@ -190,9 +265,20 @@ class NeighborhoodWatchCard extends HTMLElement {
     const filled = side.filter(Boolean);
     if (filled.length) parts.push(`<div class="side">${filled.join("")}</div>`);
 
-    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      // Leaving a field mid-press (tapping Scan or Save) waits for the click to land first.
+      this.shadowRoot.addEventListener("pointerdown", () => (this._pressing = true));
+      this.shadowRoot.addEventListener("focusout", () => setTimeout(() => this._resume()));
+    }
+    const cols = this._config.columns || 3;
+    const ph = this._config.photo_height || 140;
+    if (this._styleKey !== `${cols}|${ph}`) {
+      this._styleKey = `${cols}|${ph}`;
+      this._style = STYLE.replace("__COLS__", cols).replace("__SMALLCOLS__", Math.min(cols, 2)).replace("__PH__", ph);
+    }
     this.shadowRoot.innerHTML = `
-      <style>${STYLE.replace("__COLS__", this._config.columns || 3).replace("__PH__", this._config.photo_height || 140)}</style>
+      <style>${this._style}</style>
       <ha-card>
         <div class="whole">
           <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
@@ -244,7 +330,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         Promise.resolve(this._hass.callService(DOMAIN, "add_note", { note: text, [kind]: name }))
           .then(() => {
             this._note = null;
-            this._render();
+            this._render(true);
           })
           .catch((err) => {
             noteSave.disabled = false;
@@ -255,7 +341,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (noteSkip)
       noteSkip.addEventListener("click", () => {
         this._note = null;
-        this._render();
+        this._render(true);
       });
     this._loadFrames();
     this._wireLightbox();
@@ -285,6 +371,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _answer(sid, answer) {
+    // Remembered so the buttons stay off until the sighting leaves the list.
+    this._answered.add(sid);
     this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid });
     // A mistake fixed: offer to tell the AI, where it will use it.
     if (["right", "unsure"].includes(answer)) return;
@@ -292,20 +380,25 @@ class NeighborhoodWatchCard extends HTMLElement {
     const items = this._state(d.hub?.keys.to_review)?.attributes?.items || [];
     const it = items.find((x) => x.id === sid);
     if (!it) return;
-    const known = new Set([...d.animals, ...d.wildlife].map((x) => x.name));
+    const known = new Set(this._names(d));
     const about = [];
     if (answer !== "wrong" && known.has(answer)) about.push(["animal", answer, `${answer}: how to recognise them`]);
     if (known.has(it.animal) && it.animal !== answer) about.push(["animal", it.animal, `${it.animal}: how to tell them apart`]);
     if (d.cameras.some((c) => c.name === it.where)) about.push(["camera", it.where, `${it.where} camera: what's in this view`]);
     if (!about.length) return;
     this._note = { said: it.animal, was: answer === "wrong" ? "not that" : answer, where: it.where, about, text: "" };
-    this._render();
+    this._render(true);
   }
 
   _noteBox() {
     const n = this._note;
     if (!n) return "";
-    const opts = n.about.map(([k, name, label]) => `<option value="${k}|${esc(name)}">${esc(label)}</option>`).join("");
+    const opts = n.about
+      .map(([k, name, label]) => {
+        const sel = n.pick === `${k}|${name}` ? " selected" : "";
+        return `<option value="${k}|${esc(name)}"${sel}>${esc(label)}</option>`;
+      })
+      .join("");
     return `<div class="note">
         <div><b>Add a note so it doesn't happen again?</b> <span class="muted">The AI said ${esc(n.said)}; it was ${esc(n.was)}.</span></div>
         <select data-note-about>${opts}</select>
@@ -318,26 +411,39 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("img[data-frame]").forEach((img) => {
       // "crop": cut to the animal the local detector found; the full frame otherwise.
       const path = `/api/${DOMAIN}/frame/${img.dataset.frame}${img.dataset.crop ? "/crop" : ""}`;
-      if (this._signed[path]) {
-        img.src = this._signed[path];
-        return;
-      }
-      this._hass
-        .callWS({ type: "auth/sign_path", path, expires: 86400 })
-        .then((r) => {
-          this._signed[path] = r.path;
-          img.src = r.path;
-        })
-        .catch(() => img.classList.add("broken"));
+      // A link that stops working (signature expired or revoked) is signed afresh, once.
+      img.addEventListener("error", () => {
+        if (img.dataset.retried) return img.classList.add("broken");
+        img.dataset.retried = "1";
+        delete this._signed[path];
+        this._sign(img, path);
+      });
+      this._sign(img, path);
     });
+  }
+
+  _sign(img, path) {
+    // Signed links last a day; sign again in the last hour so a thumbnail never goes stale.
+    const cached = this._signed[path];
+    if (cached && cached.exp - Date.now() > 3600e3) {
+      img.src = cached.url;
+      return;
+    }
+    this._hass
+      .callWS({ type: "auth/sign_path", path, expires: 86400 })
+      .then((r) => {
+        this._signed[path] = { url: r.path, exp: Date.now() + 86400e3 };
+        img.src = r.path;
+      })
+      .catch(() => img.classList.add("broken"));
   }
 
   _lightbox() {
     // The full frame, over everything. Tap the picture to zoom in where you tapped.
     if (!this._zoom) return "";
     return `<div class="lightbox" data-close>
-        <button class="lbclose" data-close title="Close">✕</button>
-        <img class="lbimg" data-frame="${esc(this._zoom)}" alt="">
+        <button class="lbclose" data-close title="Close" aria-label="Close">✕</button>
+        <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}">
       </div>`;
   }
 
@@ -345,7 +451,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-zoom]").forEach((el) =>
       el.addEventListener("click", () => {
         this._zoom = el.dataset.zoom;
-        this._render();
+        this._zoomAlt = el.alt;
+        this._render(true);
       })
     );
     const box = this.shadowRoot.querySelector(".lightbox");
@@ -360,7 +467,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         return;
       }
       this._zoom = null;
-      this._render();
+      this._render(true);
     });
   }
 
@@ -369,19 +476,19 @@ class NeighborhoodWatchCard extends HTMLElement {
     const items = s?.attributes?.items || [];
     if (!items.length) return `<div class="section"><h2>To review</h2>${this._noteBox()}<div class="muted">All caught up.</div></div>`;
     const limit = this._config.review_limit || 6;
-    const names = [...d.animals, ...d.wildlife].map((x) => x.name);
-    const options = ["Nothing", ...names].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    const options = ["Nothing", ...this._names(d)].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
     const rows = items.slice(0, limit).map((it) => {
       const sid = esc(it.id);
+      const off = this._answered.has(String(it.id)) ? " disabled" : "";
       return `<div class="rev">
-          <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="" title="Tap to enlarge">
+          <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
           <div class="revname"><b>${esc(it.animal)}</b> <span class="muted">${esc(it.confidence)}</span></div>
           <div class="muted small">${esc(it.where)} · ${clock(it.time)} · ${ago(it.time)}</div>
           <div class="acts">
-            <button class="mini" data-answer="right" data-sid="${sid}" title="Right">✓</button>
-            <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong">✗</button>
-            <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure">?</button>
-            <select data-sid="${sid}"><option value="">It was…</option>${options}</select>
+            <button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right"${off}>✓</button>
+            <button class="mini" data-answer="wrong" data-sid="${sid}" title="Wrong" aria-label="Wrong"${off}>✗</button>
+            <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure"${off}>?</button>
+            <select data-sid="${sid}" aria-label="It was"${off}><option value="">It was…</option>${options}</select>
           </div>
         </div>`;
     });
@@ -410,32 +517,19 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _toggles(k) {
     // Icon toggles for an animal's Alerts, Critical alerts and Missing mode switches.
-    const t = (id, on, icon, offIcon, label, alarm) => {
+    const t = (id, icon, offIcon, label, alarm) => {
       const s = id && this._state(id);
       if (!s) return "";
       const isOn = s.state === "on";
-      return `<button class="tog ${isOn ? (alarm ? "alarm" : "on") : ""}" data-toggle="${esc(id)}" title="${label}: ${isOn ? "on" : "off"}">
+      const tip = `${label}: ${isOn ? "on" : "off"}`;
+      return `<button class="tog ${isOn ? (alarm ? "alarm" : "on") : ""}" data-toggle="${esc(id)}" title="${tip}" aria-label="${tip}" aria-pressed="${isOn}">
           <ha-icon icon="${isOn ? icon : offIcon}"></ha-icon><span>${label}</span></button>`;
     };
     return (
-      t(k.alerts, true, "mdi:bell", "mdi:bell-off-outline", "Alerts") +
-      t(k.critical_alerts, true, "mdi:bell-ring", "mdi:bell-ring-outline", "Critical", true) +
-      t(k.missing_mode, true, "mdi:map-marker-alert", "mdi:map-marker-question-outline", "Missing", true)
+      t(k.alerts, "mdi:bell", "mdi:bell-off-outline", "Alerts") +
+      t(k.critical_alerts, "mdi:bell-ring", "mdi:bell-ring-outline", "Critical", true) +
+      t(k.missing_mode, "mdi:map-marker-alert", "mdi:map-marker-question-outline", "Missing", true)
     );
-  }
-
-  _ruleChips(k) {
-    // An animal's Alerts switch, and its Critical switch when it has critical cameras.
-    const out = [];
-    const alerts = this._state(k.alerts);
-    const crit = this._state(k.critical_alerts);
-    if (alerts)
-      out.push(
-        `<button class="chip ${alerts.state === "on" ? "" : "dim"}" data-toggle="${esc(k.alerts)}">${alerts.state === "on" ? "Alerts" : "Alerts off"}</button>`
-      );
-    if (crit)
-      out.push(`<button class="chip ${crit.state === "on" ? "alarm" : ""}" data-toggle="${esc(k.critical_alerts)}">Critical</button>`);
-    return out;
   }
 
   _more(entityId) {
@@ -481,27 +575,11 @@ class NeighborhoodWatchCard extends HTMLElement {
     return `<div class="section"><div class="grid">${tiles.join("")}</div></div>`;
   }
 
-  _wildlife(list, hub) {
-    const rows = list.map((w) => {
-      const k = w.keys;
-      const seen = this._state(k.last_seen);
-      const where = this._state(k.location);
-      const onCam = this._state(k.on_camera);
-      const tonight = this._state(k.sightings_tonight);
-      const live = onCam?.state === "on";
-      const when = seen && !["unknown", "unavailable"].includes(seen.state) ? `${esc(where?.state)} · ${ago(seen.state)}` : "Not seen";
-      return `<div class="row ${live ? "is-live" : ""}" data-more="${esc(k.last_photo || k.last_seen)}">
-          <span class="rname">${esc(w.name)}</span>
-          <span class="rinfo">${live ? `<span class="live">● ${esc(onCam.attributes.camera || "")}</span>` : when}</span>
-          <span class="rcount">${tonight && Number(tonight.state) > 0 ? `${esc(tonight.state)} tonight` : ""}</span>
-          ${this._ruleChips(k).join("")}
-        </div>`;
-    });
-    // Every other kind lives on the hub's Wildlife sensor: no device per animal.
-    const seen = hub?.keys.wildlife ? this._state(hub.keys.wildlife)?.attributes?.kinds || {} : {};
-    const own = new Set(list.map((w) => w.name));
+  _wildlife(hub) {
+    // Wildlife kinds live on the hub's Wildlife sensor: no device per animal.
+    const rows = [];
+    const seen = this._state(hub.keys.wildlife)?.attributes?.kinds || {};
     for (const [name, k] of Object.entries(seen)) {
-      if (own.has(name)) continue;
       const tag = k.pest ? ` <span class="badge alarm">pest</span>` : "";
       const maybe = k.possible ? ` <span class="muted">(possible)</span>` : "";
       rows.push(`<div class="row" data-more="${esc(hub.keys.wildlife)}">
@@ -530,9 +608,10 @@ class NeighborhoodWatchCard extends HTMLElement {
         const a = s.attributes;
         const sid = a.id;
         const nothing = (a.animal || "") === "Nothing" || !a.animal;
+        const off = this._answered.has(String(sid)) ? " disabled" : "";
         const buttons =
           sid && !nothing
-            ? `<button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right">✓</button><button class="mini" data-answer="wrong" data-sid="${esc(sid)}" title="Wrong">✗</button>`
+            ? `<button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button><button class="mini" data-answer="wrong" data-sid="${esc(sid)}" title="Wrong" aria-label="Wrong"${off}>✗</button>`
             : "";
         return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
       });
@@ -666,14 +745,14 @@ const STYLE = `
   .pic { position: relative; height: __PH__px; cursor: pointer; }
   .pic img, .nophoto { display: block; width: 100%; height: 100%; object-fit: cover; }
   .face { width: 62%; height: 78%; }
-  .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color); --mdc-icon-size: 44px;
+  .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color);
     background: linear-gradient(135deg, var(--secondary-background-color), var(--card-background-color)); }
   .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: #fff;
     background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
   .nophoto + .over { color: var(--primary-text-color); background: none; }
   .over .name { font-weight: 600; font-size: 1.1em; }
   .over .status { font-size: .85em; opacity: .9; }
-  .over .live { color: #7CFC9A; }
+  .over .live { color: var(--success-color, #7CFC9A); }
   .badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
   .badge { font-size: .72em; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
   .badge.dim { opacity: .8; }
@@ -687,23 +766,21 @@ const STYLE = `
   .whole > h2.title { font-size: 1.3em; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--primary-text-color); margin: 0; }
   .whole > .inner { margin-top: 12px; }
   .whole.folded > .inner { display: none; }
-  .body { padding: 8px 10px 10px; }
   .name { font-weight: 600; font-size: 1.05em; }
   .status { font-size: .9em; margin-top: 2px; color: var(--primary-text-color); }
   .muted, .dim { color: var(--secondary-text-color); }
   .live { color: var(--success-color, #43a047); font-weight: 600; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .chip { font: inherit; font-size: .8em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: default; }
+  .chip { font: inherit; font-size: .8em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: default; min-height: 32px; }
   button.chip { cursor: pointer; }
   .chip.alarm { background: var(--error-color, #db4437); border-color: var(--error-color, #db4437); color: var(--text-primary-color, #fff); }
-  .chip.dim { opacity: .75; }
-  .row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--divider-color); cursor: pointer; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--divider-color); cursor: pointer; }
   .row:last-child { border-bottom: none; }
   .row.is-live .rname { color: var(--success-color, #43a047); }
   .rname { font-weight: 600; min-width: 90px; }
   .rinfo { flex: 1; font-size: .92em; }
   .rcount { font-size: .85em; color: var(--secondary-text-color); white-space: nowrap; }
-  .mini { font: inherit; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: pointer; }
+  .mini { font: inherit; width: 36px; height: 36px; flex: none; border-radius: 50%; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: pointer; }
   .mini:disabled { opacity: .4; }
   .empty { color: var(--secondary-text-color); }
   .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
@@ -713,7 +790,7 @@ const STYLE = `
   .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .small { font-size: .8em; }
   .rev .acts { gap: 4px; }
-  .rev .mini { width: 28px; height: 28px; }
+  .rev .mini { width: 36px; height: 36px; }
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -721,12 +798,11 @@ const STYLE = `
   .lbimg.zoomed { transform: scale(2.6); cursor: zoom-out; }
   .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
   .thumb.broken { opacity: .3; }
-  .revbody { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   input[data-folder] { flex: 1; min-width: 180px; font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
-  select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
+  select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; min-height: 32px; }
   select option { background: var(--card-background-color, #1c1c1f); color: var(--primary-text-color); }
-  @media (max-width: 500px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 500px) { .grid { grid-template-columns: repeat(__SMALLCOLS__, minmax(0, 1fr)); } }
 `;
 
 customElements.define("neighborhood-watch-card", NeighborhoodWatchCard);

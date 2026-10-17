@@ -17,6 +17,8 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import aiohttp
+
 from homeassistant.components import camera as camera_component
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON
@@ -30,6 +32,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.sun import is_up
 from homeassistant.util import dt as dt_util, slugify
@@ -129,6 +132,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
+SCAN_VISITS_KEPT = 50  # per stored scan
 
 
 def _is_busy(err: BaseException) -> bool:
@@ -198,7 +202,6 @@ class AnimalConfig:
     known_location: str | None = None
     alert_at: frozenset[str] | str = logic.EVERY
     critical_at: frozenset[str] | str = frozenset()
-    kind: str = "animal"
 
     @property
     def key(self) -> str:
@@ -216,7 +219,6 @@ class AnimalConfig:
             always_strict=self.always_strict,
             pattern=self.pattern,
             base=self.base,
-            species=self.species,
         )
 
 
@@ -229,8 +231,12 @@ class Check:
     models: str
     frame: bytes | None
     at: datetime
-    test: bool = False
     detector: dict[str, Any] | None = None
+    counted: bool = False  # set when recorded
+
+
+# One alert for one person: (person, alert, image url, phone buttons).
+type Send = tuple[RecipientConfig, logic.Alert, str, list[dict[str, str]]]
 
 
 @dataclass
@@ -343,6 +349,7 @@ class WatchEngine:
         self.hass = hass
         self.entry = entry
         self.signal = f"{DOMAIN}_{entry.entry_id}_updated"
+        self.scan_signal = f"{DOMAIN}_{entry.entry_id}_scan"  # scan progress (every 5 s)
         self._store: Store[dict[str, Any]] = Store(
             hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}"
         )
@@ -430,6 +437,7 @@ class WatchEngine:
                 alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
                 critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
             )
+        self._animal_keys = frozenset(a.key for a in self.animals.values())
 
     @property
     def rules(self) -> dict[str, logic.AnimalRule]:
@@ -439,17 +447,12 @@ class WatchEngine:
         key = name.strip().lower()
         return next((a for a in self.animals.values() if a.key == key or a.slug == key), None)
 
-    def subject(self, name: str) -> AnimalConfig | None:
-        """One of your named animals (wildlife is tracked by kind on the hub)."""
-        return self.animal_by_name(name)
-
     @property
     def wildlife(self) -> list[str]:
-        names: list[str] = []
+        names: dict[str, str] = {}
         for w in [*(self.options.get(CONF_PESTS) or []), *(self.options.get(CONF_WILDLIFE) or list(logic.DEFAULT_WILDLIFE))]:
-            if w.lower() not in {n.lower() for n in names}:
-                names.append(w)
-        return names
+            names.setdefault(w.lower(), w)
+        return list(names.values())
 
     @property
     def pests(self) -> frozenset[str]:
@@ -458,12 +461,13 @@ class WatchEngine:
 
     def is_wildlife(self, name: str) -> bool:
         """Any animal that isn't one of yours."""
-        return name != logic.NOTHING and logic.is_wildlife(name, {a.key for a in self.animals.values()})
+        return name != logic.NOTHING and logic.is_wildlife(name, self._animal_keys)
 
     def wildlife_now(self, pests_only: bool = False) -> dict[str, Any] | None:
         """The wildlife on camera right now (a sure sighting within the on-camera window)."""
         now = dt_util.utcnow()
         since = now - timedelta(minutes=float(self.options.get(CONF_ON_CAMERA_MINUTES, 10)))
+        pests = self.pests
         for s in reversed(self.sightings()):
             at = _dt(s.get("time")) or now
             if at < since:
@@ -475,7 +479,7 @@ class WatchEngine:
                 or s.get("confidence") == logic.LOW
                 or not self.is_wildlife(name)
                 or name.lower() in logic.HARMLESS
-                or (pests_only and name.lower() not in self.pests)
+                or (pests_only and name.lower() not in pests)
             ):
                 continue
             return {"animal": name, "camera": s.get("where"), "time": s.get("time")}
@@ -486,6 +490,7 @@ class WatchEngine:
         now = now or dt_util.utcnow()
         night = self.night_start()
         week = now - timedelta(days=7)
+        pests = self.pests
         kinds: dict[str, dict[str, Any]] = {}
         for s in self.sightings():
             name = s.get("animal") or ""
@@ -493,7 +498,7 @@ class WatchEngine:
                 continue
             at = _dt(s.get("time")) or now
             k = kinds.setdefault(
-                name, {"tonight": 0, "week": 0, "pest": name.lower() in self.pests}
+                name, {"tonight": 0, "week": 0, "pest": name.lower() in pests}
             )
             k.update(last_seen=_iso(at), where=s.get("where"), sighting_id=s.get("id"))
             k["possible"] = s.get("confidence") == logic.LOW and not s.get("user")
@@ -652,8 +657,12 @@ class WatchEngine:
             self.data.pop(old, None)
         self.data.setdefault("critical", {})
         self.data.setdefault("alerts", {})
+        self._prune_removed()
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
+        # Lights a deterrent left on when Home Assistant stopped: their timer is gone.
+        if leftover := self._deterrent_lights():
+            self._unsubs.append(async_at_started(self.hass, partial(self._lights_off, leftover)))
         await self.hass.async_add_executor_job(self._load_frames)
         # A last-seen entered in setup (e.g. carried over from another system) is the
         # starting point until a newer sighting replaces it.
@@ -704,10 +713,48 @@ class WatchEngine:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+        # A reload must not leave the deterrent lights on: their timers go with it.
+        await self._lights_off(self._deterrent_lights())
         for cancel in self._deterring.values():
             cancel()
         self._deterring.clear()
         await self._store.async_save(self.data)
+
+    def _prune_removed(self) -> None:
+        """Forget the state of cameras, animals and people that were removed."""
+        switches = {
+            *(c.switch_key for c in self.cameras.values()),
+            *(a.switch_key for a in self.animals.values()),
+            *(p.switch_key for p in self.recipients),
+            *(builtin_switch_key(k) for k in BUILTIN_KEYS.values()),
+        }
+        for key, keep in (
+            ("cameras", self.cameras),
+            ("animals", self.animals),
+            ("missing", self.animals),
+            ("critical", switches),
+            ("alerts", switches),
+        ):
+            stored = self.data[key]
+            for gone in [k for k in stored if k not in keep]:
+                del stored[gone]
+
+    def _deterrent_lights(self) -> list[str]:
+        """Every light a deterrent turned on and still owes turning off; forgets them."""
+        lights = [e for turned_on in self.data.pop("deterring", {}).values() for e in turned_on]
+        if lights:
+            self._save()
+        return lights
+
+    async def _lights_off(self, entity_ids: list[str], _hass: HomeAssistant | None = None) -> None:
+        if not entity_ids:
+            return
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", "turn_off", {"entity_id": entity_ids}, blocking=False
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Deterrent lights not turned off: %s", err)
 
     def _load_frames(self) -> None:
         self._scan_references()
@@ -846,15 +893,19 @@ class WatchEngine:
             else:
                 verdict, models = await self._identify(cam)
             check = Check(cam, verdict, models, content, now, detector=detector)
-            await self._record(check)
-            return self._result(check)
+            sends = await self._record(check)
+        # Phones are told after the lock is released: a slow notify service must not hold
+        # up the next check.
+        await self._deliver(sends)
+        return self._result(check)
 
     async def _detect(self, frame: bytes) -> dict[str, Any] | None:
         """Ask the local detector (MegaDetector) what's in the frame; None if it's not set up
         or doesn't answer. Never blocks a check."""
-        url = (self.options.get(CONF_DETECTOR_URL) or "").strip().rstrip("/")
+        url = self._detector_url()
         if not url:
             return None
+        stats = self.data.setdefault("detector", {})
         try:
             async with asyncio.timeout(10):
                 response = await async_get_clientsession(self.hass).post(
@@ -862,24 +913,26 @@ class WatchEngine:
                 )
                 response.raise_for_status()
                 body = await response.json()
-        except Exception as err:  # noqa: BLE001
+            found = body.get("detections") or []
+
+            def best(label: str) -> float:
+                return max((d["confidence"] for d in found if d.get("label") == label), default=0.0)
+
+            result = {
+                "animal": best("animal"),
+                "person": best("person"),
+                "vehicle": best("vehicle"),
+                "boxes": [d for d in found if d.get("label") == "animal"][:3],
+                "ms": body.get("ms"),
+                "device": body.get("device"),
+                "size": [body.get("width"), body.get("height")],
+            }
+        except Exception as err:  # noqa: BLE001 - a bad reply counts as no answer
             _LOGGER.info("Local detector gave no answer: %s", err)
-            self.data.setdefault("detector", {})["last_error"] = str(err)[:200]
+            stats["last_error"] = str(err)[:200] or type(err).__name__
             return None
-        found = body.get("detections") or []
-
-        def best(label: str) -> float:
-            return max((d["confidence"] for d in found if d.get("label") == label), default=0.0)
-
-        return {
-            "animal": best("animal"),
-            "person": best("person"),
-            "vehicle": best("vehicle"),
-            "boxes": [d for d in found if d.get("label") == "animal"][:3],
-            "ms": body.get("ms"),
-            "device": body.get("device"),
-            "size": [body.get("width"), body.get("height")],
-        }
+        stats.pop("last_error", None)
+        return result
 
     def _score_detector(self, v: logic.Verdict, det: dict[str, Any], now: datetime) -> None:
         """Shadow statistics: does the detector agree with the AI about whether an animal
@@ -908,7 +961,7 @@ class WatchEngine:
             "first_look_said": v.first_look_said,
             "second_opinion_said": v.second_opinion_said,
             "models_used": check.models,
-            "counted": logic.counts(v, self.rules),
+            "counted": check.counted,
         }
 
     # --- the AI chain ---------------------------------------------------------------------
@@ -1071,10 +1124,11 @@ class WatchEngine:
 
     # --- recording -----------------------------------------------------------------------------
 
-    async def _record(self, check: Check) -> None:
+    async def _record(self, check: Check) -> list[Send]:
+        """Track the sighting and plan its alerts (the caller sends them)."""
         cam, v, now = check.camera, check.verdict, check.at
         rules = self.rules
-        counted = logic.counts(v, rules)
+        counted = check.counted = logic.counts(v, rules)
         on_minutes = float(self.options.get(CONF_ON_CAMERA_MINUTES, 10))
         until = now + timedelta(minutes=on_minutes)
 
@@ -1164,17 +1218,25 @@ class WatchEngine:
 
         self._save()
         self._notify()
-        if not check.test:
-            data = self.event_data(cam, v, check.models, now)
-            data["sighting_id"] = sid
-            self.hass.bus.async_fire(EVENT_SIGHTING, data)
-            await self._alert(cam, v, now, sid)
-            if counted and v.animal.lower() in self.pests:
-                await self._deter(cam)
+        data = self.event_data(cam, v, check.models, now, counted=counted)
+        data["sighting_id"] = sid
+        self.hass.bus.async_fire(EVENT_SIGHTING, data)
+        sends = self._plan_alerts(cam, v, now, sid)
+        if counted and v.animal.lower() in self.pests:
+            await self._deter(cam)
+        return sends
 
     def event_data(
-        self, cam: CameraConfig, v: logic.Verdict, models: str, now: datetime, test: bool = False
+        self,
+        cam: CameraConfig,
+        v: logic.Verdict,
+        models: str,
+        now: datetime,
+        test: bool = False,
+        counted: bool | None = None,
     ) -> dict[str, Any]:
+        if counted is None:
+            counted = logic.counts(v, self.rules)
         return {
             "location": cam.slug,
             "location_name": cam.name,
@@ -1188,7 +1250,7 @@ class WatchEngine:
             "first_look_said": v.first_look_said,
             "second_opinion_said": v.second_opinion_said,
             "models_used": models,
-            "counted": "yes" if logic.counts(v, self.rules) else "no",
+            "counted": "yes" if counted else "no",
             "time": logic.clock(dt_util.as_local(now)),
             "image": self.image_url(cam.slug, now),
             "test": "yes" if test else "no",
@@ -1238,7 +1300,9 @@ class WatchEngine:
         summary = logic.summarize(entries, order)
         if self.options.get(CONF_DATASET, True):
             limit = int(float(self.options.get(CONF_DATASET_GB, 5)) * 1024**3)
-            self.hass.async_add_executor_job(dataset.prune, self.dataset_root, limit)
+            self.entry.async_create_background_task(
+                self.hass, self._prune_dataset(limit), f"{DOMAIN} dataset prune"
+            )
         self.data["summary"] = {
             "text": summary.text,
             "lines": summary.lines,
@@ -1251,6 +1315,12 @@ class WatchEngine:
         self._save()
         self._notify()
         return summary
+
+    async def _prune_dataset(self, limit: int) -> None:
+        try:
+            await self.hass.async_add_executor_job(dataset.prune, self.dataset_root, limit)
+        except OSError as err:  # training data is best-effort
+            _LOGGER.debug("Training data not pruned: %s", err)
 
     # --- services ---------------------------------------------------------------------------------
 
@@ -1303,7 +1373,7 @@ class WatchEngine:
             return {"corrected": None}
         answer = answer.strip()
         before = row.get("animal")
-        old = self.subject(before or "")
+        old = self.animal_by_name(before or "")
         if row.get("scan"):
             # Scanned footage can be old: a verdict labels it, never moves tracking.
             old = None
@@ -1325,7 +1395,7 @@ class WatchEngine:
             if old:
                 await self._recompute(old, row, removed=True)
         else:
-            new = self.subject(answer)
+            new = self.animal_by_name(answer)
             if answer.lower() in ("nothing", "none"):
                 name = logic.NOTHING
             elif logic.is_unknown(answer):
@@ -1364,10 +1434,10 @@ class WatchEngine:
         latest = rows[-1] if rows else None
         state["last_seen"] = latest["time"] if latest else None
         state["location"] = latest["where"] if latest else None
-        known = getattr(subject, "known_last_seen", None)
+        known = subject.known_last_seen
         if known and (latest is None or known > (_dt(latest["time"]) or known)):
             state["last_seen"] = _iso(known)
-            state["location"] = getattr(subject, "known_location", None)
+            state["location"] = subject.known_location
         if subject.priority:
             sure = [s for s in rows if s.get("confidence") in (logic.HIGH, "confirmed")]
             state["last_confirmed"] = sure[-1]["time"] if sure else state.get("last_confirmed") if not removed else None
@@ -1399,13 +1469,13 @@ class WatchEngine:
             return
         verb, sid = parts[1], parts[2]
         if verb == "is" and len(parts) > 3:
-            target = self.subject(parts[3])
+            target = self.animal_by_name(parts[3])
             answer = target.name if target else parts[3]
         elif verb in ("right", "wrong"):
             answer = verb
         else:
             return
-        self.hass.async_create_task(self.async_correct(sid, None, answer))
+        self.entry.async_create_task(self.hass, self.async_correct(sid, None, answer), f"{DOMAIN} correct {sid}")
 
     # --- alerts and deterrents ------------------------------------------------------------------
 
@@ -1445,9 +1515,16 @@ class WatchEngine:
             )
         return rules
 
-    def _repeat(self, cam: CameraConfig, v: logic.Verdict, now: datetime) -> tuple[bool, str | None]:
+    def _repeat(
+        self,
+        cam: CameraConfig,
+        v: logic.Verdict,
+        now: datetime,
+        rules: dict[str, logic.AlertRule],
+        builtins: dict[str, logic.AlertRule],
+    ) -> tuple[bool, str | None]:
         """Is this the same visit as the subject's last sighting at this camera?"""
-        rule = logic.subject_of(v, self.alert_rules(), self.builtin_rules(), self.pests)
+        rule = logic.subject_of(v, rules, builtins, self.pests)
         if rule is None:
             return False, None
         visits = self.camera_state(cam.slug).setdefault("visits", {})
@@ -1455,18 +1532,20 @@ class WatchEngine:
         same = logic.same_visit(_dt(visits.get(rule.key)), now, gap, VISIT_SLACK_MINUTES)
         return same, rule.key
 
-    async def _alert(
+    def _plan_alerts(
         self, cam: CameraConfig, v: logic.Verdict, now: datetime, sid: str | None, test: bool = False
-    ) -> list[logic.Alert]:
+    ) -> list[Send]:
+        """Who gets which alert; _deliver sends them."""
         if not self.options.get(CONF_ALERTS, True) or not self.recipients:
             return []
         missing = {a.key for a in self.animals.values() if self.missing_mode(a)}
-        repeat, visit_key = (False, None) if test else self._repeat(cam, v, now)
+        rules, builtins = self.alert_rules(), self.builtin_rules()
+        repeat, visit_key = (False, None) if test else self._repeat(cam, v, now, rules, builtins)
         alerts = logic.plan_alerts(
             v,
             self.camera_rule(cam),
-            self.alert_rules(),
-            self.builtin_rules(),
+            rules,
+            builtins,
             missing,
             logic.clock(dt_util.as_local(now)),
             test=test,
@@ -1477,7 +1556,7 @@ class WatchEngine:
             self.camera_state(cam.slug).setdefault("visits", {})[visit_key] = _iso(now)
             self._save()
         if not alerts:
-            return alerts
+            return []
         image = self.image_url(cam.slug, now)
         actions = []
         if sid and self.options.get(CONF_BUTTONS, True):
@@ -1488,6 +1567,7 @@ class WatchEngine:
             for a in self.animals.values():
                 if (a.priority or a.key in missing) and a.name != v.animal:
                     actions.append({"action": f"{ACTION_PREFIX}|is|{sid}|{a.slug}", "title": f"It's {a.name}"})
+        sends: list[Send] = []
         for alert in alerts:
             for person in self.recipients:
                 if alert.audience == logic.AUDIENCE_MISSING and not person.missing_alerts:
@@ -1496,8 +1576,13 @@ class WatchEngine:
                     continue
                 if alert.kind != "missing" and {alert.subject.lower(), v.animal.lower()} & person.muted:
                     continue
-                await self._send(person, alert, image, actions)
-        return alerts
+                sends.append((person, alert, image, actions))
+        return sends
+
+    async def _deliver(self, sends: list[Send]) -> None:
+        """In order (a missing-mode alert first); one phone failing never stops the others."""
+        for send in sends:
+            await self._send(*send)
 
     def _quiet(self, person: RecipientConfig) -> bool:
         """In one of the person's quiet zones (work) or inside their quiet hours."""
@@ -1572,6 +1657,7 @@ class WatchEngine:
                 e for e in cam.deter_lights if (s := self.hass.states.get(e)) and s.state == "off"
             ]
             self.data.setdefault("deterring", {})[cam.slug] = turned_on
+            self._save()
             if cam.deter_lights:
                 await self.hass.services.async_call(
                     "homeassistant", "turn_on", {"entity_id": cam.deter_lights}, blocking=False
@@ -1591,10 +1677,8 @@ class WatchEngine:
         async def lights_back(_now: datetime) -> None:
             self._deterring.pop(cam.slug, None)
             back = self.data.setdefault("deterring", {}).pop(cam.slug, [])
-            if back:
-                await self.hass.services.async_call(
-                    "homeassistant", "turn_off", {"entity_id": back}, blocking=False
-                )
+            self._save()
+            await self._lights_off(back)
 
         self._deterring[cam.slug] = async_call_later(
             self.hass, cam.deter_minutes * 60, lights_back
@@ -1616,9 +1700,14 @@ class WatchEngine:
         if not url:
             raise ValueError("no_detector")
         session = async_get_clientsession(self.hass)
-        async with asyncio.timeout(30):
-            response = await session.post(f"{url}/scan", json={"path": folder})
-            body = await response.json()
+        try:
+            async with asyncio.timeout(30):
+                response = await session.post(f"{url}/scan", json={"path": folder})
+                body = await response.json()
+        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
+            raise ValueError(f"the detector did not answer ({err or type(err).__name__})") from err
+        if not isinstance(body, dict):
+            body = {}
         if response.status != 200 or "id" not in body:
             raise ValueError(body.get("error") or f"detector answered {response.status}")
         sid = body["id"]
@@ -1657,7 +1746,7 @@ class WatchEngine:
                 record.update(
                     files_total=status.get("files_total"), files_done=status.get("files_done")
                 )
-                self._notify()
+                async_dispatcher_send(self.hass, self.scan_signal)  # progress: the scan sensor only
                 if status.get("state") in ("done", "error"):
                     break
                 await asyncio.sleep(5)
@@ -1685,7 +1774,8 @@ class WatchEngine:
                 state=status.get("state", "error"),
                 error=status.get("error") or None,
                 finished=_iso(dt_util.utcnow()),
-                visits=results,
+                visits=results[:SCAN_VISITS_KEPT],  # the tally covers them all
+                visits_total=len(results),
                 tally=tally,
                 report=report,
             )
@@ -1765,13 +1855,16 @@ class WatchEngine:
             f"scan_{record['id']}",
             logic.NORMAL,
         )
-        for person in self.recipients:
-            await self._send(person, alert, "", [])
+        await self._deliver([(person, alert, "", []) for person in self.recipients])
 
     async def async_set_reference(self, animal: AnimalConfig, camera: CameraConfig | None) -> str:
         """Use the animal's last photo (or a fresh snapshot) as its reference photo."""
         if camera is not None:
-            content: bytes | None = await async_snapshot(self.hass, camera.camera)
+            try:
+                content: bytes | None = await async_snapshot(self.hass, camera.camera)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("%s: snapshot for a reference photo failed: %s", camera.name, err)
+                return "snapshot_failed"
         else:
             content = await self.hass.async_add_executor_job(_read, self.photo_path(animal))
         if not content:
@@ -1794,7 +1887,7 @@ class WatchEngine:
                 self.entry, options={**self.entry.options, CONF_CAMERAS: cameras}
             )
             return camera.name
-        subject = self.subject(animal or "")
+        subject = self.animal_by_name(animal or "")
         if subject is None:
             raise ValueError(f"unknown animal {animal}")
         subentry = self.entry.subentries[subject.subentry_id]
@@ -1824,7 +1917,9 @@ class WatchEngine:
         )
         data = self.event_data(cam, verdict, "test", now, test=True)
         self.hass.bus.async_fire(EVENT_SIGHTING, data)
-        self.hass.async_create_task(self._alert(cam, verdict, now, None, test=True))
+        self.entry.async_create_task(
+            self.hass, self._deliver(self._plan_alerts(cam, verdict, now, None, test=True)), f"{DOMAIN} test alert"
+        )
         return data
 
 

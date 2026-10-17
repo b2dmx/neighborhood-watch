@@ -10,7 +10,7 @@ services:
     volumes:
       - ./models:/models:ro
       # The service's code, so updates are a file copy (it restarts itself when it changes).
-      - ./app:/app
+      - ./app:/app:ro
       - ./work:/work
       # The folder you bulk-scan (photos and videos); reports are written back into it.
       - ./scan:/scan

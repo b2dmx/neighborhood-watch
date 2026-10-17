@@ -18,8 +18,8 @@ It is all set up in the UI. A dashboard card comes with it.
 
 1. **A camera sees motion or an animal** during the watch window: between set times, or whenever it's dark, whichever is wider. Person and vehicle sensors skip the check; each camera has its own cooldown.
 2. **A snapshot is taken.** If it fails, the check stops, so the AI never judges an old photo.
-3. **The first AI model looks.** If it is busy, errors or is out of quota, the next model in your list tries, then the next. Paid models go last.
-4. **A second model double-checks** when the first named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered.
+3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models are a last resort.
+4. **A second model double-checks** (the **Second opinion** list, in order) when the first answer named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered. It also checks when a backup gave the first answer and named an animal; that check uses free models only.
 5. **The two answers become one verdict:**
    - Models that disagree give low confidence.
    - A priority animal is high only when both models name it and both see its coat pattern and main colour. Without a second opinion it is capped at medium.
@@ -67,7 +67,7 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
   - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
-- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
+- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts only at** (see [Alerts](#alerts)).
 - **People**: someone who gets alerts. Each has these settings:
   - their phone, and their critical sound and volume;
   - **Don't notify me about**: animals this person never hears about;
@@ -83,11 +83,21 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Cameras / People | Pick one to change or remove, or add one |
 | Alerts | Send alerts (on); alert from confidence (medium); Right / Wrong buttons on alerts (on) |
 | Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
-| AI models | First look, second opinion, paid models; optional hours for the main model |
+| AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | Identification | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
 | Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
+| Local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
 | Notification pictures | Public address for picture links (defaults to the external URL) |
+
+### AI models
+
+- **First look** runs on every sighting. Its models are tried in order until one answers.
+- **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, or came from a backup and names an animal. Its models are tried in order too.
+- **Paid models** are only a last resort: they are tried after the free ones give no answer, and never to double-check a backup's answer. Put them last in each list.
+- **First model's hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
+
+**Free-tier tip:** put the cheapest model with the biggest free allowance (for example Gemini Flash-Lite) first in First look, and a smarter model first in Second opinion.
 
 ### Cooldowns
 
@@ -145,12 +155,12 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 
 ## The sighting event
 
-`neighborhood_watch_sighting` fires for every check in live mode:
+`neighborhood_watch_sighting` fires for every check:
 
 | Field | Example |
 |---|---|
 | `animal`, `confidence`, `pattern`, `description` | `Luna`, `high`, `blotchy`, `` |
-| `location`, `location_name`, `camera` | `garage`, `Garage`, `camera.backyard` |
+| `location`, `location_name`, `camera` | `backyard`, `Backyard`, `camera.backyard` |
 | `priority_candidate`, `priority_animal` | `yes`, `Luna`: either model named a priority animal, at any confidence |
 | `counted` | `yes` when it counts for tracking |
 | `first_look_said`, `second_opinion_said`, `models_used` | the raw (tidied) answers and which models gave them |
@@ -164,7 +174,7 @@ The integration sends the alerts itself, to every person you add. Every alert is
 - **Alert at:** all cameras, chosen cameras, or none.
 - **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.
 
-Every critical setting is a switch that starts off, so you can put it on a dashboard and flip it at short notice: one per camera, animal and wildlife kind, and one per catch-all on the Neighborhood Watch device.
+Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera, animal and wildlife kind, and one per catch-all on the Neighborhood Watch device. These all start off. Each person's **"<name> gets critical alerts"** switch starts on.
 
 Then:
 
@@ -238,15 +248,29 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
+- **To review**: sightings waiting for a ✓ / ✗ (see [Corrections](#corrections-and-training-data));
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ✗ buttons;
-- the critical-alert switches.
+- the critical-alert switches;
+- **Scan a folder**: start a [bulk scan](#bulk-scanning-photos-and-videos) and see the last one's totals.
 
-Its editor picks the sections and the devices to hide, and sets the columns and photo height.
+Its editor picks the sections and the devices to hide, and sets the rest:
+
+| Option | What it does (default) |
+|---|---|
+| `title` | The card's title (Neighborhood Watch) |
+| `sections` | Which sections to show: `review`, `animals`, `wildlife`, `summary`, `recent`, `switches`, `scan` (all) |
+| `hide` | Devices to leave out |
+| `order` | Animal order: `recent` puts animals on camera now first, then the most recently seen, ties by name; `name` is alphabetical (`recent`) |
+| `columns` | Animal columns (3) |
+| `photo_height` | Photo height in px (140) |
+| `photo_hours` | How long a sighting photo shows before the drawn face comes back; 0 = always (12) |
+| `review_limit` | Sightings to review at once (6) |
 
 ```yaml
 type: custom:neighborhood-watch-card
-sections: [animals, wildlife, summary, recent, switches]
+sections: [review, animals, wildlife, summary, recent, switches, scan]
+order: recent
 columns: 3
 ```
 
@@ -260,6 +284,9 @@ columns: 3
 | `neighborhood_watch.mark_wrong` | "That wasn't Pepper": removes the latest counted sighting of an animal from tracking |
 | `neighborhood_watch.set_reference_photo` | Uses an animal's last photo, or a fresh snapshot, as its reference photo |
 | `neighborhood_watch.build_summary` | Builds the night summary now and starts a new night |
+| `neighborhood_watch.scan` | Bulk-scans a folder of photos and videos on the detector's machine (see [Bulk scanning](#bulk-scanning-photos-and-videos)) |
+| `neighborhood_watch.add_note` | Adds a note for the AI to a camera's view notes or an animal's tips |
+| `neighborhood_watch.move_training_data` | Moves saved training photos into the current training folder, e.g. after pointing it at a NAS |
 
 ## Privacy
 
@@ -277,4 +304,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.6.1 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.13.0 by Goobis<br>AI was used to help develop this integration.</p>

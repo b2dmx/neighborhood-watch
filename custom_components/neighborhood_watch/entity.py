@@ -93,10 +93,15 @@ class WatchEntity(Entity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self._refresh()
         self.async_on_remove(
             async_dispatcher_connect(self.hass, self.watch.signal, self._handle_update)
         )
 
+    def _refresh(self) -> None:
+        """Work the state and its attributes share, done once per update."""
+
     @callback
     def _handle_update(self) -> None:
+        self._refresh()
         self.async_write_ha_state()

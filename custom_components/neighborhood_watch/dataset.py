@@ -121,24 +121,24 @@ def read_crop(root: Path, day: str, sid: str) -> bytes | None:
         meta = json.loads((root / day / f"{sid}.json").read_text(encoding="utf-8"))
         det = meta.get("detector") or {}
         boxes = det.get("boxes") or []
+        if not boxes:
+            return frame
         size = det.get("size") or [None, None]
-    except (OSError, ValueError):
+        box = max(boxes, key=lambda b: b.get("confidence", 0))["box"]
+        with Image.open(BytesIO(frame)) as img:
+            # Boxes are in the camera's own resolution; the saved frame may be smaller.
+            sx = img.width / (size[0] or img.width)
+            sy = img.height / (size[1] or img.height)
+            x1, y1, x2, y2 = box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy
+            side = max(x2 - x1, y2 - y1) * 1.8
+            side = max(side, min(img.width, img.height) * 0.25)
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            w, h = min(side * 4 / 3, img.width), min(side, img.height)
+            left = min(max(cx - w / 2, 0), img.width - w)
+            top = min(max(cy - h / 2, 0), img.height - h)
+            crop = img.convert("RGB").crop((int(left), int(top), int(left + w), int(top + h)))
+            buffer = BytesIO()
+            crop.save(buffer, "JPEG", quality=88)
+    except Exception:  # noqa: BLE001 - no metadata, an odd box or a bad image: the whole frame
         return frame
-    if not boxes:
-        return frame
-    box = max(boxes, key=lambda b: b.get("confidence", 0))["box"]
-    with Image.open(BytesIO(frame)) as img:
-        # Boxes are in the camera's own resolution; the saved frame may be smaller.
-        sx = img.width / (size[0] or img.width)
-        sy = img.height / (size[1] or img.height)
-        x1, y1, x2, y2 = box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy
-        side = max(x2 - x1, y2 - y1) * 1.8
-        side = max(side, min(img.width, img.height) * 0.25)
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        w, h = min(side * 4 / 3, img.width), min(side, img.height)
-        left = min(max(cx - w / 2, 0), img.width - w)
-        top = min(max(cy - h / 2, 0), img.height - h)
-        crop = img.convert("RGB").crop((int(left), int(top), int(left + w), int(top + h)))
-        buffer = BytesIO()
-        crop.save(buffer, "JPEG", quality=88)
     return buffer.getvalue()

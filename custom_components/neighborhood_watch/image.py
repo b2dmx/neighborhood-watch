@@ -41,9 +41,7 @@ class _Image(WatchEntity, ImageEntity):
 
     @callback
     def _handle_update(self) -> None:
-        updated = self._updated_at()
-        if updated != self._attr_image_last_updated:
-            self._attr_image_last_updated = updated
+        self._attr_image_last_updated = self._updated_at()
         self.async_write_ha_state()
 
 

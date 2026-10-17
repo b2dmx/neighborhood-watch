@@ -8,15 +8,15 @@
           "first_look": "First look",
           "second_opinion": "Second opinion",
           "paid_models": "Paid models",
-          "main_start": "Main model from",
-          "main_end": "Main model until"
+          "main_start": "First model's hours (from)",
+          "main_end": "First model's hours (until)"
         },
         "data_description": {
-          "first_look": "Runs on every sighting. Put the main model first and backups after it.",
-          "second_opinion": "Double-checks priority animals, strict animals, unknown cats and unsure answers. Use different models from the first look.",
-          "paid_models": "Models that cost money. They are labelled \"last resort\" and are never used in independent shadow mode. Put them last in each list.",
-          "main_start": "Optional: use the first model in the first-look list only between these times, to save its daily quota for the busiest hours. Backups cover the rest of the night.",
-          "main_end": "Leave both empty to use it all night."
+          "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
+          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
+          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list.",
+          "main_start": "Optional: outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
+          "main_end": "Leave both empty to keep it first all the time."
         }
       },
       "schedule": {
@@ -38,7 +38,7 @@
       },
       "cameras": {
         "title": "Cameras",
-        "description": "Pick the cameras to watch. Each one is set up on the next pages, filled in from its own device. You can add more later with Add camera.",
+        "description": "Pick the cameras to watch. Each one is set up on the next pages, filled in from its own device. You can add more later under Configure → Cameras.",
         "data": {
           "cameras": "Cameras"
         }
@@ -117,7 +117,7 @@
       },
       "people": {
         "title": "Who gets alerts",
-        "description": "These phones get Neighborhood Watch alerts. Quiet zones (like work), sounds and missing-mode alerts can be set per person afterwards.",
+        "description": "These phones get Neighborhood Watch alerts. Quiet zones (like work), sounds and missing-mode alerts can be set per person later under Configure → People.",
         "data": {
           "phones": "Phones"
         }
@@ -161,19 +161,20 @@
           "first_look": "First look",
           "second_opinion": "Second opinion",
           "paid_models": "Paid models",
-          "main_start": "Main model from",
-          "main_end": "Main model until"
+          "main_start": "First model's hours (from)",
+          "main_end": "First model's hours (until)"
         },
         "data_description": {
-          "first_look": "Runs on every sighting. Main model first, backups after it.",
-          "second_opinion": "Double-checks priority animals, strict animals, unknown cats and unsure answers.",
-          "paid_models": "Labelled \"last resort\"; never used in independent shadow mode.",
-          "main_start": "Optional: use the first model in the first-look list only between these times, to save its daily quota for the busiest hours. Backups cover the rest of the night.",
-          "main_end": "Leave both empty to use it all night."
+          "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
+          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
+          "paid_models": "Models that cost money. They are only a last resort, when the free ones give no answer, and never double-check a backup's answer. Put them last in each list.",
+          "main_start": "Optional: outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
+          "main_end": "Leave both empty to keep it first all the time."
         }
       },
       "schedule": {
         "title": "When to watch",
+        "description": "Cameras are watched between these times, and also whenever the sun is down if you turn that on (whichever is wider).",
         "data": {
           "night_start": "Start",
           "night_end": "End",
@@ -183,6 +184,8 @@
           "watch_always": "Watch all day"
         },
         "data_description": {
+          "summary_time": "Last night's summary is built at this time each morning, and a new night starts.",
+          "on_camera_minutes": "How long an animal shows as on camera after a sighting.",
           "watch_always": "For daytime visitors too. Every check uses AI quota, so this uses more."
         }
       },
@@ -191,7 +194,7 @@
         "description": "The AI instructions. {animals} is replaced with each animal's description, {location} with the camera name, {absent} with the recently-absent line, {extra_rules} with the extra rules and {wildlife} with the wildlife list.",
         "data": {
           "instructions": "Instructions",
-          "reset_instructions": "Restore the default instructions",
+          "reset_instructions": "Discard my edits and restore the default instructions",
           "extra_rules": "Notes for the AI (all cameras)",
           "wildlife": "Common visitors (hints for the AI)",
           "absent_days": "Recently absent after",
@@ -213,7 +216,7 @@
       },
       "alerts": {
         "title": "Alerts",
-        "description": "Who gets alerts is set per person (Add person). Cameras, animals and wildlife each decide when they alert.",
+        "description": "Who gets alerts is set per person under Configure → People. Cameras, animals and wildlife each decide when they alert.",
         "data": {
           "alerts": "Send alerts",
           "correction_buttons": "Right / Wrong buttons on alerts",
@@ -248,12 +251,12 @@
         },
         "data_description": {
           "detector_url": "e.g. {example}. Leave empty to turn it off.",
-          "detector_min": "Below this confidence the frame counts as empty."
+          "detector_min": "Below this confidence the frame counts as empty. Lower finds more but also more false alarms; 0.2 is a good start."
         }
       },
       "catch_alls": {
         "title": "Wildlife and catch-alls",
-        "description": "Every animal that isn't one of yours is recognised and tracked as wildlife, without adding it. Pests are the kinds you list here; everything else is other wildlife. Unknown animals: a cat or dog that isn't one of yours. Unsure motion: the AI saw movement but couldn't say what.",
+        "description": "Every animal that isn't one of yours is recognised and tracked as wildlife, without adding it. Pests are the kinds you list here; everything else is other wildlife. Unknown animals: a cat or dog that isn't one of yours. Unsure motion: the AI saw movement but couldn't say what. Each one has a Critical alerts switch on the Neighborhood Watch device, and its \"critical alerts only at\" field limits where that rings. Empty: wherever it alerts.",
         "data": {
           "pests": "Pests",
           "pest_alert_at": "Pests: alert at",
@@ -266,12 +269,12 @@
           "motion_critical_at": "Unsure motion: critical alerts only at"
         },
         "data_description": {
-          "pests": "Alert every time they come back, and are scared off with a camera's lights and sound.",
-          "motion_critical_at": "Each has a Critical alerts switch on the Neighborhood Watch device; these limit where it rings. Empty: wherever it alerts."
+          "pests": "Alert every time they come back, and are scared off with a camera's lights and sound."
         }
       },
       "camera": {
         "title": "Camera",
+        "description": "Settings for {camera}.",
         "data": {
           "camera": "Camera",
           "name": "Name",
@@ -290,14 +293,18 @@
           "remove": "Remove this camera"
         },
         "data_description": {
+          "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
+          "cooldown": "Minimum time between checks of this camera.",
+          "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
+          "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
+          "reopened_by": "For a camera an animal passes on its way here.",
           "deterrent_lights": "Turned on when a pest (wildlife set to scare off) is seen here, then back off.",
           "deterrent_sound": "Played when a pest is seen here.",
           "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check.",
           "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here).",
           "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet.",
           "remove": "Its entities go too."
-        },
-        "description": "Camera {camera}."
+        }
       },
       "person": {
         "title": "Person",
@@ -316,10 +323,12 @@
           "remove": "Remove this person"
         },
         "data_description": {
+          "person": "Needed for quiet zones (where they are).",
           "notify_service": "The phone's notify service, e.g. mobile_app_my_iphone.",
           "quiet_zones": "Zones (like work) where alerts are toned down.",
           "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-          "critical_sound": "The sound file name on the phone, or default.",
+          "critical_sound": "For iPhones: a sound file name from the Companion app, or default.",
+          "critical_volume": "On a scale of 0 to 1; 1 is full volume.",
           "muted": "Animals this person never gets alerts for. Missing mode still reaches them.",
           "quiet_start": "Optional: a daily window, like overnight.",
           "quiet_end": "Leave both empty for no quiet hours.",
@@ -386,9 +395,11 @@
           },
           "data_description": {
             "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-            "tips": "Extra rules for telling this animal apart.",
-            "priority": "Never missed, never falsely confirmed. Adds missing mode and a confirmed-on-camera signal.",
-            "always_strict": "Counts only when both AI models name it at high confidence.",
+            "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+            "pattern": "For a priority animal, both AI models must report this pattern.",
+            "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+            "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
+            "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
             "reference_upload": "A clear night photo, sent to the AI beside each frame.",
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
@@ -415,6 +426,14 @@
             "critical_at": "Critical alerts only at"
           },
           "data_description": {
+            "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
+            "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+            "pattern": "For a priority animal, both AI models must report this pattern.",
+            "base": "The tone covering more than half the body. For a priority animal, both AI models must report it.",
+            "priority": "Never missed, never falsely confirmed: high confidence needs both AI models to agree and to see its coat. Adds missing mode and a confirmed-on-camera signal.",
+            "always_strict": "Counts only when both AI models name it at high confidence. Animals not seen for a while are strict automatically.",
+            "reference_upload": "A clear night photo, sent to the AI beside each frame. Replaces the current one.",
+            "remove_reference": "The AI then judges each frame without one.",
             "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
             "known_location": "Optional: where it was last seen.",
             "alert_at": "Cameras where it sends an alert. Empty: never.",
@@ -439,9 +458,9 @@
   "selector": {
     "pattern": {
       "options": {
-        "blotchy": "Blotchy (calico-like)",
-        "uniform": "Uniform",
-        "striped": "Striped (tabby)",
+        "blotchy": "Patches or blotches (e.g. calico)",
+        "uniform": "One colour all over",
+        "striped": "Stripes (e.g. tabby)",
         "na": "Not checked"
       }
     },
@@ -592,6 +611,9 @@
     },
     "unknown_animal": {
       "message": "No animal named {animal}."
+    },
+    "snapshot_failed": {
+      "message": "The snapshot from {camera} failed; see the log."
     },
     "no_photo": {
       "message": "There is no photo of that animal yet; name a camera to take one now."

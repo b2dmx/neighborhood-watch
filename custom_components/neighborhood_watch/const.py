@@ -151,7 +151,6 @@ CONF_ALERT_SCOPE = "alert_scope"  # before 0.7
 CONF_ALERT_CAMERAS = "alert_cameras"  # before 0.7
 CONF_CRITICAL_SWITCH = "critical_switch"  # before 0.7
 CONF_PEST = "pest"
-CONF_IN_SUMMARY = "in_summary"
 
 # --- recipient subentry ---
 CONF_PERSON = "person"

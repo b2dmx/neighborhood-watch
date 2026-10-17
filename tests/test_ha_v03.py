@@ -584,3 +584,109 @@ def test_reference_photo_from_an_iphone_heic(tmp_path):
     save_reference(buffer.getvalue(), tmp_path / "luna.jpg")
     with PILImage.open(tmp_path / "luna.jpg") as saved:
         assert saved.format == "JPEG" and max(saved.size) == 1280
+
+
+# --- audit fixes ------------------------------------------------------------------------
+
+
+async def test_reload_turns_the_deterrent_lights_off(hass, watch):
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "garage")
+    assert watch["on"] and not watch["off"]
+    assert await hass.config_entries.async_reload(watch["entry"].entry_id)
+    await hass.async_block_till_done()
+    (off,) = watch["off"]
+    assert off.data["entity_id"] == ["light.garage_flood"]
+    assert "deterring" not in watch["entry"].runtime_data.data
+
+
+async def test_lights_left_on_before_a_restart_go_off(hass, watch, hass_storage):
+    entry = watch["entry"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]["deterring"] = {"garage": ["light.garage_flood"]}
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    (off,) = watch["off"]
+    assert off.data["entity_id"] == ["light.garage_flood"]
+
+
+async def test_alerts_go_out_after_the_check_lock_is_released(hass, watch):
+    w = watch["watch"]
+    held: list[bool] = []
+
+    async def phone(call: ServiceCall) -> None:
+        held.append(w._lock.locked())
+
+    hass.services.async_register("notify", "mobile_app_bo", phone)
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    assert held and not any(held)  # sent by the time identify returns, without the lock
+
+
+async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, aioclient_mock, freezer):
+    await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.5)
+    w = watch["entry"].runtime_data
+    w.data.setdefault("detector", {})["last_error"] = "old"
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|", "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    assert "last_error" not in w.data["detector"]
+    aioclient_mock.clear_requests()
+    aioclient_mock.post("http://vision:8765/detect", json=[1, 2])
+    freezer.tick(timedelta(minutes=4))
+    await trigger(hass, "yard")
+    assert w.data["detector"]["last_error"]
+    assert watch["ai"].calls == [FIRST, FIRST]  # the check still ran
+
+
+async def test_scan_with_the_detector_down_is_a_friendly_error(hass, watch, aioclient_mock):
+    import aiohttp
+
+    from homeassistant.exceptions import ServiceValidationError
+
+    entry = watch["entry"]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "detector_url": "http://vision:8765"})
+    await hass.async_block_till_done()
+    aioclient_mock.post("http://vision:8765/scan", exc=aiohttp.ClientError("down"))
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(DOMAIN, "scan", {"folder": "x"}, blocking=True, return_response=True)
+
+
+async def test_state_of_removed_cameras_and_animals_is_forgotten(hass, watch):
+    entry = watch["entry"]
+    w = watch["watch"]
+    w.data["cameras"]["gone"] = {"current": "Milo"}
+    w.data["animals"]["gone"] = {"last_seen": None}
+    w.data["critical"]["animal:gone"] = True
+    w.data["critical"]["animal:luna"] = True
+    w.data["missing"]["gone"] = True
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    data = entry.runtime_data.data
+    assert "gone" not in data["cameras"] and "gone" not in data["animals"] and "gone" not in data["missing"]
+    assert "animal:gone" not in data["critical"] and data["critical"]["animal:luna"] is True
+
+
+async def test_diagnostics_hide_people(hass, watch):
+    from custom_components.neighborhood_watch.diagnostics import async_get_config_entry_diagnostics
+
+    result = await async_get_config_entry_diagnostics(hass, watch["entry"])
+    text = json.dumps(result, default=str)
+    assert "mobile_app_ann" not in text and "person.ann" not in text and "zone.work" not in text
+    assert all(p["name"] == "**REDACTED**" for p in result["options"]["people"].values())
+
+
+def test_crop_falls_back_to_the_whole_frame(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image as PILImage
+
+    from custom_components.neighborhood_watch import dataset
+
+    buffer = BytesIO()
+    PILImage.new("RGB", (320, 240), (90, 90, 90)).save(buffer, "JPEG")
+    dataset.save_sample(tmp_path, "2026-10-16", "nobox", buffer.getvalue(), {"detector": {"boxes": [{"confidence": 0.9}]}})
+    assert dataset.read_crop(tmp_path, "2026-10-16", "nobox") == dataset.read_frame(tmp_path, "2026-10-16", "nobox")
+    (tmp_path / "2026-10-16" / "bad.jpg").write_bytes(b"not a picture")
+    (tmp_path / "2026-10-16" / "bad.json").write_text(json.dumps({"detector": {"boxes": [{"box": [1, 2, 3, 4]}]}}))
+    assert dataset.read_crop(tmp_path, "2026-10-16", "bad") == b"not a picture"

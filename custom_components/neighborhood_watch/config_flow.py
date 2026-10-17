@@ -1,4 +1,4 @@
-"""Onboarding, settings, and the Add camera / Add animal flows.
+"""Onboarding, settings (Configure), and the Add animal / Edit animal flows.
 
 Onboarding walks through: which AI models look (and in what order), when to watch, which
 cameras (each pre-filled from its own device's motion and person/vehicle sensors), then the
@@ -565,7 +565,8 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_people(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Phones that get alerts. Quiet zones and sounds can be set per person later."""
+        """Phones that get alerts. Quiet zones and sounds are set per person later, under
+        Configure → People."""
         phones = [s for s in _notify_services(self.hass) if s.startswith("mobile_app_")]
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
@@ -915,7 +916,7 @@ class WatchOptionsFlow(OptionsFlow):
         )
 
 
-# --- Add camera ------------------------------------------------------------------------------
+# --- animals (Add animal / Edit animal) -------------------------------------------------------
 
 
 class AnimalSubentryFlow(ConfigSubentryFlow):

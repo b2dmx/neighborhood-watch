@@ -19,7 +19,6 @@ LEVELS = (HIGH, MEDIUM, LOW)
 PATTERNS = ("blotchy", "uniform", "striped", "na")
 BASES = ("white", "grey", "black", "na")
 
-UNKNOWN_CAT = "Unknown Cat"
 NOTHING = "Nothing"
 UNSURE_NOTHING = "None|low|na|na|"
 
@@ -93,10 +92,6 @@ def is_unknown(name: str) -> bool:
     return n.startswith("unknown ") and len(n) > len("unknown ")
 
 
-def unknown_kind(name: str) -> str:
-    return name.strip().split(" ", 1)[1].lower() if is_unknown(name) else ""
-
-
 def tidy(raw: str | None) -> str:
     """Clean a model reply into `Name|confidence|pattern|base|description`.
 
@@ -151,7 +146,6 @@ class AnimalRule:
     always_strict: bool = False  # counts only when both models agree at high (Pepper)
     pattern: str = "na"  # expected coat pattern; checked for priority animals
     base: str = "na"  # expected dominant tone; checked for priority animals
-    species: str = "cat"
 
     @property
     def key(self) -> str:
@@ -185,10 +179,6 @@ class Verdict:
     first_look_said: str  # tidied, lower case
     second_opinion_said: str  # tidied
     named: tuple[str, ...] = ()  # lower-case names either model said
-
-    @property
-    def is_nothing(self) -> bool:
-        return self.animal == NOTHING
 
 
 def _level(value: str) -> str:
@@ -583,7 +573,6 @@ BUILTIN_PEST = "Pests"
 BUILTIN_UNKNOWN = "Unknown animals"
 BUILTIN_OTHER = "Other wildlife"
 BUILTIN_MOTION = "Unsure motion"
-BUILTINS = (BUILTIN_PEST, BUILTIN_OTHER, BUILTIN_UNKNOWN, BUILTIN_MOTION)
 
 AUDIENCE_ALL = "all"
 AUDIENCE_MISSING = "missing"  # people who get missing-mode alerts

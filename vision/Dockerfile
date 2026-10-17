@@ -8,7 +8,7 @@ RUN apt-get update \
  && add-apt-repository -y ppa:kobuk-team/intel-graphics \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      python3 python3-venv libze1 libze-intel-gpu1 intel-opencl-icd libgl1 libglib2.0-0 \
+      python3 python3-venv libze1 libze-intel-gpu1 intel-opencl-icd libglib2.0-0 \
  && apt-get purge -y software-properties-common gpg-agent && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 

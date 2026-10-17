@@ -17,6 +17,7 @@ import asyncio
 from io import BytesIO
 import os
 from pathlib import Path
+import shutil
 import threading
 import time
 
@@ -34,6 +35,7 @@ SCAN_ROOT = Path(os.environ.get("NW_SCAN_ROOT", "/scan"))
 WORK = Path(os.environ.get("NW_WORK", "/work"))
 _infer_lock = threading.Lock()
 SCANS: dict = {}
+KEEP_SCANS = 20  # finished scans (and their frames in WORK) kept; older ones are deleted
 
 # Memory: the compiled model is ~250 MB, so it's unloaded after NW_IDLE_UNLOAD seconds
 # without a request (0 = keep it) and compiled again on the next one (well under a second).
@@ -51,7 +53,7 @@ _last_used = 0.0
 
 def _load():
     """The compiled model, compiling it first if it was unloaded. Call under _infer_lock."""
-    global _model, _device, _last_used
+    global _model, _device, _last_used, _wanted
     _last_used = time.monotonic()
     if _model is None:
         try:
@@ -59,7 +61,7 @@ def _load():
             _device = _wanted
         except Exception:  # noqa: BLE001 - e.g. the container can't reach the GPU: run on the CPU
             compiled = core.compile_model(core.read_model(_xml), "CPU", COMPILE_CONFIG)
-            _device = "CPU"
+            _device = _wanted = "CPU"  # don't retry the GPU on every reload
         _model = (compiled, compiled.output(0))
     return _model
 
@@ -113,9 +115,29 @@ def letterbox(img: Image.Image) -> tuple[np.ndarray, float, int, int]:
     nw, nh = round(w * scale), round(h * scale)
     canvas = Image.new("RGB", (SIZE, SIZE), (114, 114, 114))
     left, top = (SIZE - nw) // 2, (SIZE - nh) // 2
-    canvas.paste(img.resize((nw, nh), Image.BILINEAR), (left, top))
-    arr = np.asarray(canvas, dtype=np.float32) / 255.0
-    return arr.transpose(2, 0, 1)[None], scale, left, top
+    canvas.paste(img.resize((nw, nh), Image.BILINEAR, reducing_gap=2.0), (left, top))
+    arr = np.asarray(canvas, dtype=np.float32)
+    arr *= 1 / 255.0
+    return np.ascontiguousarray(arr.transpose(2, 0, 1))[None], scale, left, top
+
+
+def open_small(data: bytes) -> tuple[Image.Image, int, int]:
+    """Decode an image no bigger than the model needs (JPEG decodes at 1/2, 1/4 or 1/8 scale
+    directly), and return it with the original width and height."""
+    img = Image.open(BytesIO(data))
+    ow, oh = img.size
+    img.draft("RGB", (SIZE * ow // max(ow, oh), SIZE * oh // max(ow, oh)))
+    return img.convert("RGB"), ow, oh
+
+
+def scale_boxes(found: list[dict], img: Image.Image, ow: int, oh: int) -> list[dict]:
+    """Boxes from a reduced decode, back in the original image's pixels."""
+    sx, sy = ow / img.width, oh / img.height
+    if sx != 1 or sy != 1:
+        for d in found:
+            x1, y1, x2, y2 = d["box"]
+            d["box"] = [round(x1 * sx), round(y1 * sy), round(x2 * sx), round(y2 * sy)]
+    return found
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou: float = 0.45) -> list[int]:
@@ -184,19 +206,25 @@ async def health(_request: web.Request) -> web.Response:
     )
 
 
+def _detect_bytes(data: bytes) -> tuple[list[dict], int, int, int]:
+    start = time.perf_counter()
+    img, ow, oh = open_small(data)
+    found = scale_boxes(detect(img), img, ow, oh)
+    return found, ow, oh, round((time.perf_counter() - start) * 1000)
+
+
 async def detect_endpoint(request: web.Request) -> web.Response:
     body = await request.read()
     try:
-        img = Image.open(BytesIO(body)).convert("RGB")
+        # Decoding and inference run off the event loop so /health and scans stay responsive.
+        detections, ow, oh, ms = await asyncio.get_running_loop().run_in_executor(None, _detect_bytes, body)
     except Exception as err:  # noqa: BLE001
         return web.json_response({"error": f"not an image: {err}"}, status=400)
-    start = time.perf_counter()
-    detections = detect(img)
     return web.json_response(
         {
-            "width": img.width,
-            "height": img.height,
-            "ms": round((time.perf_counter() - start) * 1000),
+            "width": ow,
+            "height": oh,
+            "ms": ms,
             "device": _device,
             "detections": detections,
         }
@@ -214,24 +242,40 @@ def _folder(rel: str) -> Path | None:
 async def scan_start(request: web.Request) -> web.Response:
     import scan as scanning  # noqa: PLC0415
 
-    body = await request.json()
-    folder = _folder(str(body.get("path", "")))
+    # Everything is checked before the scan is registered, so a bad request can't leave a
+    # "queued" scan behind (which would also block restarting on new code).
+    try:
+        body = await request.json()
+        threshold, step = float(body.get("threshold", 0.25)), float(body.get("step", 1.0))
+        rel = str(body.get("path", ""))
+    except (ValueError, TypeError, AttributeError):
+        return web.json_response({"error": "bad request"}, status=400)
+    if any(s.state in ("queued", "running") for s in SCANS.values()):
+        return web.json_response({"error": "a scan is already running"}, status=409)
+    folder = _folder(rel)
     if folder is None:
         return web.json_response({"error": "no such folder under the scan root"}, status=404)
+    _prune_scans()
     job = scanning.Scan(path=str(folder.relative_to(SCAN_ROOT.resolve())) or ".")
     SCANS[job.id] = job
-    loop = asyncio.get_running_loop()
-    loop.run_in_executor(
-        None,
-        scanning.run_scan,
-        job,
-        folder,
-        WORK,
-        detect,
-        float(body.get("threshold", 0.25)),
-        float(body.get("step", 1.0)),
-    )
+
+    def run() -> None:
+        try:
+            scanning.run_scan(job, folder, WORK, detect, threshold, step)
+        except Exception as err:  # noqa: BLE001
+            print(f"Scan {job.id} failed: {err}", flush=True)
+            if job.state in ("queued", "running"):
+                job.state = "error"
+
+    asyncio.get_running_loop().run_in_executor(None, run)
     return web.json_response({"id": job.id})
+
+
+def _prune_scans() -> None:
+    finished = [sid for sid, s in SCANS.items() if s.state not in ("queued", "running")]
+    for sid in finished[: max(0, len(finished) - KEEP_SCANS + 1)]:
+        SCANS.pop(sid, None)
+        shutil.rmtree(WORK / sid, ignore_errors=True)
 
 
 async def scan_status(request: web.Request) -> web.Response:
@@ -263,6 +307,8 @@ async def scan_report(request: web.Request) -> web.Response:
         visit.animal = named.get("animal") or visit.animal
         visit.label_confidence = named.get("confidence") or visit.label_confidence
     folder = _folder(job.path)
+    if folder is None:
+        return web.json_response({"error": "the scanned folder is gone"}, status=404)
     target = await asyncio.get_running_loop().run_in_executor(None, scanning.write_report, job, folder, WORK)
     return web.json_response({"report": str(target.relative_to(SCAN_ROOT.resolve()))})
 

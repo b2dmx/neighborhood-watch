@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -77,18 +78,21 @@ class Wildlife(WatchEntity, SensorEntity):
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "wildlife")
+        self._kinds: dict[str, dict[str, Any]] = {}
+
+    def _refresh(self) -> None:
+        self._kinds = self.watch.wildlife_seen()
 
     @property
     def native_value(self) -> str | None:
-        kinds = self.watch.wildlife_seen()
-        if not kinds:
+        if not self._kinds:
             return None
-        name, k = next(iter(kinds.items()))
+        name, k = next(iter(self._kinds.items()))
         return f"{name} · {k.get('where')}"[:STATE_LIMIT]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"kinds": self.watch.wildlife_seen()}
+        return {"kinds": self._kinds}
 
 
 class LastSighting(WatchEntity, SensorEntity):
@@ -229,17 +233,21 @@ class ToReview(WatchEntity, SensorEntity):
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "to_review")
+        self._queue: list[dict[str, Any]] = []
+
+    def _refresh(self) -> None:
+        self._queue = self.watch.review_queue()
 
     @property
     def native_value(self) -> int:
-        return len(self.watch.review_queue())
+        return len(self._queue)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "items": [
                 {k: s.get(k) for k in ("id", "time", "where", "animal", "confidence")}
-                for s in self.watch.review_queue()[:40]
+                for s in self._queue[:40]
             ]
         }
 
@@ -285,6 +293,13 @@ class LastScan(WatchEntity, SensorEntity):
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "last_scan")
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # Scan progress has its own signal, so it doesn't update every other entity.
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, self.watch.scan_signal, self._handle_update)
+        )
+
     @property
     def native_value(self) -> str | None:
         scan = self.watch.latest_scan()
@@ -294,11 +309,11 @@ class LastScan(WatchEntity, SensorEntity):
             return f"Scanning {scan.get('files_done') or 0}/{scan.get('files_total') or '?'}"
         if scan["state"] == "error":
             return "Error"
-        return f"{len(scan.get('visits') or [])} visits"
+        return f"{scan.get('visits_total', len(scan.get('visits') or []))} visits"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         scan = self.watch.latest_scan() or {}
-        return {k: scan.get(k) for k in ("folder", "state", "started", "finished", "tally", "report", "error")} | {
+        return {k: scan.get(k) for k in ("folder", "state", "started", "finished", "visits_total", "tally", "report", "error")} | {
             "visits": (scan.get("visits") or [])[:50]
         }

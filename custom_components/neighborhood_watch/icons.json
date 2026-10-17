@@ -6,6 +6,8 @@
     "set_reference_photo": { "service": "mdi:image-check" },
     "build_summary": { "service": "mdi:weather-night" },
     "correct": { "service": "mdi:check-decagram-outline" },
-    "scan": { "service": "mdi:folder-search-outline" }
+    "scan": { "service": "mdi:folder-search-outline" },
+    "add_note": { "service": "mdi:note-edit-outline" },
+    "move_training_data": { "service": "mdi:folder-move-outline" }
   }
 }

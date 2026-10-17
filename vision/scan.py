@@ -58,11 +58,14 @@ class Scan:
 
 def media_files(folder: Path) -> list[Path]:
     out = []
+    top = folder.resolve()
     for root, dirs, files in os.walk(folder):
         dirs[:] = sorted(d for d in dirs if d != REPORT_DIR and not d.startswith("."))
         for name in sorted(files):
-            if Path(name).suffix.lower() in IMAGES | VIDEOS:
-                out.append(Path(root) / name)
+            path = Path(root) / name
+            # Links pointing outside the scanned folder are skipped.
+            if path.suffix.lower() in IMAGES | VIDEOS and top in path.resolve().parents:
+                out.append(path)
     return out
 
 
@@ -111,12 +114,21 @@ def _keep(scan: Scan, out: Path, img: Image.Image, visit: Visit) -> None:
     scan.visits.append(visit)
 
 
-def _scan_image(scan, path, rel, out, detect, threshold) -> None:
+def _scan_image(scan, path, rel, out, detect, threshold, size: int = 640) -> None:
+    # Detect on a small decode (JPEGs decode at a fraction of full size directly); only a
+    # photo with an animal is decoded again in full to keep.
     with Image.open(path) as original:
-        img = original.convert("RGB")
-    best = _best_animal(detect(img))
+        ow, oh = original.size
+        original.draft("RGB", (size * ow // max(ow, oh), size * oh // max(ow, oh)))
+        small = original.convert("RGB")
+    best = _best_animal(detect(small))
     if best and best["confidence"] >= threshold:
-        _keep(scan, out, img, Visit(len(scan.visits) + 1, rel, "image", 0, 0, best["confidence"], best["box"]))
+        sx, sy = ow / small.width, oh / small.height
+        x1, y1, x2, y2 = best["box"]
+        box = [round(x1 * sx), round(y1 * sy), round(x2 * sx), round(y2 * sy)]
+        with Image.open(path) as original:
+            img = original.convert("RGB")
+        _keep(scan, out, img, Visit(len(scan.visits) + 1, rel, "image", 0, 0, best["confidence"], box))
 
 
 def _scan_video(scan, path, rel, out, detect, threshold, step, gap) -> None:
