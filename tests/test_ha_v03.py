@@ -520,6 +520,7 @@ async def test_add_note_goes_where_the_ai_uses_it(hass, watch):
         blocking=True, return_response=True,
     )
     assert result == {"added_to": "Yard"}
+    await hass.async_block_till_done()  # a camera note is saved in the options, which reloads
     await hass.services.async_call(
         DOMAIN, "add_note", {"animal": "milo", "note": "Looks very bright under strong infrared."},
         blocking=True, return_response=True,
