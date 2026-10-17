@@ -209,8 +209,14 @@ def _entry(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
+ADVANCED = {"identification", "training", "detector", "notifications"}
+
+
 async def _options(hass: HomeAssistant, entry, step: str):
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    if step in ADVANCED:  # these sit in the Advanced submenu
+        result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "advanced"})
+        assert result["type"] is FlowResultType.MENU
     return await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": step})
 
 
@@ -300,9 +306,7 @@ async def test_add_and_edit_animal(hass: HomeAssistant, ready):
 
 async def test_options_identification_requires_animals_placeholder(hass: HomeAssistant, ready):
     entry = _entry(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] is FlowResultType.MENU
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "identification"})
+    result = await _options(hass, entry, "identification")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {"instructions": "no placeholder here", "reset_instructions": False, "wildlife": ["Fox"],
@@ -329,20 +333,20 @@ async def test_add_and_edit_person(hass: HomeAssistant, ready):
     assert "mobile_app_phone" in [o["value"] for o in selector.config["options"]]
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"name": "Oscar", "notify_service": "notify.mobile_app_phone",
+        {"name": "Sam", "notify_service": "notify.mobile_app_phone",
          "critical_alerts": {"missing_alerts": True, "critical_sound": "default", "critical_volume": 0.5},
          "mutes": {"muted": ["Luna"]}, "quiet": {"quiet_start": "22:00:00", "quiet_end": "07:00:00"}},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    ((pid, oscar),) = entry.options["people"].items()
-    assert oscar["notify_service"] == "mobile_app_phone"
-    assert oscar["muted"] == ["luna"] and oscar["quiet_start"] == "22:00:00" and oscar["critical_volume"] == 0.5
-    assert "quiet" not in oscar and "mutes" not in oscar
+    ((pid, sam),) = entry.options["people"].items()
+    assert sam["notify_service"] == "mobile_app_phone"
+    assert sam["muted"] == ["luna"] and sam["quiet_start"] == "22:00:00" and sam["critical_volume"] == 0.5
+    assert "quiet" not in sam and "mutes" not in sam
     result = await _options(hass, entry, "people")
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"person": pid})
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"name": "Oscar", "notify_service": "mobile_app_phone",
+        {"name": "Sam", "notify_service": "mobile_app_phone",
          "critical_alerts": {"missing_alerts": False, "critical_sound": "default", "critical_volume": 0.5},
          "mutes": {}, "quiet": {}, "remove": False},
     )
@@ -370,8 +374,7 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
     assert entry.options["other_alert_at"] == ["*"] and entry.options["other_critical_at"] == ["*"]
     assert entry.options["motion_alert_at"] == []
     assert entry.options["pests"] == ["Raccoon"] and entry.options["pest_alert_at"] == ["garage"]
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "training"})
+    result = await _options(hass, entry, "training")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"dataset": True, "dataset_dir": "/media/nas/nw", "dataset_gb": 50}
     )
@@ -380,7 +383,7 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
 
 
 async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
-    hass.services.async_register("notify", "mobile_app_oscars_phone", lambda call: None)
+    hass.services.async_register("notify", "mobile_app_sams_phone", lambda call: None)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     # API callers may leave a form's sections out: they get the sections' defaults.
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
@@ -391,23 +394,25 @@ async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon"]})
     assert result["step_id"] == "people"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_oscars_phone"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_sams_phone"]})
     assert "Configure → People" not in result["description_placeholders"]["notes"]
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"species": "cat"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     options = result["result"].options
     assert "first_model_hours" not in options
-    (oscar,) = options["people"].values()
-    assert (oscar["name"], oscar["notify_service"]) == ("Oscars Phone", "mobile_app_oscars_phone")
+    (sam,) = options["people"].values()
+    assert (sam["name"], sam["notify_service"]) == ("Sams Phone", "mobile_app_sams_phone")
 
 
-async def test_configure_menu_puts_the_advanced_pages_last(hass: HomeAssistant, ready):
+async def test_configure_menu_puts_the_advanced_pages_in_a_submenu(hass: HomeAssistant, ready):
     entry = _entry(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["menu_options"] == [
-        "cameras", "people", "alerts", "catch_alls", "schedule", "models",
-        "identification", "training", "detector", "notifications",
+        "cameras", "people", "alerts", "catch_alls", "schedule", "models", "advanced",
     ]
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "advanced"})
+    assert result["type"] is FlowResultType.MENU and result["step_id"] == "advanced"
+    assert result["menu_options"] == ["identification", "training", "detector", "notifications"]
 
 
 async def test_options_models_keeps_the_hours_flat(hass: HomeAssistant, ready):

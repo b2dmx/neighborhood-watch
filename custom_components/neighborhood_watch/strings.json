@@ -212,10 +212,17 @@
           "catch_alls": "Wildlife and catch-alls",
           "schedule": "When to watch",
           "models": "AI models",
-          "identification": "Advanced: AI instructions",
-          "training": "Advanced: training data",
-          "detector": "Advanced: local detector",
-          "notifications": "Advanced: notification pictures"
+          "advanced": "Advanced"
+        }
+      },
+      "advanced": {
+        "title": "Advanced",
+        "description": "Settings most people never need to change.",
+        "menu_options": {
+          "identification": "AI instructions",
+          "training": "Training data",
+          "detector": "Local detector",
+          "notifications": "Notification pictures"
         }
       },
       "models": {
@@ -852,7 +859,7 @@
       "message": "Choose a camera or an animal for the note."
     },
     "no_detector": {
-      "message": "Set the local detector's address under Configure → Advanced: local detector first."
+      "message": "Set the local detector's address under Configure → Advanced → Local detector first."
     }
   },
   "services": {

@@ -85,10 +85,10 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
-| Advanced: AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
-| Advanced: training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
-| Advanced: local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
-| Advanced: notification pictures | Public address for picture links (defaults to the external URL) |
+| Advanced → AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
+| Advanced → Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
+| Advanced → Local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
+| Advanced → Notification pictures | Public address for picture links (defaults to the external URL) |
 
 ### AI models
 
@@ -230,7 +230,7 @@ The AI models never learn from your corrections, so the integration keeps what's
   <img src="vision/logo.png" alt="Neighborhood Watch vision" width="320">
 </picture>
 
-The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Advanced: local detector**, it looks at every frame before the AI:
+The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Advanced → Local detector**, it looks at every frame before the AI:
 
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.

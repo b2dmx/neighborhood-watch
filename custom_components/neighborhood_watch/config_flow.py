@@ -760,12 +760,15 @@ class WatchOptionsFlow(OptionsFlow):
                 "catch_alls",
                 "schedule",
                 "models",
-                # The advanced ones last (their labels say so).
-                "identification",
-                "training",
-                "detector",
-                "notifications",
+                "advanced",
             ],
+        )
+
+    async def async_step_advanced(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Settings most people never need to change."""
+        return self.async_show_menu(
+            step_id="advanced",
+            menu_options=["identification", "training", "detector", "notifications"],
         )
 
     # --- cameras -------------------------------------------------------------------------
