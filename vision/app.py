@@ -1,98 +1,184 @@
-"""Neighborhood Watch vision service: MegaDetector on OpenVINO.
+"""Neighborhood Watch vision service: an animal detector on OpenVINO (MegaDetector v6, or
+a model trained on the owner's labelled photos by train.py).
 
 POST /detect  (body: a JPEG/PNG)  ->  {"width", "height", "ms", "device",
                                         "detections": [{"label", "confidence", "box": [x1, y1, x2, y2]}]}
-GET  /health  ->  {"ok": true, "device": ..., "model": ...}
+GET  /health  ->  {"ok": true, "device": ..., "model": ..., "trained": ...}
 POST /scan    {"path": "<folder under NW_SCAN_ROOT>"}  ->  {"id"}      (bulk scan, runs in the background)
 GET  /scan/<id>                ->  progress and visits
 GET  /scan/<id>/frame/<n>      ->  a visit's best frame (JPEG)
 POST /scan/<id>/report {"names": {"<n>": {"animal", "confidence"}}}  ->  writes the report into the folder
+POST /train   ->  starts a training round now (409 if one is running)
+GET  /train   ->  training status and the last round's results
 
-Boxes are in pixels of the image that was sent. Labels: animal, person, vehicle.
-Runs on an Intel GPU/NPU when the container can see /dev/dri, otherwise on the CPU.
+Boxes are in pixels of the image that was sent. Labels: animal, person, vehicle (a trained
+model only has animal). Runs on an Intel GPU/NPU when the container can see /dev/dri,
+otherwise on the CPU.
 """
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from io import BytesIO
-import math
+import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import threading
 import time
 
 from aiohttp import web
-import numpy as np
-import openvino as ov
 from PIL import Image, UnidentifiedImageError
 
+import detector as det
+
 MODEL_DIR = Path(os.environ.get("NW_MODEL", "/models/megadetector"))
-DEVICE = os.environ.get("NW_DEVICE", "AUTO")
-SIZE = int(os.environ.get("NW_SIZE", "640"))  # MegaDetector v6 was trained at 640
-# A wide frame shrunk to 640 leaves a cat ~50 px across, too small to find; the frame is
-# also checked in overlapping tiles about the model's size (at most NW_TILES of them).
-MAX_TILES = int(os.environ.get("NW_TILES", "8"))
 DECODE_PIXELS = 3_100_000  # decode no bigger than about this: enough detail for the tiles
-MIN_CONF = float(os.environ.get("NW_MIN_CONF", "0.1"))
-LABELS = {0: "animal", 1: "person", 2: "vehicle"}
 SCAN_ROOT = Path(os.environ.get("NW_SCAN_ROOT", "/scan"))
 WORK = Path(os.environ.get("NW_WORK", "/work"))
-_infer_lock = threading.Lock()
+DATASET = Path(os.environ.get("NW_DATASET", "/dataset"))
 SCANS: dict = {}
 KEEP_SCANS = 20  # finished scans (and their frames in WORK) kept; older ones are deleted
+
+# Weekly training (train.py) on the labelled photos in NW_DATASET; NW_TRAIN=0 turns it off.
+TRAIN = os.environ.get("NW_TRAIN", "1").strip().lower() not in ("0", "false", "no", "off")
+_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_day = os.environ.get("NW_TRAIN_DAY", "sunday").strip().lower()
+TRAIN_DAY = int(_day) % 7 if _day.isdigit() else next((i for i, d in enumerate(_DAYS) if d.startswith(_day[:3])), 6)
+TRAIN_HOUR = int(os.environ.get("NW_TRAIN_HOUR", "13"))
+TRAIN_DIR = WORK / "train"
+CURRENT = WORK / "models" / "current.txt"
 
 # Memory: the compiled model is ~250 MB, so it's unloaded after NW_IDLE_UNLOAD seconds
 # without a request (0 = keep it) and compiled again on the next one (well under a second).
 IDLE_UNLOAD = float(os.environ.get("NW_IDLE_UNLOAD", "600"))
-COMPILE_CONFIG = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1"}  # one request at a time
-core = ov.Core()
-# GPU kernels take seconds to compile; caching them makes reloading after an idle unload fast.
-core.set_property({"CACHE_DIR": str(WORK / "openvino-cache")})
-_xml = next(MODEL_DIR.glob("*.xml"))
-_wanted = DEVICE if DEVICE != "AUTO" else ("GPU" if "GPU" in core.available_devices else "CPU")
-_device = _wanted
-_model = None  # (compiled model, its output)
-_last_used = 0.0
+core = det.make_core(WORK)
 
 
-def _load():
-    """The compiled model, compiling it first if it was unloaded. Call under _infer_lock."""
-    global _model, _device, _last_used, _wanted
-    _last_used = time.monotonic()
-    if _model is None:
+def _choose_model() -> det.Detector:
+    """The trained model named in WORK/models/current.txt if it loads, else MegaDetector."""
+    wanted = det.production_dir(WORK, MODEL_DIR)
+    if wanted != MODEL_DIR:
         try:
-            compiled = core.compile_model(core.read_model(_xml), _wanted, COMPILE_CONFIG)
-            _device = _wanted
-        except Exception:  # noqa: BLE001 - e.g. the container can't reach the GPU: run on the CPU
-            compiled = core.compile_model(core.read_model(_xml), "CPU", COMPILE_CONFIG)
-            _device = _wanted = "CPU"  # don't retry the GPU on every reload
-        _model = (compiled, compiled.output(0))
-    return _model
+            model = det.env_detector(wanted, core)
+            with model.lock:
+                model.load()
+            return model
+        except Exception as err:  # noqa: BLE001 - a broken export must never take the service down
+            print(f"Trained model {wanted} failed to load ({err}); using MegaDetector", flush=True)
+    model = det.env_detector(MODEL_DIR, core)
+    with model.lock:
+        model.load()  # fail fast at start if the model can't load
+    return model
+
+
+_det = _choose_model()
+print(f"Serving {_det.name} ({_det.size} px, labels {_det.labels}) on {_det.device}", flush=True)
+
+
+def _current_stamp() -> tuple:
+    try:
+        return (CURRENT.stat().st_mtime, CURRENT.read_text(encoding="utf-8").strip())
+    except OSError:
+        return ()
+
+
+def _watch_model() -> None:
+    """Switch to a newly promoted model (current.txt changed) without a restart."""
+    global _det  # noqa: PLW0603
+    seen = _current_stamp()
+    while True:
+        time.sleep(30)
+        stamp = _current_stamp()
+        if stamp == seen:
+            continue
+        seen = stamp
+        try:
+            new = _choose_model()
+        except Exception as err:  # noqa: BLE001
+            print(f"Model switch failed: {err}", flush=True)
+            continue
+        if new.dir != _det.dir:
+            print(f"Now serving {new.name} ({new.size} px) on {new.device}", flush=True)
+            _det = new
 
 
 def _unload_when_idle() -> None:
-    global _model
     while IDLE_UNLOAD > 0:
         time.sleep(30)
-        with _infer_lock:
-            if _model is not None and time.monotonic() - _last_used > IDLE_UNLOAD:
-                _model = None
-                import gc  # noqa: PLC0415
+        if _det.unload_if_idle(IDLE_UNLOAD):
+            import gc  # noqa: PLC0415
 
-                gc.collect()
-                try:  # hand the freed memory back to the system (glibc)
-                    import ctypes  # noqa: PLC0415
+            gc.collect()
+            try:  # hand the freed memory back to the system (glibc)
+                import ctypes  # noqa: PLC0415
 
-                    ctypes.CDLL("libc.so.6").malloc_trim(0)
-                except OSError:
-                    pass
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except OSError:
+                pass
+
+
+# ---- training -------------------------------------------------------------------------
+_train_proc: subprocess.Popen | None = None
+_train_lock = threading.Lock()
+
+
+def training_running() -> bool:
+    return _train_proc is not None and _train_proc.poll() is None
+
+
+def start_training(*args: str) -> bool:
+    """Run train.py in its own low-priority process (never two at once). False if busy."""
+    global _train_proc  # noqa: PLW0603
+    with _train_lock:
+        if training_running():
+            return False
+        TRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        log = TRAIN_DIR / "train.log"
+        if log.exists() and log.stat().st_size > 5_000_000:
+            log.replace(TRAIN_DIR / "train.log.1")
+        env = {**os.environ, "NW_DATASET": str(DATASET), "NW_WORK": str(WORK), "NW_MODEL": str(MODEL_DIR)}
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n=== {datetime.now().isoformat(timespec='seconds')} train.py {' '.join(args)}\n")
+            fh.flush()
+            _train_proc = subprocess.Popen(  # noqa: S603
+                [sys.executable, str(Path(__file__).with_name("train.py")), *args],
+                cwd=WORK,
+                env=env,
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                preexec_fn=(lambda: os.nice(10)) if hasattr(os, "nice") else None,  # noqa: PLW1509
+            )
+        print(f"Training started (pid {_train_proc.pid}); log in {log}", flush=True)
+        return True
+
+
+def _schedule_training() -> None:
+    """Once on NW_TRAIN_DAY from NW_TRAIN_HOUR (local time; set TZ): train.py --if-needed,
+    which only trains when enough new confirmed photos arrived since the last round."""
+    done_on = None
+    while TRAIN:
+        time.sleep(60)
+        now = datetime.now()
+        if now.weekday() == TRAIN_DAY and now.hour >= TRAIN_HOUR and done_on != now.date() and DATASET.is_dir():
+            if start_training("--if-needed"):
+                done_on = now.date()
+
+
+def _read_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
 
 
 def _restart_on_new_code() -> None:
     """The code can live in a folder on the host (./app) so updates are a file copy: when a
     .py file changes, exit between requests and let Docker's restart policy start the new
-    code. A bulk scan in progress is never cut short."""
+    code. A bulk scan or a training round in progress is never cut short."""
     here = Path(__file__).parent
 
     def stamp() -> dict[str, float]:
@@ -101,29 +187,24 @@ def _restart_on_new_code() -> None:
     started = stamp()
     while True:
         time.sleep(60)
-        if stamp() != started and not any(s.state in ("queued", "running") for s in SCANS.values()):
+        if (
+            stamp() != started
+            and not any(s.state in ("queued", "running") for s in SCANS.values())
+            and not training_running()
+        ):
             print("New code found; restarting", flush=True)
             os._exit(0)
 
 
-with _infer_lock:
-    _load()  # fail fast at start if the model can't load
 threading.Thread(target=_unload_when_idle, daemon=True).start()
 threading.Thread(target=_restart_on_new_code, daemon=True).start()
+threading.Thread(target=_watch_model, daemon=True).start()
+threading.Thread(target=_schedule_training, daemon=True).start()
 
 
-
-def letterbox(img: Image.Image) -> tuple[np.ndarray, float, int, int]:
-    """Scale to fit SIZE x SIZE keeping the aspect, pad with grey (as YOLO was trained)."""
-    w, h = img.size
-    scale = min(SIZE / w, SIZE / h)
-    nw, nh = round(w * scale), round(h * scale)
-    canvas = Image.new("RGB", (SIZE, SIZE), (114, 114, 114))
-    left, top = (SIZE - nw) // 2, (SIZE - nh) // 2
-    canvas.paste(img.resize((nw, nh), Image.BILINEAR, reducing_gap=2.0), (left, top))
-    arr = np.asarray(canvas, dtype=np.float32)
-    arr *= 1 / 255.0
-    return np.ascontiguousarray(arr.transpose(2, 0, 1))[None], scale, left, top
+def detect(img: Image.Image) -> list[dict]:
+    """Detections from the model being served (used by /detect and bulk scans)."""
+    return _det.detect(img)
 
 
 def open_small(data: bytes) -> tuple[Image.Image, int, int]:
@@ -146,103 +227,44 @@ def scale_boxes(found: list[dict], img: Image.Image, ow: int, oh: int) -> list[d
     return found
 
 
-def nms(boxes: np.ndarray, scores: np.ndarray, iou: float = 0.45) -> list[int]:
-    order = scores.argsort()[::-1]
-    keep: list[int] = []
-    while order.size:
-        i = order[0]
-        keep.append(int(i))
-        xx1 = np.maximum(boxes[i, 0], boxes[order[1:], 0])
-        yy1 = np.maximum(boxes[i, 1], boxes[order[1:], 1])
-        xx2 = np.minimum(boxes[i, 2], boxes[order[1:], 2])
-        yy2 = np.minimum(boxes[i, 3], boxes[order[1:], 3])
-        inter = np.clip(xx2 - xx1, 0, None) * np.clip(yy2 - yy1, 0, None)
-        area_i = (boxes[i, 2] - boxes[i, 0]) * (boxes[i, 3] - boxes[i, 1])
-        area_o = (boxes[order[1:], 2] - boxes[order[1:], 0]) * (boxes[order[1:], 3] - boxes[order[1:], 1])
-        order = order[1:][inter / (area_i + area_o - inter + 1e-9) < iou]
-    return keep
-
-
-def tiles(w: int, h: int) -> list[tuple[int, int, int, int]]:
-    """Overlapping tiles about the model's size (fewer, larger ones on big frames)."""
-    target = float(SIZE)
-    while True:
-        cols, rows = math.ceil(w / target), math.ceil(h / target)
-        if cols * rows <= MAX_TILES:
-            break
-        target *= 1.15
-    if cols * rows <= 1:
-        return []
-    tw, th = w / cols, h / rows
-    pad_x, pad_y = tw * 0.1, th * 0.1  # 20% overlap so an animal on a seam is whole in one
-    return [
-        (
-            max(0, int(c * tw - pad_x)),
-            max(0, int(r * th - pad_y)),
-            min(w, int((c + 1) * tw + pad_x)),
-            min(h, int((r + 1) * th + pad_y)),
-        )
-        for r in range(rows)
-        for c in range(cols)
-    ]
-
-
-def _candidates(img: Image.Image, dx: int = 0, dy: int = 0) -> tuple[np.ndarray, ...]:
-    """Boxes (in the full image, offset by dx/dy), confidences and classes above MIN_CONF."""
-    tensor, scale, left, top = letterbox(img)
-    with _infer_lock:
-        compiled, output = _load()
-        raw = compiled(tensor)[output][0]  # (4 + classes, anchors)
-    raw = raw.T
-    scores_all = raw[:, 4:]
-    cls = scores_all.argmax(1)
-    conf = scores_all.max(1)
-    mask = conf >= MIN_CONF
-    raw, cls, conf = raw[mask], cls[mask], conf[mask]
-    cx, cy, bw, bh = raw[:, 0], raw[:, 1], raw[:, 2], raw[:, 3]
-    boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
-    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / scale + dx
-    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / scale + dy
-    return boxes, conf, cls
-
-
-def detect(img: Image.Image) -> list[dict]:
-    found = [_candidates(img)]
-    for x0, y0, x1, y1 in tiles(*img.size):
-        found.append(_candidates(img.crop((x0, y0, x1, y1)), x0, y0))
-    boxes = np.concatenate([f[0] for f in found])
-    conf = np.concatenate([f[1] for f in found])
-    cls = np.concatenate([f[2] for f in found])
-    if not len(conf):
-        return []
-    w, h = img.size
-    boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w)
-    boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h)
-    out = []
-    for c in np.unique(cls):
-        idx = np.where(cls == c)[0]
-        for k in nms(boxes[idx], conf[idx]):
-            i = idx[k]
-            out.append(
-                {
-                    "label": LABELS.get(int(c), str(int(c))),
-                    "confidence": round(float(conf[i]), 3),
-                    "box": [round(float(v)) for v in boxes[i]],
-                }
-            )
-    return sorted(out, key=lambda d: -d["confidence"])
-
-
 async def health(_request: web.Request) -> web.Response:
+    model = _det
     return web.json_response(
         {
             "ok": True,
-            "device": _device,
-            "model": _xml.stem,
-            "size": SIZE,
-            "loaded": _model is not None,
+            "device": model.device,
+            "model": model.name,
+            "trained": model.dir != MODEL_DIR,
+            "size": model.size,
+            "labels": sorted(set(model.labels.values())),
+            "loaded": model.loaded,
+            "training": training_running(),
             "available": core.available_devices,  # what OpenVINO can use here (CPU, GPU, NPU)
             "dri": sorted(p.name for p in Path("/dev/dri").glob("*")) if Path("/dev/dri").exists() else [],
+        }
+    )
+
+
+async def train_start(_request: web.Request) -> web.Response:
+    if not DATASET.is_dir():
+        return web.json_response({"error": f"no dataset folder at {DATASET}"}, status=400)
+    if not await asyncio.get_running_loop().run_in_executor(None, start_training):
+        return web.json_response({"error": "a training round is already running"}, status=409)
+    return web.json_response({"started": True})
+
+
+async def train_status(_request: web.Request) -> web.Response:
+    history = _read_json(TRAIN_DIR / "history.json", [])
+    return web.json_response(
+        {
+            "running": training_running(),
+            "enabled": TRAIN,
+            "schedule": f"{_DAYS[TRAIN_DAY]} from {TRAIN_HOUR}:00",
+            "dataset": DATASET.is_dir(),
+            "serving": _det.name,
+            "status": _read_json(TRAIN_DIR / "status.json", {}),
+            "rounds": len(history),
+            "last": history[-1] if history else None,
         }
     )
 
@@ -268,7 +290,7 @@ async def detect_endpoint(request: web.Request) -> web.Response:
             "width": ow,
             "height": oh,
             "ms": ms,
-            "device": _device,
+            "device": _det.device,
             "detections": detections,
         }
     )
@@ -373,6 +395,8 @@ def make_app() -> web.Application:
             web.get("/scan/{id}", scan_status),
             web.get("/scan/{id}/frame/{n}", scan_frame),
             web.post("/scan/{id}/report", scan_report),
+            web.post("/train", train_start),
+            web.get("/train", train_status),
         ]
     )
     return app

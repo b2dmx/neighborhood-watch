@@ -235,6 +235,29 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
+### Training the detector on your photos
+
+MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [training data](#corrections-and-training-data)) and gets better every week:
+
+1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo. Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
+2. **Fair test.** The confirmed photos from the most recent ~20% of days are held back as the test set and never trained on. So are confirmed animal photos that no teacher could box, which are exactly the misses that matter. Confidently empty frames from those days are the empty side of the test.
+3. **Training.** A one-class ("animal") YOLO11 model is trained on everything else: from YOLO11s the first time, then from the last promoted model.
+4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it only if it **misses fewer animals** and its **false alarms don't more than double** (or stay within 5% of the empty photos). It's then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
+
+Set it up by mounting the training-data folder into the container (see `vision/compose.yaml`; adjust the path on the left to where that folder lives, read-only is enough):
+
+```yaml
+    volumes:
+      - /volume1/your-share/neighborhood-watch/dataset:/dataset:ro
+    shm_size: 1gb           # room for training's data loaders
+    environment:
+      TZ: Europe/Berlin     # your time zone; the schedule uses local time
+```
+
+- **Schedule:** every Sunday from 13:00 local time (`NW_TRAIN_DAY`, `NW_TRAIN_HOUR`), when at least 30 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. `NW_TRAIN=0` turns it off. Training runs in a separate low-priority process, so detection stays responsive. A round takes from tens of minutes to a few hours on a CPU, depending on how many photos there are. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
+- **Now:** `POST /train` starts a round (409 if one is running). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
+- **Which model is in use:** `GET /health` shows `model` and `trained`. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
+
 ## Bulk scanning (photos and videos)
 
 Got a trail-cam card, a phone video or old recordings? Put them in the detector's scan folder, then use the card's **Scan a folder** box or the `neighborhood_watch.scan` action:

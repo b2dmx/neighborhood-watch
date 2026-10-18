@@ -1,5 +1,6 @@
-# Neighborhood Watch vision service (MegaDetector on OpenVINO).
-# Put the model folder next to this file as ./models/megadetector (the .xml and .bin files).
+# Neighborhood Watch vision service (MegaDetector on OpenVINO, plus a detector it trains
+# on your labelled photos). Put the model folder next to this file as ./models/megadetector
+# (the .xml and .bin files).
 services:
   vision:
     image: ghcr.io/b2dmx/neighborhood-watch-vision:latest
@@ -11,11 +12,19 @@ services:
       - ./models:/models:ro
       # The service's code, so updates are a file copy (it restarts itself when it changes).
       - ./app:/app:ro
+      # Working files: scans, trained models (models/current.txt names the one in use), training history.
       - ./work:/work
       # The folder you bulk-scan (photos and videos); reports are written back into it.
       - ./scan:/scan
+      # The integration's training-data folder (Configure -> training data). Adjust the left
+      # side to where that folder is on this machine; read-only is enough.
+      - /volume1/Workspace/neighborhood-watch/dataset:/dataset:ro
+    shm_size: 1gb           # training's data loaders share memory here (Docker's default is 64 MB)
     devices:
       - /dev/dri:/dev/dri   # Intel GPU; remove this line on machines without one (it then runs on the CPU)
     environment:
       NW_DEVICE: AUTO
-      NW_SIZE: "640"
+      TZ: Etc/UTC           # your time zone, e.g. Europe/Berlin: the training schedule uses local time
+      NW_TRAIN: "1"         # 0 = never train automatically (POST /train still works)
+      NW_TRAIN_DAY: sunday
+      NW_TRAIN_HOUR: "13"
