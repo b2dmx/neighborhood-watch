@@ -460,13 +460,21 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("img[data-frame]").forEach((img) => {
       // "crop": cut to the animal the local detector found; the full frame otherwise.
       const path = `/api/${DOMAIN}/frame/${img.dataset.frame}${img.dataset.crop ? "/crop" : ""}`;
-      // A frame that's gone stays marked broken; it isn't asked for again on every redraw.
-      if (this._broken.has(path)) return img.classList.add("broken");
+      // A frame that's gone stays marked broken (or shows its fallback picture); it isn't
+      // asked for again on every redraw.
+      const giveUp = () => {
+        if (img.dataset.fallback && !img.dataset.fellBack) {
+          img.dataset.fellBack = "1";
+          img.src = img.dataset.fallback;
+        } else img.classList.add("broken");
+      };
+      if (this._broken.has(path)) return giveUp();
       // A link that stops working (signature expired or revoked) is signed afresh, once.
       img.addEventListener("error", () => {
+        if (img.dataset.fellBack) return img.classList.add("broken");
         if (img.dataset.retried) {
           this._broken.add(path);
-          return img.classList.add("broken");
+          return giveUp();
         }
         img.dataset.retried = "1";
         delete this._signed[path];
@@ -611,12 +619,18 @@ class NeighborhoodWatchCard extends HTMLElement {
       const fresh = !hours || Date.now() - new Date(photo?.state).getTime() < hours * 3600e3;
       const hasPhoto =
         photo && !["unknown", "unavailable"].includes(photo.state) && photo.attributes.entity_picture && fresh;
-      const img = hasPhoto
-        ? `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
-        : `<div class="nophoto">${catFace(seen?.attributes || {})}</div>`;
+      // The photo's crop around the animal: smaller and quicker than the whole frame, which
+      // stays the fallback (an older photo, or no training data saved).
+      const cropId = seen?.attributes?.photo_id;
+      const img = !hasPhoto
+        ? `<div class="nophoto">${catFace(seen?.attributes || {})}</div>`
+        : cropId
+          ? `<img data-frame="${esc(cropId)}" data-crop="1" data-fallback="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
+          : `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`;
       const badges = [];
+      const neverSeen = !seen || ["unknown", "unavailable"].includes(seen.state);
       if (tonight && Number(tonight.state) > 0) badges.push(`<span class="badge">${esc(tonight.state)} tonight</span>`);
-      if (absent?.state === "on") badges.push(`<span class="badge dim">away lately</span>`);
+      if (absent?.state === "on" && !neverSeen) badges.push(`<span class="badge dim">away lately</span>`);
       if (missing?.state === "on") badges.push(`<span class="badge alarm">MISSING</span>`);
       return `<div class="tile ${live ? "is-live" : ""} ${missing?.state === "on" ? "is-missing" : ""}">
           <div class="pic" data-more="${esc(hasPhoto ? k.last_photo : k.last_seen || "")}">${img}
@@ -737,6 +751,8 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     if (!point) parts.push(`<path d="M27 40 L29 22 L39 33 Z" fill="#e8a0a8" opacity=".6"/><path d="M73 40 L71 22 L61 33 Z" fill="#e8a0a8" opacity=".6"/>`);
     if (tufts) parts.push(`<path d="M26 14 L24 4 M26 14 L29 5 M74 14 L76 4 M74 14 L71 5" stroke="${earFill}" stroke-width="1.6" stroke-linecap="round"/>`);
   }
+  // A white chest (bib, tuxedo) sits under the head, so no gap shows between them.
+  if (bib) parts.push(`<path d="M35 70 Q50 64 65 70 L62 94 Q50 98 38 94 Z" fill="${WHITE}"/>`);
   parts.push(`<ellipse cx="50" cy="55" rx="31" ry="27" fill="${fur}"/>`);
   if (calico)
     parts.push(
@@ -762,7 +778,6 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     );
   if (point) parts.push(`<ellipse cx="50" cy="63" rx="15" ry="12" fill="#3d332e" opacity=".85"/>`);
   else if (bib || base === "white" || calico || bicolor) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="${WHITE}"/>`);
-  if (bib) parts.push(`<path d="M34 78 Q50 96 66 78 L60 92 L40 92 Z" fill="${WHITE}"/>`);
 
   // Eyes: blue for colourpoints unless said otherwise; odd-eyed gets one of each.
   const named = has("green") ? "#a6b83a" : has("blue eye", "blue-eye") || (point && !has("green", "copper")) ? "#6aa7d8"

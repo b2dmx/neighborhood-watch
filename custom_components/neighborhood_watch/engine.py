@@ -661,6 +661,15 @@ class WatchEngine:
     def last_seen(self, animal: AnimalConfig) -> datetime | None:
         return _dt(self.animal_state(animal).get("last_seen"))
 
+    def photo_sighting(self, animal: AnimalConfig) -> str | None:
+        """The id of the sighting the animal's photo came from (the card shows its crop)."""
+        at = self.animal_state(animal).get("photo_at")
+        if not at:
+            return None
+        rows = self.sightings()
+        i = bisect_left(rows, at, key=_row_time)  # each check has its own snapshot time
+        return rows[i].get("id") if i < len(rows) and rows[i].get("time") == at else None
+
     def is_absent(self, animal: AnimalConfig, now: datetime | None = None) -> bool:
         if animal.priority:
             return False

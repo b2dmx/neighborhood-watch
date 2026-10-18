@@ -178,6 +178,7 @@ class LastDetection(WatchEntity, SensorEntity):
 
 class LastSeen(WatchEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _unrecorded_attributes = frozenset({"looks", "photo_id"})
     _attr_icon = "mdi:clock-outline"
 
     @property
@@ -188,7 +189,13 @@ class LastSeen(WatchEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """How it looks, for the card's drawn icon when there's no photo yet."""
         a = self.animal
-        return {"pattern": a.pattern, "base": a.base, "looks": f"{a.description} {a.tips}"[:600]}
+        return {
+            "pattern": a.pattern,
+            "base": a.base,
+            "looks": f"{a.description} {a.tips}"[:600],
+            # The sighting the photo came from: the card shows its crop (small and quick).
+            "photo_id": self.watch.photo_sighting(a),
+        }
 
 
 class Location(WatchEntity, SensorEntity):
