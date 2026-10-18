@@ -742,7 +742,7 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
 
   const parts = [];
   if (fluffy)
-    parts.push(`<path d="M18 62 L10 70 L22 70 L16 80 L30 76 L32 88 L50 82 L68 88 L70 76 L84 80 L78 70 L90 70 L82 62 Z" fill="${fur}"/>`);
+    parts.push(`<path d="M18 62 L10 70 L22 70 L16 78 L30 76 L70 76 L84 78 L78 70 L90 70 L82 62 Z" fill="${fur}"/>`);
   // Ears: pointed (or small and folded), pink inside unless dark-pointed.
   const earFill = point ? "#3d332e" : bicolor ? "#4a4a50" : fur;
   if (folded) parts.push(`<path d="M22 40 Q24 26 38 30 L34 38 Z" fill="${earFill}"/><path d="M78 40 Q76 26 62 30 L66 38 Z" fill="${earFill}"/>`);
@@ -751,8 +751,6 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     if (!point) parts.push(`<path d="M27 40 L29 22 L39 33 Z" fill="#e8a0a8" opacity=".6"/><path d="M73 40 L71 22 L61 33 Z" fill="#e8a0a8" opacity=".6"/>`);
     if (tufts) parts.push(`<path d="M26 14 L24 4 M26 14 L29 5 M74 14 L76 4 M74 14 L71 5" stroke="${earFill}" stroke-width="1.6" stroke-linecap="round"/>`);
   }
-  // A white chest (bib, tuxedo) sits under the head, so no gap shows between them.
-  if (bib) parts.push(`<path d="M35 70 Q50 64 65 70 L62 94 Q50 98 38 94 Z" fill="${WHITE}"/>`);
   parts.push(`<ellipse cx="50" cy="55" rx="31" ry="27" fill="${fur}"/>`);
   if (calico)
     parts.push(
