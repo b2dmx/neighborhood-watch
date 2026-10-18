@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from io import BytesIO
+import math
 import os
 from pathlib import Path
 import shutil
@@ -29,6 +30,10 @@ from PIL import Image, UnidentifiedImageError
 MODEL_DIR = Path(os.environ.get("NW_MODEL", "/models/megadetector"))
 DEVICE = os.environ.get("NW_DEVICE", "AUTO")
 SIZE = int(os.environ.get("NW_SIZE", "640"))  # MegaDetector v6 was trained at 640
+# A wide frame shrunk to 640 leaves a cat ~50 px across, too small to find; the frame is
+# also checked in overlapping tiles about the model's size (at most NW_TILES of them).
+MAX_TILES = int(os.environ.get("NW_TILES", "8"))
+DECODE_PIXELS = 3_100_000  # decode no bigger than about this: enough detail for the tiles
 MIN_CONF = float(os.environ.get("NW_MIN_CONF", "0.1"))
 LABELS = {0: "animal", 1: "person", 2: "vehicle"}
 SCAN_ROOT = Path(os.environ.get("NW_SCAN_ROOT", "/scan"))
@@ -126,7 +131,8 @@ def open_small(data: bytes) -> tuple[Image.Image, int, int]:
     directly), and return it with the original width and height."""
     img = Image.open(BytesIO(data))
     ow, oh = img.size
-    img.draft("RGB", (SIZE * ow // max(ow, oh), SIZE * oh // max(ow, oh)))
+    k = min(1.0, (DECODE_PIXELS / (ow * oh)) ** 0.5)
+    img.draft("RGB", (int(ow * k), int(oh * k)))
     return img.convert("RGB"), ow, oh
 
 
@@ -157,7 +163,32 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou: float = 0.45) -> list[int]:
     return keep
 
 
-def detect(img: Image.Image) -> list[dict]:
+def tiles(w: int, h: int) -> list[tuple[int, int, int, int]]:
+    """Overlapping tiles about the model's size (fewer, larger ones on big frames)."""
+    target = float(SIZE)
+    while True:
+        cols, rows = math.ceil(w / target), math.ceil(h / target)
+        if cols * rows <= MAX_TILES:
+            break
+        target *= 1.15
+    if cols * rows <= 1:
+        return []
+    tw, th = w / cols, h / rows
+    pad_x, pad_y = tw * 0.1, th * 0.1  # 20% overlap so an animal on a seam is whole in one
+    return [
+        (
+            max(0, int(c * tw - pad_x)),
+            max(0, int(r * th - pad_y)),
+            min(w, int((c + 1) * tw + pad_x)),
+            min(h, int((r + 1) * th + pad_y)),
+        )
+        for r in range(rows)
+        for c in range(cols)
+    ]
+
+
+def _candidates(img: Image.Image, dx: int = 0, dy: int = 0) -> tuple[np.ndarray, ...]:
+    """Boxes (in the full image, offset by dx/dy), confidences and classes above MIN_CONF."""
     tensor, scale, left, top = letterbox(img)
     with _infer_lock:
         compiled, output = _load()
@@ -168,12 +199,22 @@ def detect(img: Image.Image) -> list[dict]:
     conf = scores_all.max(1)
     mask = conf >= MIN_CONF
     raw, cls, conf = raw[mask], cls[mask], conf[mask]
-    if not len(conf):
-        return []
     cx, cy, bw, bh = raw[:, 0], raw[:, 1], raw[:, 2], raw[:, 3]
     boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
-    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / scale
-    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / scale
+    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / scale + dx
+    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / scale + dy
+    return boxes, conf, cls
+
+
+def detect(img: Image.Image) -> list[dict]:
+    found = [_candidates(img)]
+    for x0, y0, x1, y1 in tiles(*img.size):
+        found.append(_candidates(img.crop((x0, y0, x1, y1)), x0, y0))
+    boxes = np.concatenate([f[0] for f in found])
+    conf = np.concatenate([f[1] for f in found])
+    cls = np.concatenate([f[2] for f in found])
+    if not len(conf):
+        return []
     w, h = img.size
     boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w)
     boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h)

@@ -138,7 +138,7 @@ _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
 IDENTIFY_CAP_SECONDS = 240  # all AI calls of one check together
-STREAM_FRAME_WIDTH = 1920  # a frame taken from the stream is scaled down to this width
+STREAM_FRAME_PIXELS = 3_100_000  # a frame taken from the stream is scaled down to about this many pixels (a 180° panorama keeps its height)
 SNAPSHOT_RECHECK_SECONDS = 3600  # how often a camera's snapshot size is measured again
 _SNAPSHOT_SMALL = f"{DOMAIN}_snapshot_small"  # hass.data: {entity_id: (small, measured at)}
 SCAN_VISITS_KEPT = 50  # per stored scan
@@ -315,7 +315,7 @@ async def async_snapshot(hass: HomeAssistant, entity_id: str) -> bytes:
 
     Some cameras hand Home Assistant a small snapshot (older UniFi Protect cameras give
     640x360) although their stream is 2K or 4K. When the snapshot is well below the
-    stream's size, one frame is taken from the stream instead (at most 1920 wide); if that
+    stream's size, one frame is taken from the stream instead (about 3 MP at most); if that
     fails, the snapshot is used as it is. Whether a camera's snapshot is small is measured
     once an hour, not on every check.
     """
@@ -333,9 +333,10 @@ async def async_snapshot(hass: HomeAssistant, entity_id: str) -> bytes:
         return image.content
     size: dict[str, int] = {}
     high = state.attributes.get("height") if state else None
-    if want > STREAM_FRAME_WIDTH and isinstance(high, int) and high > 0:
-        # ffmpeg's -s needs both sides: keep the stream's shape.
-        size = {"width": STREAM_FRAME_WIDTH, "height": round(STREAM_FRAME_WIDTH * high / want)}
+    if isinstance(high, int) and high > 0 and want * high > STREAM_FRAME_PIXELS:
+        # ffmpeg's -s needs both sides: keep the stream's shape (even sizes for the encoder).
+        k = (STREAM_FRAME_PIXELS / (want * high)) ** 0.5
+        size = {"width": round(want * k / 2) * 2, "height": round(high * k / 2) * 2}
     try:
         from homeassistant.components.ffmpeg import async_get_image as ffmpeg_image
 

@@ -114,12 +114,13 @@ def _keep(scan: Scan, out: Path, img: Image.Image, visit: Visit) -> None:
     scan.visits.append(visit)
 
 
-def _scan_image(scan, path, rel, out, detect, threshold, size: int = 640) -> None:
+def _scan_image(scan, path, rel, out, detect, threshold, pixels: int = 3_100_000) -> None:
     # Detect on a small decode (JPEGs decode at a fraction of full size directly); only a
     # photo with an animal is decoded again in full to keep.
     with Image.open(path) as original:
         ow, oh = original.size
-        original.draft("RGB", (size * ow // max(ow, oh), size * oh // max(ow, oh)))
+        k = min(1.0, (pixels / (ow * oh)) ** 0.5)
+        original.draft("RGB", (int(ow * k), int(oh * k)))
         small = original.convert("RGB")
     best = _best_animal(detect(small))
     if best and best["confidence"] >= threshold:
