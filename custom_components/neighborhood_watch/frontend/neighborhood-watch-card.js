@@ -775,9 +775,9 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
         .join("")
     );
   if (point) parts.push(`<ellipse cx="50" cy="63" rx="15" ry="12" fill="#3d332e" opacity=".85"/>`);
-  // A tuxedo (white bib) has a white muzzle and chin: a blaze from between the eyes down.
+  // A tuxedo (white bib) has a white muzzle: a narrow blaze from the forehead between the eyes, widening over the muzzle (the chin stays dark).
   else if (bib && base !== "white" && !calico)
-    parts.push(`<path d="M50 50 Q45 58 37 66 Q36 76 50 81 Q64 76 63 66 Q55 58 50 50 Z" fill="${WHITE}"/>`);
+    parts.push(`<path d="M50 42 Q47 49 45.5 56 Q42 64 34 72 L31.5 75.5 Q40 72.5 50 74 Q60 72.5 68.5 75.5 L66 72 Q58 64 54.5 56 Q53 49 50 42 Z" fill="${WHITE}"/>`);
   else if (bib || base === "white" || calico || bicolor) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="${WHITE}"/>`);
 
   // Eyes: blue for colourpoints unless said otherwise; odd-eyed gets one of each.
