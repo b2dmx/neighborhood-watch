@@ -314,6 +314,14 @@ class NeighborhoodWatchCard extends HTMLElement {
       this._styleKey = `${cols}|${ph}`;
       this._style = STYLE.replace("__COLS__", cols).replace("__SMALLCOLS__", Math.min(cols, 2)).replace("__PH__", ph);
     }
+    // Hold the card's height while it redraws and its pictures load, so the page doesn't
+    // jump (scroll position snaps back when the card briefly gets shorter).
+    const held = this.offsetHeight;
+    if (held) {
+      this.style.minHeight = `${held}px`;
+      clearTimeout(this._release);
+      this._release = setTimeout(() => (this.style.minHeight = ""), 1500);
+    }
     this.shadowRoot.innerHTML = `
       <style>${this._style}</style>
       <ha-card>

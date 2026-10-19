@@ -455,8 +455,9 @@ async def _with_detector(hass, watch, mode, aioclient_mock, animal=0.0):
 async def test_detector_shadow_records_and_scores(hass, watch, aioclient_mock):
     await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.05)
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    watch["ai"].say(SECOND, "Raccoon|high|na|na|")  # a pest is double-checked
     await trigger(hass, "yard")
-    assert watch["ai"].calls == [FIRST]  # shadow never skips
+    assert watch["ai"].calls == [FIRST, SECOND]  # shadow never skips
     agree = state(hass, "sensor.neighborhood_watch_detector_agreement")
     assert agree.state == "0.0"
     assert agree.attributes["misses"] == 1  # the AI saw a raccoon, the detector didn't
@@ -512,7 +513,7 @@ async def test_bulk_scan_names_visits_and_writes_report(hass, watch, aioclient_m
     aioclient_mock.get("http://vision:8765/scan/s1/frame/2", content=_jpeg())
     aioclient_mock.post("http://vision:8765/scan/s1/report", json={"report": "trail/neighborhood-watch-report"})
     watch["ai"].say(FIRST, "Raccoon|high|na|na|", "Unknown Cat|medium|striped|grey|big tabby")
-    watch["ai"].say(SECOND, "Unknown Cat|medium|striped|grey|big tabby")
+    watch["ai"].say(SECOND, "Raccoon|high|na|na|", "Unknown Cat|medium|striped|grey|big tabby")
 
     result = await hass.services.async_call(DOMAIN, "scan", {"folder": "trail"}, blocking=True, return_response=True)
     assert result == {"scan_id": "s1"}
@@ -859,7 +860,7 @@ async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, 
     await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.5)
     w = watch["entry"].runtime_data
     w.data.setdefault("detector", {})["last_error"] = "old"
-    watch["ai"].say(FIRST, "Raccoon|high|na|na|", "Raccoon|high|na|na|")
+    watch["ai"].say(FIRST, "Deer|high|na|na|", "Deer|high|na|na|")
     await trigger(hass, "yard")
     assert "last_error" not in w.data["detector"]
     aioclient_mock.clear_requests()
@@ -924,3 +925,16 @@ def test_crop_falls_back_to_the_whole_frame(tmp_path):
     (tmp_path / "2026-10-16" / "bad.jpg").write_bytes(b"not a picture")
     (tmp_path / "2026-10-16" / "bad.json").write_text(json.dumps({"detector": {"boxes": [{"box": [1, 2, 3, 4]}]}}))
     assert dataset.read_crop(tmp_path, "2026-10-16", "bad") == b"not a picture"
+
+
+async def test_a_pest_from_the_first_look_gets_a_free_second_opinion(hass, watch):
+    # A cat called a raccoon would send a wrong pest alert: wildlife that alerts is checked.
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    watch["ai"].say(SECOND, "Milo|high|na|na|")
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == [FIRST, SECOND]
+    # A harmless kind (a deer) isn't.
+    watch["ai"].calls.clear()
+    watch["ai"].say(FIRST, "Deer|high|na|na|")
+    await trigger(hass, "garage")
+    assert watch["ai"].calls == [FIRST]

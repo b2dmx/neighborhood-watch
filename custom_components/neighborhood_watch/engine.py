@@ -1177,10 +1177,15 @@ class WatchEngine:
         # A backup's answer that names an animal is always double-checked, by free models
         # only (paid models are kept for the cases the rules call for).
         special = logic.needs_second_opinion(first, priority, strict)
+        # Wildlife that alerts (a raccoon, a fox; not a bird or a deer) is double-checked too:
+        # it's rare, and a cat called a pest sends a wrong pest alert.
+        # Free models only, like a backup's check.
+        answer = logic.Answer.parse(first)
+        wild_check = bool(answer and answer.name not in logic.HARMLESS and self.is_wildlife(answer.name))
         backup_check = from_backup and logic.names_animal(first)
         second, second_label = "", ""
         said["unconfirmed"] = backup_check
-        if special or backup_check:
+        if special or backup_check or wild_check:
             for index, model in enumerate(self._chain(CONF_SECOND_OPINION, free_only=not special)):
                 if model == first_model:
                     continue  # a model never second-guesses itself
