@@ -1492,7 +1492,7 @@ class WatchEngine:
         return [
             s
             for s in reversed(recent)
-            if not s.get("user")
+            if s.get("user") in (None, "other")  # "other" still waits for what it was
             and s.get("day")
             and not (s.get("animal") == logic.NOTHING and s.get("confidence") == logic.HIGH)
         ]
@@ -1521,8 +1521,9 @@ class WatchEngine:
         answer = answer.strip()
         before = row.get("animal")
         old = self.animal_by_name(before or "")
-        if row.get("scan"):
-            # Scanned footage can be old: a verdict labels it, never moves tracking.
+        if row.get("scan") or (row.get("user") == "other" and answer.lower() != "other"):
+            # Scanned footage can be old: a verdict labels it, never moves tracking. A sighting
+            # already marked "something else" was taken off its animal then.
             old = None
         if answer.lower() in ("unsure", "not sure", "skip", "maybe"):
             # Looked at, but no verdict: leaves the queue, never labels the training frame.
@@ -1535,6 +1536,13 @@ class WatchEngine:
                 row["counted"] = True
                 row["log"] = True
                 await self._recompute(old, row)
+        elif answer.lower() == "other":
+            # Something else, to be picked later: off the animal's tracking, still in To review.
+            row["label"] = f"not:{before}"
+            row["user"] = "other"
+            row["wrong"] = True
+            if old:
+                await self._recompute(old, row, removed=True)
         elif answer.lower() == "wrong":
             row["label"] = f"not:{before}"
             row["user"] = "wrong"
@@ -1627,7 +1635,7 @@ class WatchEngine:
         elif verb == "is" and len(parts) > 3:  # alerts sent before the typed reply existed
             target = self.animal_by_name(parts[3])
             answer = target.name if target else parts[3]
-        elif verb in ("right", "wrong", "unsure"):
+        elif verb in ("right", "wrong", "unsure", "other"):
             answer = verb
         else:
             return
@@ -1726,13 +1734,9 @@ class WatchEngine:
             actions = [
                 {"action": f"{ACTION_PREFIX}|right|{sid}", "title": "✓ Right"},
                 {"action": f"{ACTION_PREFIX}|unsure|{sid}", "title": "? Not sure"},
-                # A phone or watch alert can't hold a list: "Other…" opens the review on the
-                # phone, where every animal and wildlife kind can be picked.
-                {
-                    "action": "URI",
-                    "title": "Other…",
-                    "uri": self.options.get(CONF_REVIEW_PAGE) or "/",
-                },
+                # "Other": it was something else. Works on a watch (no typing, no page): the
+                # sighting leaves that animal's tracking and waits in To review for the pick.
+                {"action": f"{ACTION_PREFIX}|other|{sid}", "title": "… Other"},
             ]
         sends: list[Send] = []
         for alert in alerts:
@@ -1804,6 +1808,8 @@ class WatchEngine:
                 data.update({"ttl": 0, "priority": "high", "channel": "alarm_stream"})
             if actions:
                 data["actions"] = actions
+                if page := self.options.get(CONF_REVIEW_PAGE):
+                    data["url"] = data["clickAction"] = page  # tapping the alert opens the review
             payload["data"] = data
         elif image:
             # Other services have no attachment: the picture's link goes in the text.

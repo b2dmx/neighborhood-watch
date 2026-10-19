@@ -313,14 +313,14 @@
         "description": "Who gets alerts is set per person under Configure → People. Cameras, animals and wildlife each decide when they alert.",
         "data": {
           "alerts": "Send alerts",
-          "correction_buttons": "Right / Not sure / Other… buttons on alerts",
-          "review_page": "Page the Other… button opens",
+          "correction_buttons": "Right / Not sure / Other buttons on alerts",
+          "review_page": "Page that opens when you tap an alert",
           "min_confidence": "Alert from confidence"
         },
         "data_description": {
           "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
           "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data.",
-          "review_page": "The dashboard page with this card, so Other… lands on the review, e.g. /lovelace/pets#review (add #review to open the To review section). Empty = the default dashboard.",
+          "review_page": "The dashboard page with this card, e.g. /lovelace/pets#review (#review opens the To review section). Empty = the app opens as usual.",
           "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in the review queue. Critical alerts and missing mode ignore this."
         }
       },

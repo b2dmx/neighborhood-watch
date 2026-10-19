@@ -209,9 +209,30 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
     assert data["image"].split("?")[0].endswith(f"/{watch['watch'].data['www_secret']}/yard.jpg")
     titles = [a["title"] for a in data["actions"]]
-    assert titles == ["✓ Right", "? Not sure", "Other…"]
-    # "Other…" opens the review on the phone (works from a watch too); default: the main page.
-    assert data["actions"][2] == {"action": "URI", "title": "Other…", "uri": "/"}
+    assert titles == ["✓ Right", "? Not sure", "… Other"]
+    assert "url" not in data  # no review page set: tapping the alert opens the app as usual
+
+
+async def test_other_takes_it_off_the_animal_and_keeps_it_for_review(hass, watch):
+    entry = watch["entry"]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "review_page": "/lovelace/pets#review"})
+    await hass.async_block_till_done()
+    before = state(hass, "sensor.milo_last_seen").state
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    data = watch["sent"][-1]["data"]
+    assert data["url"] == data["clickAction"] == "/lovelace/pets#review"
+    prefix, _, sid = data["actions"][2]["action"].split("|")
+    assert state(hass, "sensor.milo_last_seen").state != before
+    hass.bus.async_fire("mobile_app_notification_action", {"action": f"{prefix}|other|{sid}"})
+    await hass.async_block_till_done()
+    assert state(hass, "sensor.milo_last_seen").state == before  # off Milo's tracking
+    queue = state(hass, "sensor.neighborhood_watch_to_review").attributes["items"]
+    assert sid in [i["id"] for i in queue]  # still waiting for what it was
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": sid, "answer": "Raccoon"}, blocking=True)
+    await hass.async_block_till_done()
+    queue = state(hass, "sensor.neighborhood_watch_to_review").attributes["items"]
+    assert sid not in [i["id"] for i in queue]
 
 
 async def test_an_older_alerts_typed_reply_still_corrects_the_sighting(hass, watch):
