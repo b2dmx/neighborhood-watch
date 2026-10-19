@@ -56,6 +56,7 @@ from .const import (
     CONF_ALERT_AT,
     CONF_ALERTS,
     CONF_BUTTONS,
+    CONF_REVIEW_PAGE,
     CONF_CRITICAL_AT,
     CONF_CRITICAL_EXCEPT,
     CONF_CRITICAL_SOUND,
@@ -945,6 +946,7 @@ class WatchOptionsFlow(OptionsFlow):
 
     async def async_step_alerts(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
+            user_input[CONF_REVIEW_PAGE] = (user_input.get(CONF_REVIEW_PAGE) or "").strip()
             return self._save(user_input)
         values = self._values
         return self.async_show_form(
@@ -954,6 +956,9 @@ class WatchOptionsFlow(OptionsFlow):
                     vol.Required(CONF_ALERTS, default=values[CONF_ALERTS]): BOOL,
                     vol.Required(CONF_MIN_CONFIDENCE, default=values[CONF_MIN_CONFIDENCE]): CONFIDENCE,
                     vol.Required(CONF_BUTTONS, default=values[CONF_BUTTONS]): BOOL,
+                    vol.Optional(
+                        CONF_REVIEW_PAGE, description={"suggested_value": values.get(CONF_REVIEW_PAGE) or ""}
+                    ): TEXT,
                 }
             ),
         )

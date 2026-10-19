@@ -47,6 +47,7 @@ CONF_ALERTS = "alerts"
 CONF_UNKNOWN_ALERTS = "unknown_alerts"  # before 0.7: migrated into the built-ins
 CONF_MIN_CONFIDENCE = "min_confidence"
 CONF_BUTTONS = "correction_buttons"
+CONF_REVIEW_PAGE = "review_page"  # where an alert's "Other…" button opens
 CONF_DATASET = "dataset"
 CONF_DATASET_DIR = "dataset_dir"
 CONF_DATASET_GB = "dataset_gb"
@@ -101,6 +102,7 @@ DEFAULT_OPTIONS: dict = {
     CONF_MIN_CONFIDENCE: MEDIUM,
     CONF_PESTS: [],
     CONF_BUTTONS: True,
+    CONF_REVIEW_PAGE: "",
     CONF_DATASET: True,
     CONF_DATASET_DIR: "",
     CONF_DATASET_GB: 5,

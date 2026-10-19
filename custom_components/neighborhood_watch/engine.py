@@ -50,6 +50,7 @@ from .const import (
     CONF_ALERT_AT,
     CONF_ALERTS,
     CONF_BUTTONS,
+    CONF_REVIEW_PAGE,
     CONF_CRITICAL_AT,
     CONF_CRITICAL_EXCEPT,
     CONF_CRITICAL_SOUND,
@@ -1725,13 +1726,12 @@ class WatchEngine:
             actions = [
                 {"action": f"{ACTION_PREFIX}|right|{sid}", "title": "✓ Right"},
                 {"action": f"{ACTION_PREFIX}|unsure|{sid}", "title": "? Not sure"},
-                # A phone alert can't hold a list: type what it was (an animal or a kind).
+                # A phone or watch alert can't hold a list: "Other…" opens the review on the
+                # phone, where every animal and wildlife kind can be picked.
                 {
-                    "action": f"{ACTION_PREFIX}|was|{sid}",
-                    "title": "It was…",
-                    "behavior": "textInput",
-                    "textInputButtonTitle": "Save",
-                    "textInputPlaceholder": "e.g. Raccoon",
+                    "action": "URI",
+                    "title": "Other…",
+                    "uri": self.options.get(CONF_REVIEW_PAGE) or "/",
                 },
             ]
         sends: list[Send] = []

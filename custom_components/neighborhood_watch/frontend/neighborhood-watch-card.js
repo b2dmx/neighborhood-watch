@@ -396,6 +396,16 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._render(true);
       });
     this._loadFrames();
+    // Opened from an alert's "Other…" button (page#review): open To review and show it, once.
+    if (location.hash === "#review" && !this._reviewShown) {
+      const h = [...this.shadowRoot.querySelectorAll(".section > h2")].find((x) => x.textContent.startsWith("To review"));
+      if (h) {
+        this._reviewShown = true;
+        h.parentElement.classList.remove("folded");
+        h.setAttribute("aria-expanded", "true");
+        setTimeout(() => h.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+      }
+    } else if (location.hash !== "#review") this._reviewShown = false;
     this._wireLightbox();
     const scanButton = this.shadowRoot.querySelector("[data-scan]");
     if (scanButton)

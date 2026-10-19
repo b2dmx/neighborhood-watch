@@ -184,7 +184,7 @@ Then:
 - **Missing mode** (any named animal) beats everything: any possible sighting, from either model at any confidence on any camera, sends a critical alert at full volume to the people who get missing-mode alerts. The AI always takes a second look.
 - **Per person.** Muted animals are skipped. In a quiet zone or quiet hours, critical alerts arrive as normal ones, or not at all; missing-mode alerts always arrive.
 
-Each alert carries the frame the AI judged and three buttons: **✓ Right**, **? Not sure** and **It was…**, which opens a text box: type what it was (an animal or a wildlife kind).
+Each alert carries the frame the AI judged and three buttons: **✓ Right**, **? Not sure** and **Other…**, which opens the review on your phone so you can pick what it was. Set the page it opens under Configure → Alerts (the dashboard with this card, e.g. `/lovelace/pets#review`; `#review` opens the To review section). The buttons work from a watch too.
 
 You can turn the alerts off and use the event in your own automations instead:
 
@@ -327,4 +327,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.13.12 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.13.13 by Goobis<br>AI was used to help develop this integration.</p>

@@ -209,15 +209,17 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     assert data["image"].startswith("https://example.ui.nabu.casa/local/neighborhood_watch/")
     assert data["image"].split("?")[0].endswith(f"/{watch['watch'].data['www_secret']}/yard.jpg")
     titles = [a["title"] for a in data["actions"]]
-    assert titles == ["✓ Right", "? Not sure", "It was…"]
-    assert data["actions"][2]["behavior"] == "textInput"
+    assert titles == ["✓ Right", "? Not sure", "Other…"]
+    # "Other…" opens the review on the phone (works from a watch too); default: the main page.
+    assert data["actions"][2] == {"action": "URI", "title": "Other…", "uri": "/"}
 
 
-async def test_typed_it_was_reply_corrects_the_sighting(hass, watch):
+async def test_an_older_alerts_typed_reply_still_corrects_the_sighting(hass, watch):
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")
-    action = watch["sent"][0]["data"]["actions"][2]["action"]
-    sid = action.split("|")[2]
+    # Alerts sent before "Other…" replaced it may still carry the typed reply: it keeps working.
+    prefix, _, sid = watch["sent"][0]["data"]["actions"][0]["action"].split("|")
+    action = f"{prefix}|was|{sid}"
     with patch.object(watch["watch"], "async_correct") as correct:
         hass.bus.async_fire("mobile_app_notification_action", {"action": action, "reply_text": " fox "})
         await hass.async_block_till_done()
