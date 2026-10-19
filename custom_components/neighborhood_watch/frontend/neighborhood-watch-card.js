@@ -720,14 +720,14 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
   // Colour words refine the tone (a black coat stays black).
   if (base === "grey" && has("dark grey", "dark gray")) fur = "#4b4e56";
   if (base !== "black" && has("blue", "slate", "russian blue", "silver") && !has("blue eye", "blue-eye")) fur = "#7d8794";
-  if (base !== "white" && has("brown", "chocolate")) fur = "#4a3f36";
+  if (base !== "white" && has("brown", "chocolate")) fur = "#3f2c22";
   if (has("orange", "ginger", "red tabby", "marmalade")) fur = "#d98b45";
   if (has("cream", "buff", "fawn", "apricot")) fur = "#e3c79c";
   if (has("smoke")) fur = "#3a3c42";
   if (base === "white" && !has("calico", "tortie", "patch", "blotch", "bicolor", "bicolour", "van")) fur = tones.white;
   const hairless = has("hairless", "sphynx", "sphinx");
   if (hairless) fur = "#e9c3b5";
-  const dark = ["#1c1c1f", "#3a3c42", "#4a3f36", "#4b4e56"].includes(fur) ? "#0e0e10" : "#00000055";
+  const dark = ["#1c1c1f", "#3a3c42", "#3f2c22", "#4b4e56"].includes(fur) ? "#0e0e10" : "#00000055";
 
   const fluffy = !hairless && has("long-hair", "long hair", "longhair", "fluffy", "bushy", "maine coon", "norwegian", "persian", "ragdoll");
   const tufts = has("ear tuft", "lynx", "maine coon");
@@ -742,20 +742,26 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
 
   const parts = [];
   if (fluffy)
-    parts.push(`<path d="M18 62 L10 70 L22 70 L16 78 L30 76 L70 76 L84 78 L78 70 L90 70 L82 62 Z" fill="${fur}"/>`);
+    parts.push(`<path d="M24 55 L13 61 L21 64.5 L15 71.5 L27 70.5 L50 73 L73 70.5 L85 71.5 L79 64.5 L87 61 L76 55 Z" fill="${fur}" stroke="${fur}" stroke-width="2" stroke-linejoin="round"/>`);
   // Ears: pointed (or small and folded), pink inside unless dark-pointed.
   const earFill = point ? "#3d332e" : bicolor ? "#4a4a50" : fur;
-  if (folded) parts.push(`<path d="M22 40 Q24 26 38 30 L34 38 Z" fill="${earFill}"/><path d="M78 40 Q76 26 62 30 L66 38 Z" fill="${earFill}"/>`);
+  const rightEar = calico ? "#4a4a50" : earFill;  // a calico's dark patch takes in her right ear
+  if (folded) parts.push(`<path d="M26 42 Q23 28 36 29 Q40 30 38 35 Z" fill="${earFill}"/><path d="M74 42 Q77 28 64 29 Q60 30 62 35 Z" fill="${rightEar}"/>`);
   else {
-    parts.push(`<path d="M22 46 L26 14 L44 32 Z" fill="${earFill}"/><path d="M78 46 L74 14 L56 32 Z" fill="${earFill}"/>`);
-    if (!point) parts.push(`<path d="M27 40 L29 22 L39 33 Z" fill="#e8a0a8" opacity=".6"/><path d="M73 40 L71 22 L61 33 Z" fill="#e8a0a8" opacity=".6"/>`);
+    parts.push(
+      `<path d="M26.5 44 C22.5 34 22.5 23 26 16.5 Q28 13.8 30.5 15.8 C35.5 20.5 40.5 26.5 45 33 Z" fill="${earFill}"/>`,
+      `<path d="M73.5 44 C77.5 34 77.5 23 74 16.5 Q72 13.8 69.5 15.8 C64.5 20.5 59.5 26.5 55 33 Z" fill="${rightEar}"/>`
+    );
+    if (!point) parts.push(`<path d="M28.5 39 C26.5 32 27 26 29 21.5 C32.5 25 36 29 39.5 34 Z" fill="#e8a0a8" opacity=".55"/><path d="M71.5 39 C73.5 32 73 26 71 21.5 C67.5 25 64 29 60.5 34 Z" fill="#e8a0a8" opacity=".55"/>`);
     if (tufts) parts.push(`<path d="M26 14 L24 4 M26 14 L29 5 M74 14 L76 4 M74 14 L71 5" stroke="${earFill}" stroke-width="1.6" stroke-linecap="round"/>`);
   }
-  parts.push(`<ellipse cx="50" cy="55" rx="31" ry="27" fill="${fur}"/>`);
+  const head = "M50 29.5 C64.5 29.5 76 38.5 77.5 51.5 C79 64.5 68.5 79 50 80.5 C31.5 79 21 64.5 22.5 51.5 C24 38.5 35.5 29.5 50 29.5 Z";
+  const clip = `h${Math.random().toString(36).slice(2, 9)}`;
+  parts.push(`<path d="${head}" fill="${fur}"/><g clip-path="url(#${clip})">`);
   if (calico)
     parts.push(
       `<path d="M30 34 Q46 30 44 50 Q34 56 24 50 Q22 40 30 34 Z" fill="#d9894a"/>`,
-      `<path d="M56 30 Q72 28 78 44 L74 46 Q64 40 56 42 Z" fill="#4a4a50"/><path d="M60 30 L74 14 L78 44 Z" fill="#4a4a50"/>`
+      `<path d="M54 26 Q74 26 84 44 L80 48 Q66 40 56 42 Z" fill="#4a4a50"/>`
     );
   if (tortie)
     parts.push(
@@ -764,9 +770,15 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     );
   if (bicolor && !calico) parts.push(`<path d="M24 40 Q50 22 76 40 Q66 34 50 34 Q34 34 24 40 Z" fill="#4a4a50"/>`);
   if (tabby)
+    // A tabby's face: the "M" on the forehead with lines above it, a line from the outer
+    // corner of each eye, and stripes curving across the cheeks.
     parts.push(
-      `<path d="M42 32 L44 42 M50 30 L50 42 M58 32 L56 42" stroke="${dark}" stroke-width="3" stroke-linecap="round"/>`,
-      `<path d="M21 54 L30 56 M21 61 L30 61 M79 54 L70 56 M79 61 L70 61" stroke="${dark}" stroke-width="2.5" stroke-linecap="round"/>`
+      `<g stroke="${dark}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".9">` +
+        `<path d="M41 43.5 Q42 37.5 43.5 36.5 Q45.5 38.5 47 41.5 Q48.5 35.5 50 35 Q51.5 35.5 53 41.5 Q54.5 38.5 56.5 36.5 Q58 37.5 59 43.5" stroke-width="1.9"/>` +
+        `<path d="M45.5 31.5 L46.5 34.5 M50 30 V33 M54.5 31.5 L53.5 34.5" stroke-width="1.8"/>` +
+        `<path d="M33.5 50.5 Q29.5 50.5 26.5 53 M66.5 50.5 Q70.5 50.5 73.5 53" stroke-width="1.6"/>` +
+        `<path d="M24 58.5 Q28 59 31.5 61.5 M76 58.5 Q72 59 68.5 61.5 M25.5 64.5 Q28.5 64.5 31 66.5 M74.5 64.5 Q71.5 64.5 69 66.5" stroke-width="1.6"/>` +
+        `</g>`
     );
   if (spotted)
     parts.push(
@@ -780,23 +792,28 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
     parts.push(`<path d="M50 42 Q47 49 45.5 56 Q42 64 34 72 L31.5 75.5 Q40 72.5 50 74 Q60 72.5 68.5 75.5 L66 72 Q58 64 54.5 56 Q53 49 50 42 Z" fill="${WHITE}"/>`);
   else if (bib || base === "white" || calico || bicolor) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="${WHITE}"/>`);
 
+  parts.push("</g>");
+
   // Eyes: blue for colourpoints unless said otherwise; odd-eyed gets one of each.
   const named = has("green") ? "#a6b83a" : has("blue eye", "blue-eye") || (point && !has("green", "copper")) ? "#6aa7d8"
     : has("copper", "orange eye", "amber") ? "#d0802e" : "#d4b23a";
   const [left, right] = has("odd-eye", "odd eye", "heterochrom") ? ["#6aa7d8", "#d4b23a"] : [named, named];
+  const light = [tones.white, WHITE, "#e3c79c", "#e9c3b5"].includes(fur);
+  const eye = (x, iris) =>
+    `<ellipse cx="${x}" cy="52" rx="5.4" ry="5.8" fill="${iris}" stroke="#00000040" stroke-width=".6"/>` +
+    `<ellipse cx="${x}" cy="52.3" rx="1.5" ry="4.4" fill="#111"/>` +
+    `<circle cx="${x + 1.6}" cy="49.6" r="1.15" fill="#fff" opacity=".9"/>`;
   parts.push(
-    `<ellipse cx="39" cy="52" rx="5" ry="6" fill="${left}"/><ellipse cx="61" cy="52" rx="5" ry="6" fill="${right}"/>`,
-    `<ellipse cx="39" cy="53" rx="1.8" ry="5" fill="#111"/><ellipse cx="61" cy="53" rx="1.8" ry="5" fill="#111"/>`,
-    `<path d="M46 62 L54 62 L50 67 Z" fill="#e48a95"/>`,
-    `<path d="M50 67 Q46 72 42 70 M50 67 Q54 72 58 70" stroke="#3a3a3a" stroke-width="1.5" fill="none" stroke-linecap="round"/>`
+    eye(39, left),
+    eye(61, right),
+    `<path d="M46.4 61.6 Q50 60.4 53.6 61.6 Q52.4 64.6 50 65.6 Q47.6 64.6 46.4 61.6 Z" fill="#e48a95"/>`,
+    `<path d="M50 65.6 V67.4 M50 67.4 Q47.6 70.4 44.6 69 M50 67.4 Q52.4 70.4 55.4 69" stroke="${light ? "#5a4f4a" : dark === "#0e0e10" ? "#8a8a90" : "#2a2a2a"}" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
   );
-  if (!hairless) {
-    const light = [tones.white, WHITE, "#e3c79c", "#e9c3b5"].includes(fur);
+  if (!hairless)
     parts.push(
-      `<path d="M30 64 L12 61 M30 68 L13 70 M70 64 L88 61 M70 68 L87 70" stroke="${light ? "#9a958c" : "#e9e6df"}" stroke-width="1.2" stroke-linecap="round"/>`
+      `<path d="M33 64 Q22 61.5 12 61.5 M33 67 Q22 67.5 13 70 M67 64 Q78 61.5 88 61.5 M67 67 Q78 67.5 87 70" stroke="${light ? "#9a958c" : "#e9e6df"}" stroke-width=".9" fill="none" stroke-linecap="round" opacity=".9"/>`
     );
-  }
-  return `<svg viewBox="0 0 100 100" class="face" aria-hidden="true">${parts.join("")}</svg>`;
+  return `<svg viewBox="0 0 100 100" class="face" aria-hidden="true"><defs><clipPath id="${clip}"><path d="${head}"/></clipPath></defs>${parts.join("")}</svg>`;
 }
 
 const STYLE = `
