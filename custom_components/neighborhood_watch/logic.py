@@ -179,6 +179,7 @@ class Verdict:
     first_look_said: str  # tidied, lower case
     second_opinion_said: str  # tidied
     named: tuple[str, ...] = ()  # lower-case names either model said
+    unchecked: bool = False  # a priority animal nobody could double-check: alerts, but not counted
 
 
 def _level(value: str) -> str:

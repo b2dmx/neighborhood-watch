@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from bisect import bisect_left, bisect_right, insort
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import partial
 import logging
@@ -1143,6 +1143,8 @@ class WatchEngine:
             self.strict_keys(),
             unconfirmed=said.get("unconfirmed", False),
         )
+        if said.get("unchecked"):
+            verdict = replace(verdict, unchecked=True)
         models = said.get("first_label") or "none answered"
         if said.get("second_label"):
             models += f" + {said['second_label']}"
@@ -1197,6 +1199,9 @@ class WatchEngine:
                     second, second_label = logic.tidy(raw), self._model_label(model, index)
                     said.update(second=second, second_label=second_label)
                     break
+        # A priority animal that no second model could check (all down, out of free
+        # uses, no internet) still alerts, but isn't counted until someone confirms it.
+        said["unchecked"] = bool(answer and answer.name in priority and not second)
 
         return self._decide(said)
 
@@ -1262,7 +1267,7 @@ class WatchEngine:
         """Track the sighting and plan its alerts (the caller sends them)."""
         cam, v, now = check.camera, check.verdict, check.at
         rules = self.rules
-        counted = check.counted = logic.counts(v, rules)
+        counted = check.counted = logic.counts(v, rules) and not v.unchecked
         on_minutes = float(self.options.get(CONF_ON_CAMERA_MINUTES, 10))
         until = now + timedelta(minutes=on_minutes)
 

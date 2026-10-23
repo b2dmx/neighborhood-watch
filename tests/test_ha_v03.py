@@ -961,3 +961,18 @@ async def test_a_pest_from_the_first_look_gets_a_free_second_opinion(hass, watch
     watch["ai"].say(FIRST, "Deer|high|na|na|")
     await trigger(hass, "garage")
     assert watch["ai"].calls == [FIRST]
+
+
+async def test_an_unchecked_priority_sighting_alerts_but_waits_for_review(hass, watch):
+    # Luna named, but no second model could check it: still alert, don't count it yet.
+    before = state(hass, "sensor.luna_last_seen").state
+    watch["ai"].say(FIRST, "Luna|high|blotchy|white|")  # every second opinion fails
+    await trigger(hass, "yard")
+    assert any("Luna" in m["title"] for m in watch["sent"])  # the alert still goes out
+    assert state(hass, "sensor.luna_last_seen").state == before  # not counted
+    queue = state(hass, "sensor.neighborhood_watch_to_review").attributes["items"]
+    (item,) = [i for i in queue if i["animal"] == "Luna"]
+    # Confirmed with ✓ the next day, it counts.
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": item["id"], "answer": "right"}, blocking=True)
+    await hass.async_block_till_done()
+    assert state(hass, "sensor.luna_last_seen").state != before
