@@ -976,3 +976,26 @@ async def test_an_unchecked_priority_sighting_alerts_but_waits_for_review(hass, 
     await hass.services.async_call(DOMAIN, "correct", {"sighting_id": item["id"], "answer": "right"}, blocking=True)
     await hass.async_block_till_done()
     assert state(hass, "sensor.luna_last_seen").state != before
+
+
+async def test_undo_last_answer_puts_it_back(hass, watch):
+    before = state(hass, "sensor.milo_last_seen").state
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    watch["ai"].say(SECOND, "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    queue = state(hass, "sensor.neighborhood_watch_to_review").attributes["items"]
+    sid = queue[0]["id"]
+    # Answered wrongly: it was "Milo".
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": sid, "answer": "Milo"}, blocking=True)
+    await hass.async_block_till_done()
+    assert state(hass, "sensor.milo_last_seen").state != before
+    review = state(hass, "sensor.neighborhood_watch_to_review")
+    assert sid not in [i["id"] for i in review.attributes["items"]]
+    assert review.attributes["last_answer"]["id"] == sid
+    result = await hass.services.async_call(DOMAIN, "undo_last_answer", {}, blocking=True, return_response=True)
+    await hass.async_block_till_done()
+    assert result["undone"] == sid
+    assert state(hass, "sensor.milo_last_seen").state == before  # Milo's tracking is back
+    review = state(hass, "sensor.neighborhood_watch_to_review")
+    assert sid in [i["id"] for i in review.attributes["items"]]  # back in To review
+    assert review.attributes["last_answer"] is None

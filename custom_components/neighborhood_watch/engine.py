@@ -259,6 +259,10 @@ def _iso(t: datetime | None) -> str | None:
     return t.isoformat() if t else None
 
 
+# What an answer changes on a sighting (and what undoing it puts back).
+_ANSWER_KEYS = ("animal", "label", "user", "counted", "wrong", "confidence", "log")
+
+
 def _row_time(row: dict[str, Any]) -> str:
     """A sighting's sort key: its UTC ISO time ("" sorts a row without one first)."""
     return row.get("time") or ""
@@ -1524,6 +1528,9 @@ class WatchEngine:
         if row is None:
             return {"corrected": None}
         answer = answer.strip()
+        # Remember how it was, so the last answer can be undone.
+        undo = {"id": row.get("id"), "at": _iso(dt_util.utcnow()), "answer": answer,
+                "before": {k: row.get(k) for k in _ANSWER_KEYS}}
         before = row.get("animal")
         old = self.animal_by_name(before or "")
         if row.get("scan") or (row.get("user") == "other" and answer.lower() != "other"):
@@ -1581,9 +1588,39 @@ class WatchEngine:
             await self.hass.async_add_executor_job(
                 dataset.set_label, self.dataset_root, row["day"], row["id"], row["label"], row["user"]
             )
+        undo["after"] = row.get("animal")
+        undo["where"] = row.get("where")
+        self.data["last_answer"] = undo
         self._save()
         self._notify()
         return {"corrected": {k: row.get(k) for k in ("id", "time", "where", "animal", "label")}, "was": before}
+
+    async def async_undo_last(self) -> dict[str, Any]:
+        """Take back the last answer: the sighting is as it was (back in To review), and
+        tracking and the photo follow."""
+        undo = self.data.pop("last_answer", None)
+        row = self.find_sighting(undo.get("id"), None) if undo else None
+        if row is None:
+            self._notify()
+            return {"undone": None}
+        names = {row.get("animal"), undo["before"].get("animal")}
+        for k, v in undo["before"].items():
+            if v is None:
+                row.pop(k, None)
+            else:
+                row[k] = v
+        for name in names:
+            subject = self.animal_by_name(name or "")
+            if subject and not row.get("scan"):
+                here = row.get("animal") == subject.name and row.get("counted") and not row.get("wrong")
+                await self._recompute(subject, row, removed=not here)
+        if row.get("day"):
+            await self.hass.async_add_executor_job(
+                dataset.set_label, self.dataset_root, row["day"], row["id"], row.get("label"), row.get("user")
+            )
+        self._save()
+        self._notify()
+        return {"undone": row.get("id"), "answer": undo.get("answer")}
 
     async def _recompute(
         self, subject: AnimalConfig, row: dict[str, Any], removed: bool = False

@@ -106,6 +106,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 translation_placeholders={"camera": call.data["camera"]},
             )
 
+    async def undo_last(call: ServiceCall) -> ServiceResponse:
+        return await engine().async_undo_last()
+
     async def correct(call: ServiceCall) -> ServiceResponse:
         watch = engine()
         result = await watch.async_correct(
@@ -218,6 +221,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         "set_reference_photo",
         set_reference_photo,
         vol.Schema({vol.Required("animal"): cv.string, vol.Optional("camera"): cv.string}),
+    )
+    hass.services.async_register(
+        DOMAIN, "undo_last_answer", undo_last, vol.Schema({}), supports_response=SupportsResponse.OPTIONAL
     )
     hass.services.async_register(
         DOMAIN,

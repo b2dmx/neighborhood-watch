@@ -60,6 +60,8 @@ set_reference_photo:
       selector:
         text:
 
+undo_last_answer:
+
 correct:
   fields:
     answer:

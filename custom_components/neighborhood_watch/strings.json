@@ -929,6 +929,10 @@
       "name": "Build night summary",
       "description": "Builds the night summary now and starts a new night."
     },
+    "undo_last_answer": {
+      "name": "Undo the last answer",
+      "description": "Takes back the last Right / Not sure / Other / It was… answer: the sighting goes back to To review, and tracking and the photo follow."
+    },
     "correct": {
       "name": "Correct a sighting",
       "description": "Confirms or corrects what a camera saw. Tracking and the photo move to the right animal, and the training frame is labelled.",

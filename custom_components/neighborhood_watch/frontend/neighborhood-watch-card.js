@@ -359,6 +359,17 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._hass.callService("switch", "toggle", { entity_id: el.dataset.toggle });
       })
     );
+    const undoBtn = this.shadowRoot.querySelector("[data-undo]");
+    if (undoBtn)
+      undoBtn.addEventListener("click", () => {
+        undoBtn.disabled = true;
+        const id = this._state(this._devices().hub?.keys.to_review)?.attributes?.last_answer?.id;
+        if (id) this._answered.delete(String(id));
+        this._note = null;
+        Promise.resolve(this._hass.callService(DOMAIN, "undo_last_answer", {}))
+          .catch((err) => alert(`Not undone: ${err.message || err}`))
+          .finally(() => this._render(true));
+      });
     this.shadowRoot.querySelectorAll("[data-answer]").forEach((el) =>
       el.addEventListener("click", () => {
         el.disabled = true;
@@ -552,8 +563,17 @@ class NeighborhoodWatchCard extends HTMLElement {
   _review(d) {
     const s = this._state(d.hub.keys.to_review);
     const items = s?.attributes?.items || [];
-    // Nothing to review: no section at all (unless the note box from the last answer is open).
-    if (!items.length) return this._note ? `<div class="section"><h2>To review</h2>${this._noteBox()}</div>` : "";
+    // The last answer (from here or a phone) can be taken back for an hour.
+    const la = s?.attributes?.last_answer;
+    const said = { right: "Right", unsure: "Not sure", other: "Other", wrong: "Wrong" };
+    const undo =
+      la && Date.now() - new Date(la.at).getTime() < 3600e3
+        ? `<div class="undo muted">Last answer: ${esc(la.where || "")} · ${esc(said[String(la.answer).toLowerCase()] || la.answer)}` +
+          ` <button class="chip" data-undo aria-label="Undo the last answer">Undo</button></div>`
+        : "";
+    // Nothing to review: no section at all (unless the note box or an undo is still offered).
+    if (!items.length)
+      return this._note || undo ? `<div class="section"><h2>To review</h2>${undo}${this._noteBox()}</div>` : "";
     const limit = this._config.review_limit || 6;
     const options = ["Nothing", ...this._names(d)].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
     const rows = items.slice(0, limit).map((it) => {
@@ -573,7 +593,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     // The sensor lists at most 40; its state is the full count.
     const total = Number.isFinite(Number(s.state)) ? Number(s.state) : items.length;
     const more = total > limit ? `<div class="muted">${total - limit} more after these.</div>` : "";
-    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}</div>`;
+    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}</div>`;
   }
 
   _scan(hub) {
@@ -891,6 +911,7 @@ const STYLE = `
   .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
   .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
   .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .undo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
   .rev { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 14px; background: var(--secondary-background-color); min-width: 0; }
   .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .small { font-size: .8em; }
