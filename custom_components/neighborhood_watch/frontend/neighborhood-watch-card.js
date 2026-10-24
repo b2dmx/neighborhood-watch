@@ -1463,7 +1463,7 @@ function catGrid(o) {
 
   // Inner ears.
   const pink = o.innerEar || "#d98f9c";
-  for (const [x, y] of [[15, 8], [15, 9], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x, y, pink); }
+  for (const [x, y] of [[15, 8], [15, 9], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x + (o.earFlick ? 1 : 0), y + (o.earFlick ? 1 : 0), pink); } // the flicked ear's inside moves with it
   // Eyes: 3 wide, 3 tall, a slit pupil, a glint.
   const eye = o.eyes || "#d9b23a";
   for (const ex of [18, 27]) {
