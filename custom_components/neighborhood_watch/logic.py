@@ -34,6 +34,7 @@ DEFAULT_WILDLIFE = (
     "Chicken",
     "Bird",
     "Deer",
+    "Stoat",
 )
 
 # Not visitors worth remembering: these never make a camera's "last real animal" (which

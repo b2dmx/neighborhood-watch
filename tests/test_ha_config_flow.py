@@ -130,7 +130,7 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     assert result["errors"] == {"name": "name_taken"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {"name": "Pepper", "species": "cat", "looks": {"pattern": "uniform", "base": "black"},
+        {"name": "Pepper", "species": "cat", "looks": {"pattern": "uniform", "base": "black", "appearance": {"fur": "#1d1d20"}},
          "rules": {"priority": False, "always_strict": True}, "last_seen": {}},
     )
     assert result["step_id"] == "animal"  # an empty name finishes
@@ -153,6 +153,9 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     assert "timing" not in garage and garage["deterrent_minutes"] == 2  # stored flat, as before
     luna_data = next(s.data for s in entry.subentries.values() if s.title == "Luna")
     assert luna_data["pattern"] == "blotchy" and luna_data["priority"] is True and "looks" not in luna_data
+    assert luna_data["appearance"] is None  # no sprite set: the card draws the face
+    pepper_data = next(s.data for s in entry.subentries.values() if s.title == "Pepper")
+    assert pepper_data["appearance"] == {"fur": "#1d1d20"}  # the card's sprite
 
 
 async def test_onboarding_without_ai_task_aborts(hass: HomeAssistant, ready):

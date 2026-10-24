@@ -40,6 +40,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    ObjectSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -93,6 +94,9 @@ from .const import (
     CONF_ABSENT_DAYS,
     CONF_ADDED,
     CONF_ALWAYS_STRICT,
+    CONF_APPEARANCE,
+    CONF_SPRITE,
+    SPRITE_PRESETS,
     CONF_BASE,
     CONF_CAMERA,
     CONF_COOLDOWN,
@@ -471,6 +475,12 @@ def _animal_schema(
             vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
             vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
+            vol.Optional(CONF_SPRITE, description={"suggested_value": values.get(CONF_SPRITE)}): SelectSelector(
+                SelectSelectorConfig(options=list(SPRITE_PRESETS), mode=SelectSelectorMode.DROPDOWN, translation_key="sprite")
+            ),
+            vol.Optional(
+                CONF_APPEARANCE, description={"suggested_value": values.get(CONF_APPEARANCE)}
+            ): ObjectSelector(),
         }
     )
     fields[vol.Required("rules", default={})] = _section(
@@ -502,6 +512,8 @@ def _animal_data(user_input: Mapping[str, Any], slug: str, added: str) -> dict[s
         CONF_TIPS: (user_input.get(CONF_TIPS) or "").strip(),
         CONF_PATTERN: user_input.get(CONF_PATTERN, "na"),
         CONF_BASE: user_input.get(CONF_BASE, "na"),
+        CONF_APPEARANCE: user_input.get(CONF_APPEARANCE) or None,
+        CONF_SPRITE: user_input.get(CONF_SPRITE) or None,
         CONF_PRIORITY: bool(user_input.get(CONF_PRIORITY)),
         CONF_ALWAYS_STRICT: bool(user_input.get(CONF_ALWAYS_STRICT)),
         **_alert_data(user_input),

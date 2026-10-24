@@ -88,6 +88,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._stopSprites?.();
+    this._stopSprites = null;
     clearInterval(this._tick);
     this._tick = null;
     window.removeEventListener("keydown", this._onKey);
@@ -330,6 +332,9 @@ class NeighborhoodWatchCard extends HTMLElement {
           <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.</div>`}</div>
         </div>
       </ha-card>${this._lightbox()}`;
+    this._stopSprites?.();
+    this._stopSprites = NWSprites.mountSprites(this.shadowRoot);
+    this._checkInfrared();
     // Every section folds: tap its title. "To review" starts folded; choices are remembered.
     const tappable = (el) => {
       el.tabIndex = 0;
@@ -632,6 +637,22 @@ class NeighborhoodWatchCard extends HTMLElement {
     );
   }
 
+  _checkInfrared() {
+    // A collar shows grey when the animal's latest photo is night vision (no colour to go by).
+    this._ir = this._ir || {};
+    for (const a of this._devices().animals || []) {
+      const seen = this._state(a.keys.last_seen);
+      const url = this._state(a.keys.last_photo)?.attributes?.entity_picture;
+      const look = seen?.attributes?.appearance;
+      if (!look || !NWSprites.hasCollar(look) || !url || url in this._ir) continue;
+      this._ir[url] = false;
+      NWSprites.isInfrared(url).then((ir) => {
+        this._ir[url] = ir;
+        if (ir) this._render(true);
+      });
+    }
+  }
+
   _more(entityId) {
     this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
   }
@@ -660,8 +681,15 @@ class NeighborhoodWatchCard extends HTMLElement {
       // The photo's crop around the animal: smaller and quicker than the whole frame, which
       // stays the fallback (an older photo, or no training data saved).
       const cropId = seen?.attributes?.photo_id;
+      const look = seen?.attributes?.appearance;
+      const ir = look && NWSprites.hasCollar(look) && this._ir?.[photo?.attributes?.entity_picture];
+      const sprite = look && { cat: { ...look, ...(ir ? { ir: true } : {}) }, ...(live ? { mode: "alert" } : {}) };
       const img = !hasPhoto
-        ? `<div class="nophoto">${catFace(seen?.attributes || {})}</div>`
+        ? `<div class="nophoto">${
+            sprite
+              ? `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify(sprite))}" role="img" aria-label="${esc(a.name)}"></canvas>`
+              : catFace(seen?.attributes || {})
+          }</div>`
         : cropId
           ? `<img data-frame="${esc(cropId)}" data-crop="1" data-fallback="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
           : `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`;
@@ -688,8 +716,13 @@ class NeighborhoodWatchCard extends HTMLElement {
     for (const [name, k] of Object.entries(seen)) {
       const tag = k.pest ? ` <span class="badge alarm">pest</span>` : "";
       const maybe = k.possible ? ` <span class="muted">(possible)</span>` : "";
+      const kind = NWSprites.spriteKind(name);
+      const fresh = k.last_seen && Date.now() - new Date(k.last_seen).getTime() < 15 * 60e3;
+      const pic = kind
+        ? `<canvas class="wsprite" width="48" height="48" data-sprite="${esc(JSON.stringify({ wild: kind, ...(fresh ? { mode: "walk" } : {}) }))}" aria-hidden="true"></canvas>`
+        : "";
       rows.push(`<div class="row" data-more="${esc(hub.keys.wildlife)}">
-          <span class="rname">${esc(name)}${tag}${maybe}</span>
+          <span class="rname">${pic}${esc(name)}${tag}${maybe}</span>
           <span class="rinfo">${esc(k.where || "")} · <span data-ago="${esc(k.last_seen || "")}">${ago(k.last_seen)}</span></span>
           <span class="rcount">${k.tonight ? `${esc(k.tonight)} tonight` : ""}</span>
         </div>`);
@@ -877,6 +910,8 @@ const STYLE = `
   .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: #fff;
     background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
   .nophoto + .over { color: var(--primary-text-color); background: none; }
+  .nophoto canvas.sprite { width: 82%; height: 82%; object-fit: contain; image-rendering: pixelated; margin-bottom: 14%; }
+  canvas.wsprite { width: 40px; height: 40px; image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
   .over .name { font-weight: 600; font-size: 1.1em; }
   .over .status { font-size: .85em; opacity: .9; color: inherit; }
   .over .live { color: var(--success-color, #7CFC9A); }
@@ -938,3 +973,1171 @@ window.customCards.push({
   preview: true,
   documentationURL: "https://github.com/b2dmx/neighborhood-watch",
 });
+
+// --- Pixel sprite engine ------------------------------------------------------------------------------
+// Kept in its own scope so its helpers (grid, px, shade…) don't clash with other cards.
+const NWSprites = (() => {
+// Pixel-art sprites on a 48x48 grid. Shapes are laid out in 32-unit coordinates (scaled by
+// S), then outlined; faces and markings are placed pixel by pixel on the fine grid.
+const N = 48, S = 1.5;
+
+function grid() {
+  return Array.from({ length: N }, () => Array(N).fill(null));
+}
+function px(g, x, y, c) {
+  if (x >= 0 && y >= 0 && x < N && y < N) g[y][x] = c;
+}
+function ellipse(g, cx, cy, rx, ry, c, test) {
+  cx *= S; cy *= S; rx *= S; ry *= S;
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const d = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
+      if (d <= 1 && (!test || test(x, y))) g[y][x] = c;
+    }
+}
+function tri(g, a, b, c2, col) {
+  [a, b, c2] = [a, b, c2].map(([x, y]) => [x * S, y * S]);
+  const area = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const p = [x + 0.5, y + 0.5];
+      const d1 = area(a, b, p), d2 = area(b, c2, p), d3 = area(c2, a, p);
+      if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) g[y][x] = col;
+    }
+}
+function thick(g, pts, r, c) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[i + 1];
+    const steps = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * 4);
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      ellipse(g, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, r, r, c);
+    }
+  }
+}
+function outline(g, col) {
+  const o = grid();
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      if (g[y][x]) continue;
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx])) o[y][x] = col;
+    }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (o[y][x]) g[y][x] = o[y][x];
+}
+function rects(g) {
+  let r = "";
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) if (g[y][x]) r += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${g[y][x]}"/>`;
+  return r;
+}
+function svg(g) {
+  return `<svg viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" class="sprite">${rects(g)}</svg>`;
+}
+// Frames shown one after another (a flip-book): [[grid, seconds], ...], looping. All the
+// distinct frames sit side by side on one strip and a single animation slides the strip,
+// so exactly one frame shows at any moment. Each sprite starts at a random point.
+function animated(frames) {
+  const keys = [], strips = [];
+  const index = frames.map(([g]) => {
+    const key = rects(g);
+    let i = keys.indexOf(key);
+    if (i < 0) {
+      i = keys.push(key) - 1;
+      strips.push(`<g transform="translate(${i * N} 0)">${key}</g>`);
+    }
+    return i;
+  });
+  if (reducedMotion()) return svg(frames[0][0]); // still, when motion is turned down
+  const total = frames.reduce((t, [, d]) => t + d, 0);
+  const start = -(Math.random() * total).toFixed(2);
+  let at = 0;
+  const times = [], values = [];
+  frames.forEach(([, d], k) => {
+    times.push((at / total).toFixed(4));
+    values.push(`${-index[k] * N} 0`);
+    at += d;
+  });
+  return `<svg viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" class="sprite" overflow="hidden"><g>` +
+    `<animateTransform attributeName="transform" type="translate" dur="${total}s" begin="${start}s" repeatCount="indefinite" calcMode="discrete" keyTimes="${times.join(";")}" values="${values.join(";")}"/>` +
+    `${strips.join("")}</g></svg>`;
+}
+
+function reducedMotion() {
+  if (globalThis.NW_FORCE_MOTION) return false; // preview pages play regardless
+  try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+}
+// Each sprite's timings vary a little, so a row of animals never moves in step.
+function jitter(d) {
+  return +(d * (0.75 + Math.random() * 0.5)).toFixed(2);
+}
+// Breathing: everything above the chest rises a pixel (the chest row stretches).
+function breathe(g) {
+  const rows = g.map((r, y) => (r.some((c) => c) ? y : -1)).filter((y) => y >= 0);
+  const top = rows[0], mid = Math.round(top + (rows[rows.length - 1] - top) * 0.55);
+  const out = g.map((r) => r.slice());
+  for (let y = Math.max(top - 1, 0); y < mid; y++) out[y] = g[y + 1].slice();
+  return out;
+}
+// The whole sprite lifted off the ground (a hop).
+function lift(g, dy) {
+  const out = grid();
+  for (let y = dy; y < N; y++) out[y - dy] = g[y].slice();
+  return out;
+}
+
+function pixelCat(o) {
+  return svg(catGrid(o));
+}
+// Idle: the tail sways and curls, breathing, an ear flick, blinks (one slow), now and then
+// a yawn or a paw lick.
+function idleCat(o) {
+  return animated(idleCatFrames(o));
+}
+function idleCatFrames(o) {
+  if (!o.pawUp) return idleFrames(o);
+  const down = { ...o, pawUp: false }, c = (f) => catGrid({ ...o, ...f });
+  const shuffle = [[c({ tail: 0, pawShift: 1 }), 0.3], [c({ tail: 0 }), 0.7], [c({ tail: 0, pawShift: 1 }), 0.25], [c({ tail: 0 }), 0.5]];
+  const lower = [[catGrid({ ...down, tail: 0, lick: "up" }), 0.15]];
+  return [...idleFrames(o).slice(0, 14), ...shuffle, ...idleFrames(o).slice(14), ...lower, ...idleFrames(down), ...lower];
+}
+function idleFrames(o) {
+  const c = (f) => catGrid({ ...o, ...f });
+  const rest = c({ tail: 0 });
+  return [
+    [rest, jitter(1.2)],
+    [c({ tail: 1 }), 0.5],
+    [c({ tail: 2 }), jitter(1.2)],
+    [c({ tail: 1 }), 0.5],
+    [breathe(rest), 0.7],
+    [rest, jitter(1)],
+    [c({ tail: 0, blink: true }), 0.18],
+    [rest, jitter(0.9)],
+    [c({ tail: 0, earFlick: true }), 0.22],
+    [rest, 0.3],
+    [c({ tail: 0, earFlick: true }), 0.22],
+    [breathe(rest), 0.7],
+    [c({ tail: 3 }), jitter(1.2)],
+    [rest, jitter(0.8)],
+    [c({ tail: 0, halfBlink: true }), 0.3],
+    [c({ tail: 0, blink: true }), 0.6],
+    [c({ tail: 0, halfBlink: true }), 0.3],
+    [rest, jitter(1.4)],
+    [breathe(rest), 0.7],
+    [rest, jitter(1)],
+    [c({ tail: 0, yawn: 1 }), 0.25],
+    [c({ tail: 0, yawn: 2 }), 1],
+    [c({ tail: 0, yawn: 1 }), 0.25],
+    [rest, jitter(1.6)],
+    [c({ tail: 0, lick: "up" }), 0.16],
+    [c({ tail: 0, lick: "mid", lickY: 14 }), 0.12],
+    [c({ tail: 0, lick: "mid", lickY: 9 }), 0.12],
+    [c({ tail: 0, lick: "mid", lickY: 4 }), 0.12],
+    [c({ tail: 0, lick: 1 }), 0.28],
+    [c({ tail: 0, lick: 2 }), 0.22],
+    [c({ tail: 0, lick: 1 }), 0.22],
+    [c({ tail: 0, lick: 2 }), 0.22],
+    [c({ tail: 0, lick: 1 }), 0.22],
+    [c({ tail: 0, lick: 2 }), 0.22],
+    [c({ tail: 0, lick: 1 }), 0.22],
+    [c({ tail: 0, lick: 2 }), 0.22],
+    [c({ tail: 0, lick: "mid", lickY: 4 }), 0.12],
+    [c({ tail: 0, lick: "mid", lickY: 9 }), 0.12],
+    [c({ tail: 0, lick: "mid", lickY: 14 }), 0.12],
+    [c({ tail: 0, lick: "up" }), 0.16],
+    [rest, jitter(1.2)],
+    [rest, jitter(1)],
+  ];
+}
+// On alert: ears up, tail straight up, wide eyes; still apart from a blink.
+function alertCat(o) {
+  return animated(alertCatFrames(o));
+}
+function alertCatFrames(o) {
+  const a = catGrid({ ...o, alert: true });
+  return [[a, jitter(2.4)], [catGrid({ ...o, alert: true, blink: true }), 0.18], [a, 1.2]];
+}
+function catGrid(o) {
+  const g = grid();
+  const fur = o.fur, WHITE = "#f1ece3";
+  const isFur = (c) => c === fur;
+  const bodyRx = o.fluffy || o.big ? 8.4 : o.small ? 6.8 : 7.5; // long hair or a big frame; a small cat narrower
+  const tails = o.tailPaths || [
+    [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 16.5]],
+    [[23, 25.5], [26.5, 25.5], [28.8, 22.5], [29, 19], [28.6, 16.6]],
+    [[23, 25.5], [26.5, 25.5], [29, 22.8], [29.8, 19.5], [30, 16.8]],
+    [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 17], [25.8, 17.6]], // the tip curled over
+    [[23, 25.5], [26.5, 25.5], [28.6, 22], [28.8, 17], [28.6, 13.5]], // straight up, on alert
+  ];
+  let tailPath = tails[o.alert ? 4 : o.tail || 0];
+  if (o.tall) {
+    // A taller cat carries a longer tail, so the extra height isn't left empty beside it.
+    const [a, b] = tailPath.slice(-2), l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (b[1] < a[1]) tailPath = [...tailPath.slice(0, -1), [b[0] + ((b[0] - a[0]) / l) * 1.4, b[1] + ((b[1] - a[1]) / l) * 1.4]];
+  }
+  if (o.longTail) {
+    const [a, b] = tailPath.slice(-2);
+    if (b[1] < a[1]) tailPath = [...tailPath, [b[0] + (b[0] - a[0]) * 1.3, b[1] + (b[1] - a[1]) * 1.3]]; // carried on further (not when curled over)
+  }
+  if (o.tailTaper) {
+    const [r0, r1] = o.tailTaper, segL = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1]));
+    const total = segL.reduce((t, l) => t + l, 0);
+    let run = 0;
+    tailPath.slice(1).forEach((b, i) => {
+      const a = tailPath[i], steps = Math.ceil(segL[i] * 4);
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps, f = (run + segL[i] * t) / total, r = r0 + (r1 - r0) * f;
+        ellipse(g, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, r, fur); // fat at the base, tapering to the tip
+      }
+      run += segL[i];
+    });
+  } else thick(g, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), fur);
+  ellipse(g, 16, 22.5, bodyRx, 8, fur);
+  ellipse(g, 9.8, 28.5, 1.7, 1.2, fur); // back feet
+  ellipse(g, 22.2, 28.5, 1.7, 1.2, fur);
+  ellipse(g, 13, 28.4, 2.1, 1.5, fur); // front paws
+  ellipse(g, 19, 28.4, 2.1, 1.5, fur);
+  for (let y = 44; y < N; y++) for (let x = 0; x < N; x++) g[y][x] = null; // flat on the ground
+  if (o.fluffy) ellipse(g, 16, 13.4, 8.4, 5, fur);
+  ellipse(g, 16, 10, 7, 6, fur);
+  const up = o.alert ? 0.8 : 0; // ears pricked
+  tri(g, [9, 9], [9.5, 1.5 - up], [14.5, 5.5], o.ears || fur);
+  if (o.earFlick) tri(g, [23, 9], [24.2, 2.4], [18, 6], o.rightEar || o.ears || fur); // turned out
+  else tri(g, [23, 9], [22.5, 1.5 - up], [17.5, 5.5], o.rightEar || o.ears || fur);
+  // Where the head meets the body.
+  if (o.neck === "none") for (let y = 20; y <= 25; y++) for (let x = 14; x <= 33; x++) g[y][x] = fur; // straight sides
+  if (o.neck === "short") for (let y = 21; y <= 24; y++) for (let x = 0; x < N; x++) if (Math.abs(x + 0.5 - 24) <= (y === 21 || y === 24 ? 9 : 8)) g[y][x] = fur; // a slight waist
+  if (o.neck === "ruff") {
+    for (let y = 20; y <= 25; y++) for (let x = 14; x <= 33; x++) g[y][x] = fur;
+    for (const [a, b, c] of [[[9.6, 13], [8, 15.4], [10.4, 15.2]], [[9.8, 15], [8.6, 17.2], [10.8, 16.8]]]) {
+      tri(g, a, b, c, fur); // cheek tufts
+      tri(g, [31.33 - a[0], a[1]], [31.33 - b[0], b[1]], [31.33 - c[0], c[1]], fur);
+    }
+  }
+
+  const on = (fn, c) => {
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) if (isFur(g[y][x]) && fn(x, y)) g[y][x] = typeof c === "function" ? c(x, y) : c;
+  };
+  const cx = 23.5;
+  if (o.calico) {
+    const black = "#323034", grey = black, tan = "#c9935c", orange = tan; // just white, black and orange (plus shading)
+    // The face: a tan patch over one eye and down that cheek; a soft grey cap over the top and
+    // the other brow; white from between the eyes down the muzzle.
+    const cap = o.capGrey || grey;
+    on((x, y) => x <= 22 && y >= 6 && y <= 18 && ((x - 17) ** 2) / 28 + ((y - 12.5) ** 2) / 34 <= 1 && !(x >= 20 && y >= 15) && !(x >= 21 && y >= 13), tan); // the tan patch; white at the eye's inner corner and below it
+    on((x, y) => y === 11 && (x === 27 || x === 28), tan); // a tan fleck above the other eye
+    for (const [x, y] of [[18, 5], [19, 6], [19, 7]]) if (g[y][x] === o.ears) g[y][x] = black; // a little black at the inner edge of the orange ear
+    on((x, y) => y <= 9 && !(y >= 8 && x >= 23 && x <= 24), cap); // the cap
+    on((x, y) => x >= 25 && (y <= 9 || (x >= 30 && y <= 13)), cap); // over the other brow, and at that eye's outer corner; white round the rest of it
+    on((x, y) => x <= 16 && ((x - 13) ** 2) / 12 + ((y - 30) ** 2) / 12 <= 1, black); // back patch, just past the side
+    on((x, y) => x >= 31 && ((x - 34) ** 2) / 12 + ((y - 36) ** 2) / 12 <= 1, tan); // flank patch, just past the other side
+    // The tail: black with wavy streaks of orange running through it, a black tip.
+    on((x, y) => x >= 36 || (x >= 34 && y <= 31), (x, y) => (y > 26 && Math.floor((y + Math.round(Math.sin(x * 1.3) * 1.5)) / 2) % 3 === 0 ? orange : black));
+  }
+  if (o.tabby) {
+    // A mackerel tabby: the forehead "M", a line from each eye, stripes curving down the
+    // flanks, necklace bars on the chest, barred legs, a ringed tail with a dark tip.
+    const st = shade(fur, 0.45), light = shade(fur, 1.15);
+    const M = [[19, 11], [19, 10], [20, 9], [21, 10], [22, 11], [23, 10], [24, 10], [25, 11], [26, 10], [27, 9], [28, 10], [28, 11]];
+    on((x, y) => M.some(([mx, my]) => mx === x && my === y), st);
+    on((x, y) => y <= 8 && [21, 23, 24, 26].includes(x), st); // lines up the crown
+    on((x, y) => (y === 14 && (x === 16 || x === 17)) || (y === 14 && (x === 30 || x === 31)), st); // from the eyes
+    on((x, y) => y === 16 && (x <= 15 || x >= 32), st); // cheeks
+    on((x, y) => y >= 16 && y <= 21 && Math.abs(x - cx) <= 4, light); // paler muzzle and throat
+    // Flank stripes: thin, broken, arcing down the sides only; the chest stays clear.
+    on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
+    on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
+    on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
+  }
+  if (o.tuxedo) {
+    // White muzzle and cheeks running down into the chest; only a small chin patch is black.
+    on((x, y) => y >= 11 && y <= 17 && Math.abs(x - cx) <= (y - 10.5) * 0.8, WHITE);
+    on((x, y) => y >= 17 && y <= 22 && Math.abs(x - cx) <= 7.5, WHITE);
+    on((x, y) => y >= 22 && y <= 34 && Math.abs(x - cx) <= 8 - (y - 22) * 0.55 - (y >= 31 ? (y - 30) * 0.4 : 0), WHITE); // the bib: broad under the chin, narrowing to a rounded point above the legs
+    for (let y = 20; y <= 22; y++) for (let x = 0; x < N; x++) if (Math.abs(x - cx) <= 2.5 - (y - 20) * 0.5 && g[y][x]) g[y][x] = fur; // black chin
+  }
+  if (o.faintTabby) {
+    // Soft tabby ghosting: a faint forehead "M" and crown lines, a few broken flank bars.
+    const st = shade(fur, o.contrast ? 0.66 : 0.8);
+    const M = [[20, 10], [21, 9], [22, 10], [25, 10], [26, 9], [27, 10]];
+    on((x, y) => M.some(([mx, my]) => mx === x && my === y), st);
+    on((x, y) => y >= 5 && y <= 8 && [22, 25].includes(x), st);
+    on((x, y) => y >= 29 && y <= 38 && (x <= 18 || x >= 29) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 <= 1 && y % 4 === 0 && hash(Math.min(x, 47 - x), y) % 3 !== 0, shade(fur, o.contrast ? 0.74 : 0.88)); // mirrored, so both sides match
+  }
+  if (o.tearMarks) on((x, y) => (x === 21 || x === 26) && (y === 12 || y === 13), shade(fur, 1.6)); // pale streaks by the inner eyes
+  if (o.paleMuzzle) on((x, y) => y >= 17 && y <= 21 && Math.abs(x + 0.5 - 24) <= 4 - (y === 21 ? 1 : 0), o.pale || shade(fur, 1.3));
+  if (o.bandedTail) {
+    const outside = (x, y) => (x >= 35 || (y >= 16 && x >= 34)) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 > 1; // the tail, not the head's edge
+    const band = o.ringColor || shade(fur, o.contrast ? 0.42 : 0.55);
+    if (o.rings) {
+      // Distance along the tail's path for each tail pixel; a thin ring every so often.
+      const pts = tailPath.map(([x, y]) => [x * S, y * S]);
+      const segs = pts.slice(1).map((b, i) => [pts[i], b, Math.hypot(b[0] - pts[i][0], b[1] - pts[i][1])]);
+      const total = segs.reduce((t, [, , l]) => t + l, 0);
+      let flat = false; // whether the nearest stretch of tail runs more across than up
+      const along = (x, y) => {
+        let best = Infinity, at = 0, run = 0;
+        for (const [a, b, l] of segs) {
+          const t = Math.max(0, Math.min(1, ((x + 0.5 - a[0]) * (b[0] - a[0]) + (y + 0.5 - a[1]) * (b[1] - a[1])) / (l * l)));
+          const d = Math.hypot(a[0] + (b[0] - a[0]) * t - x - 0.5, a[1] + (b[1] - a[1]) * t - y - 0.5);
+          if (d < best) { best = d; at = run + t * l; flat = Math.abs(b[0] - a[0]) > Math.abs(b[1] - a[1]) || y >= 36; } // the base runs along the ground
+          run += l;
+        }
+        return at;
+      };
+      const start = 0, step = total / o.rings; // spaced over the whole tail; the rings behind him stay hidden
+      if (o.ringPeriod) {
+        // Each ring is one straight pixel line across the tail (level where the tail rises, upright
+        // where it runs along), one every ringPeriod pixels of tail; a ring that would touch the
+        // previous one (at the bend) is left out, so they never merge.
+        const isTail = (x, y) => outside(x, y) && isFur(g[y]?.[x]);
+        let path = tailPath.map(([x, y]) => [x * S, y * S]);
+        for (let it = 0; it < 3; it++) { // Chaikin smoothing, ends kept
+          const next = [path[0]];
+          for (let i = 0; i < path.length - 1; i++) {
+            const [p0, p1] = [path[i], path[i + 1]];
+            next.push([p0[0] * 0.75 + p1[0] * 0.25, p0[1] * 0.75 + p1[1] * 0.25], [p0[0] * 0.25 + p1[0] * 0.75, p0[1] * 0.25 + p1[1] * 0.75]);
+          }
+          next.push(path[path.length - 1]);
+          path = next;
+        }
+        const last = path[path.length - 1], before = path[path.length - 2], ln = Math.hypot(last[0] - before[0], last[1] - before[1]);
+        path.push([last[0] + ((last[0] - before[0]) / ln) * 1.5, last[1] + ((last[1] - before[1]) / ln) * 1.5]); // into the rounded tip
+        let prev = [], walked = 0, next = o.ringPeriod;
+        const touches = (cells) => cells.some(([x, y]) => prev.some(([px2, py]) => Math.abs(px2 - x) <= 1 && Math.abs(py - y) <= 1));
+        for (let i = 0; i < path.length - 1; i++) {
+          const [p0, p1] = [path[i], path[i + 1]], l = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+          while (walked + l >= next) {
+            const t = (next - walked) / l, cx2 = p0[0] + (p1[0] - p0[0]) * t, cy2 = p0[1] + (p1[1] - p0[1]) * t;
+            next += o.ringPeriod;
+            const ang = Math.round(Math.atan2(p1[0] - p0[0], -(p1[1] - p0[1])) / (Math.PI / 4)) * (Math.PI / 4); // across the tail, snapped
+            const sx = Math.round(Math.cos(ang)), sy = Math.round(Math.sin(ang));
+            const cells = [];
+            for (let k = -5; k <= 5; k++) {
+              const x = Math.floor(cx2) + k * sx, y = Math.floor(cy2) + k * sy;
+              if (isTail(x, y)) cells.push([x, y]);
+            }
+            if (!cells.length || touches(cells)) continue;
+            for (const [x, y] of cells) g[y][x] = band;
+            prev = cells;
+          }
+          walked += l;
+        }
+      } else
+      on((x, y) => outside(x, y), (x, y) => {
+        const a = along(x, y);
+        if (a >= total - step * 0.45) return band; // the dark tip is the last ring
+        return a > start && (a - start) % step < 1 ? band : o.tailLight || fur;
+      });
+    } else {
+      let top = N;
+      for (let y = 0; y < N && top === N; y++) for (let x = 33; x < N; x++) if (isFur(g[y][x]) && outside(x, y)) { top = y; break; }
+      on((x, y) => x >= 33 && outside(x, y) && (y <= top + 2 || (y >= 37 ? Math.floor(x / 2) % 2 === 1 : Math.floor(y / 2) % 2 === 1)), band); // straight rings all along, a short dark tip
+    }
+  }
+  if (o.darkTailTip) on((x, y) => x >= 36 && y <= 27, shade(fur, 0.45));
+  if (o.cap) {
+    // A dark cap over the ears and both eyes, split by a white blaze; a dark spot on the nose.
+    const k = o.cap;
+    on((x, y) => y <= 16 && !(y >= 8 && Math.abs(x + 0.5 - 24) <= (y - 6) * 0.45), k);
+    on((x, y) => y >= 15 && y <= 19 && x >= 20 && x <= 25 && ((x - 22.5) ** 2) / 9 + ((y - 17) ** 2) / 5 <= 1, k); // the nose spot, a little off to one side
+  }
+  if (o.sides) {
+    on((x, y) => x <= 15 && y >= 24 && y <= 37 && ((x - 12) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides); // the dark back, showing past each side
+    on((x, y) => x >= 32 && y >= 24 && y <= 37 && ((x - 35) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides);
+  }
+  if (o.tailColor) on((x, y) => x >= 33 && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 > 1, o.tailColor); // the whole tail
+  if (o.spottedBelly) {
+    const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
+    const half = { 29: 3, 30: 4, 31: 4, 32: 3 };
+    const inBelly = (x, y) => y >= 29 && (y <= 32 ? Math.abs(x + 0.5 - 24) <= half[y] : x >= 23 && x <= 24); // rounded, then down between the legs to the ground
+    const spots = [[21, 30], [26, 30], [22, 32], [25, 32]]; // even, single-pixel, mirrored, staggered
+    on(inBelly, (x, y) => (!o.plainBelly && spots.some(([sx, sy]) => sx === x && sy === y) ? spot : pale)); // pale (spotted) belly, kept off the legs
+  }
+  if (o.whiteChest) on((x, y) => y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
+  for (const [colour, runs] of o.marks || []) {
+    const set = new Set();
+    for (const row of String(runs).split(";")) {
+      const [y, xs] = row.split(":");
+      for (const run of (xs || "").split(",")) {
+        const [a, b] = run.split("-").map(Number);
+        for (let x = a; x <= (Number.isNaN(b) || b === undefined ? a : b); x++) set.add(`${x},${y}`);
+      }
+    }
+    on((x, y) => set.has(`${x},${y}`), colour); // extra markings, as data
+  }
+  if (o.chestPatch) on((x, y) => ((x - cx) ** 2) / 4 + ((y - 26) ** 2) / 6 <= 1, WHITE); // a small white chest patch
+  if (o.tuxedo || o.whitePaws) on((x, y) => y >= 41 && ((x >= 16 && x <= 22 && !o.lick && !o.pawUp) || (x >= 25 && x <= 31)), WHITE);
+  if (o.whiteBackPaws || o.whitePaws) on((x, y) => y >= 41 && (x <= 15 || (x >= 32 && x <= 35)), WHITE); // back feet only, not the tail beside them
+
+  outline(g, o.outline || "#141416");
+  const line = o.outline || "#141416";
+  // The body's right edge mirrors its left edge, drawn across the tail's root so the tail
+  // comes from behind.
+  for (let y = 24; y < 44; y++) {
+    let x = g[y].findIndex((c) => c);
+    if (x < 0 || x > 23) continue;
+    for (; g[y][x] === line && x < 23; x++) if (g[y][47 - x]) g[y][47 - x] = line;
+  }
+  if (o.small) {
+    // The narrower body pinches in under the head: move the deepest point of that notch
+    // out by one pixel on each side.
+    let best = -1, by = -1;
+    for (let y = 18; y <= 28; y++) {
+      const x = g[y].findIndex((c) => c);
+      if (x > best && x < 23) { best = x; by = y; }
+    }
+    if (by >= 0 && g[by][best] === line) {
+      g[by][best] = g[by][best + 1]; g[by][best - 1] = line;
+      g[by][47 - best] = g[by][46 - best]; g[by][48 - best] = line;
+    }
+  }
+  if (o.detail) {
+    // Shading, light from above: the body's sides and the band under the jaw fall into
+    // shadow, the top of the head catches the light (not under the ears, which shade it).
+    // Worked out on the left half and mirrored, so it is symmetrical; every colour shades
+    // itself, markings included.
+    const brx = bodyRx * S + (o.small ? 1 : 0), cy0 = 22.5 * S, ry0 = 8 * S; // a small cat's shading sits a pixel further out, under its eased neck
+    const inB = (x, y) => ((x + 0.5 - 24) / brx) ** 2 + ((y + 0.5 - cy0) / ry0) ** 2 <= 1;
+    const inHead = (x, y) => ((x + 0.5 - 24) / 10.5) ** 2 + ((y + 0.5 - 15) / 9) ** 2 <= 1;
+    const isEar = (x, y) => !inHead(x, y) && g[y]?.[x] && g[y][x] !== line;
+    const underEar = (x, y) => [1, 2, 3, 4, 5].some((k) => isEar(x, y - k) || isEar(47 - x, y - k));
+    const fac = grid(); // 0.94 shadow, 0.95 under the jaw, "lit" highlight
+    for (let y = 0; y < 44; y++)
+      for (let x = 0; x <= 23; x++) {
+        if (y >= 25 && inB(x, y) && (!inB(x - 2, y) || (!o.small && !inB(x - 3, y) && (x + y) % 2 === 0))) fac[y][x] = 0.94; // no stray dither dots on a small cat
+        if (y >= 21 && y < 25 && !inHead(x, y) && g[y][x] && g[y][x] !== line && (g[y][x - 1] === line || g[y][x - 2] === line)) fac[y][x] = 0.94; // the shoulders, up to the neck
+        if (y >= 22 && y <= 27 && !inHead(x, y) && (inHead(x, y - 1) || inHead(x, y - 2))) fac[y][x] = 0.95;
+        if (y < 24 && inHead(x, y) && !underEar(x, y) && (!inHead(x, y - 2) || (!inHead(x, y - 3) && (x + y) % 2 === 0))) fac[y][x] = "lit";
+      }
+    for (let y = 0; y < N; y++) for (let x = 24; x < N; x++) fac[y][x] = fac[y][47 - x];
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const c = g[y][x], k = fac[y][x];
+        if (!k || !c || c === line || c === "#d98f9c") continue;
+        if (x > 23 && y >= 24 && !inB(x, y)) continue; // the tail keeps its own colours
+        g[y][x] = shade(c, k === "lit" ? (midTone(c) ? 1.04 : 1.08) : k); // gentler on mid greys
+      }
+  }
+  if (o.lick || o.pawUp) {
+    // The hind leg behind the lifted paw: a thigh curving down to a foot with toes.
+    // Just the hind foot on that side, set apart by one short mark; no toe lines.
+    px(g, 20, 42, line); px(g, 20, 43, line);
+  }
+  for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
+    if (o.lick === "up" && x0 === 16) {
+      // Starting the lick: the paw just lifted off the ground, the leg otherwise as it stands.
+      const pc = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur, lift = 4;
+      for (let y = 33; y <= 40 - lift; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); }
+      for (let y = 41 - lift; y <= 43 - lift; y++) {
+        px(g, x0 - 1, y, line); px(g, x0 + 7, y, line);
+        for (let x = x0; x <= x0 + 6; x++) px(g, x, y, y === 41 - lift && (x === x0 || x === x0 + 6) ? line : pc);
+      }
+      for (let x = x0; x <= x0 + 6; x++) px(g, x, 44 - lift, line); // the pad's underside, off the ground
+      px(g, x0 + 2, 43 - lift, line); px(g, x0 + 4, 43 - lift, line); // toes
+      continue;
+    }
+    if (o.pawUp && x0 === 16) {
+      // Paw up: this front paw held up, curled against the chest, three feet on the ground.
+      const pc = g[38][19] && g[38][19] !== line ? g[38][19] : fur;
+      const ps = o.pawShift || 0; // a little shuffle: the paw settles a pixel lower
+      for (let y = 33; y <= 35 + ps; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); }
+      for (let y = 36 + ps; y <= 38 + ps; y++) {
+        const sh = y >= 37 + ps ? 1 : 0; // tipped in toward the chest
+        px(g, x0 + sh, y, line); px(g, x0 + 6 + sh, y, line);
+        for (let x = x0 + 1 + sh; x <= x0 + 5 + sh; x++) px(g, x, y, pc);
+      }
+      for (let x = x0 + 2; x <= x0 + 6; x++) px(g, x, 39 + ps, line); // its underside, well off the ground
+      px(g, x0 + 3, 38 + ps, line); px(g, x0 + 5, 38 + ps, line); // toes, hanging
+      if (o.cuffs) { px(g, x0 + 1, 35 + ps, o.cuffs); px(g, x0 + 2, 35 + ps, o.cuffs); }
+      continue;
+    }
+    for (let y = 33; y <= 40; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); } // the arm
+    for (let y = 41; y <= 43; y++) { px(g, x0 - 1, y, line); px(g, x0 + 7, y, line); } // the paw, a touch wider
+    px(g, x0, 41, line); px(g, x0 + 6, 41, line);
+    for (const y of [42, 43]) { px(g, x0, y, g[y][x0 + 1]); px(g, x0 + 6, y, g[y][x0 + 5]); }
+    px(g, x0 + 2, 43, line); px(g, x0 + 4, 43, line); // toes
+    px(g, x0 - 1, 43, line); px(g, x0 + 7, 43, line); // rounded corners, closed off (no see-through gaps)
+    if (o.cuffs) for (const y of [39, 40]) for (let dx = 0; dx < 2; dx++) px(g, x0 < 23 ? x0 + 1 + dx : x0 + 4 + dx, y, o.cuffs); // part-way round, on the outside
+  }
+
+  // Inner ears.
+  const pink = o.innerEar || "#d98f9c";
+  for (const [x, y] of [[15, 8], [15, 9], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x, y, pink); }
+  // Eyes: 3 wide, 3 tall, a slit pupil, a glint.
+  const eye = o.eyes || "#d9b23a";
+  for (const ex of [18, 27]) {
+    if (o.blink || o.yawn === 2 || o.lick === 1 || o.lick === 2) { for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 14, o.lid || "#141416"); continue; }
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) px(g, ex + dx, 13 + dy, eye);
+    if (o.alert) { px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); px(g, ex, 14, "#111"); } // round pupils
+    else { px(g, ex + 1, 13, "#111"); px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); }
+    px(g, ex + (ex < 23 ? 2 : 0), 13, "#fff");
+    if (o.halfBlink || o.yawn === 1) for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 13, o.lid || "#141416"); // lids half down
+  }
+  if (o.eyeliner && !o.blink && !o.lick && o.yawn !== 2) {
+    const rim = o.eyeliner;
+    for (const ex of [18, 27]) {
+      for (let dx = 0; dx < 3; dx++) { if (o.rimTop && !o.halfBlink && o.yawn !== 1) px(g, ex + dx, 12, rim); px(g, ex + dx, 16, rim); }
+      const inner = ex < 23 ? ex + 3 : ex - 1, outer = ex < 23 ? ex - 1 : ex + 3;
+      for (const y of [13, 14, 15]) px(g, inner, y, rim);
+      px(g, outer, 15, rim);
+    }
+  }
+  // Nose: a small pink triangle; mouth: a short line splitting into a "w".
+  const m = o.mouth || "#3a2a2a";
+  const nose = o.nose || "#e48a95";
+  for (const x of [22, 23, 24, 25]) px(g, x, 17, nose);
+  px(g, 23, 18, nose); px(g, 24, 18, nose);
+  px(g, 23, 19, m); px(g, 24, 19, m);
+  px(g, 22, 20, m); px(g, 21, 20, m); px(g, 20, 19, m);
+  px(g, 25, 20, m); px(g, 26, 20, m); px(g, 27, 19, m);
+  if (o.yawn) {
+    // The mouth opens: dark inside, a pink tongue at the bottom.
+    const deep = o.yawn === 2 ? 22 : 21;
+    for (let y = 19; y <= deep; y++) for (let x = 21; x <= 26; x++) if (Math.abs(x + 0.5 - 24) <= (y === 19 ? 2 : 3)) px(g, x, y, "#3a1f24");
+    for (const x of [22, 23, 24, 25]) px(g, x, deep, "#e48a95");
+  }
+  // Whiskers: fine lines across the cheeks and out past the face.
+  const wk = o.whiskers || "#c9c5bd";
+  for (const [x, y] of [[19, 18], [18, 18], [17, 17], [16, 17], [15, 17], [14, 16], [13, 16], [12, 16], [19, 19], [18, 19], [17, 19], [16, 20], [15, 20], [14, 20], [13, 21], [12, 21]]) {
+    px(g, x, y, wk); px(g, 47 - x, y, wk);
+  }
+  if (o.collar) {
+    // A collar round the neck, under the chin, with an optional bell. Seen only in infrared,
+    // its colour is unknown, so it shows as a neutral grey (o.ir).
+    const band = o.ir ? "#8d8b90" : o.collar, dark = shade(band, 0.7);
+    for (let x = 0; x < N; x++) {
+      const d = Math.abs(x + 0.5 - 24);
+      if (d > 8) continue;
+      const top = 23 + (d <= 2.5 ? 2 : d <= 5.5 ? 1 : 0); // dipping in two steps at the front, round the neck
+      for (const y of [top, top + 1]) {
+        const c = g[y][x];
+        if (c && c !== line) g[y][x] = y === top + 1 ? dark : band;
+      }
+    }
+    if (o.bell) {
+      const gold = o.ir ? "#c4c2c6" : "#d9b23a", dim = o.ir ? "#9a989c" : "#a8842a";
+      for (const [x, y, c] of [[23, 27, gold], [24, 27, gold], [23, 28, dim], [24, 28, dim]]) px(g, x, y, c);
+      px(g, 22, 27, line); px(g, 25, 27, line); px(g, 22, 28, line); px(g, 25, 28, line); px(g, 23, 29, line); px(g, 24, 29, line);
+    }
+  }
+  if (o.lick && o.lick !== "up") {
+    // A front paw raised to the mouth (over the whiskers), toes up, a lick of tongue on it.
+    const pw = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur;
+    const up = o.lick === "mid", dy = up ? o.lickY ?? 9 : 0; // on the way up ("mid") it is lower, lickY rows below the mouth
+    // The foreleg below the raised paw: the same width as the standing leg (outlined columns
+    // at x 17 and 23), running down from the paw into the chest.
+    const legC = o.legColor || (o.tuxedo ? fur : g[30]?.[17] && g[30][17] !== line ? g[30][17] : fur);
+    const top = 24 + dy, bottom = up ? 37 : 31;
+    for (let y = top; y <= bottom; y++) {
+      px(g, 17, y, line); px(g, 23, y, line);
+      for (let x = 18; x <= 22; x++) px(g, x, y, legC);
+    }
+    // The paw, toes up: the same size and shape as a standing paw, turned over.
+    for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
+    for (let y = 21 + dy; y <= 23 + dy; y++) {
+      px(g, 16, y, line); px(g, 24, y, line);
+      for (let x = 17; x <= 23; x++) px(g, x, y, pw);
+    }
+    px(g, 17, 21 + dy, line); px(g, 23, 21 + dy, line); // rounded shoulders of the paw
+    px(g, 19, 21 + dy, line); px(g, 21, 21 + dy, line); // toes
+    if (!up) {
+      px(g, 25, 21, "#e48a95");
+      if (o.lick === 2) px(g, 25, 20, "#e48a95");
+    }
+  }
+  if (o.tall) {
+    // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
+    const rows = g.slice(1, 45).map((r) => r.slice());
+    rows.splice(27, 0, rows[26].slice()); // chest rows, clear of the belly spots and the tail's bend
+    rows.splice(29, 0, rows[28].slice());
+    const old = g.map((r) => r.slice());
+    for (let y = 0; y < 46; y++) {
+      g[y] = rows[y];
+      for (let x = 36; x < N; x++) g[y][x] = old[y - 1]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
+    }
+  }
+  // Pin-holes inside the outline (between the paws, at the tail's root) are filled.
+  for (let pass = 0; pass < 2; pass++)
+    for (let y = 1; y < N - 1; y++)
+      for (let x = 1; x < N - 1; x++) {
+        if (g[y][x]) continue;
+        const l = g[y][x - 1], r = g[y][x + 1], u = g[y - 1][x], d = g[y + 1][x];
+        if (l && r && u && d) g[y][x] = [u, l, r, d].find((c) => c !== line) || line;
+        else if (l && r && d && (y >= 40) && g[y + 1][x] === line) g[y][x] = line; // a notch in the ground line
+      }
+  return g;
+}
+
+// --- wildlife: side-on, facing left ---------------------------------------------------------
+// One builder for four-legged animals; each kind sets its shape and colours. Frames: the
+// tail pose (0/1) and a blink.
+const LINE = "#141416";
+function quad(o, f = {}) {
+  const g = grid();
+  const fur = o.fur, legC = o.legColor || fur, far = shade(legC, 0.7);
+  const by = o.by ?? 19, bry = o.bry ?? 5.5, feet = o.feet ?? 28.5, w = o.legW ?? 0.9;
+  let [ff, fn, bf, bn] = o.legs || [11, 14.5, 20, 23.5];
+  // Walking: near and far legs swing opposite ways.
+  if (f.walk) { const s2 = f.walk === 1 ? 0.8 : -0.8; ff += s2; bn += s2; fn -= s2; bf -= s2; }
+  // The head can move (alert, grazing, sniffing): everything on it moves together.
+  const hdx = (o.headDx || 0), hdy = (o.headDy || 0) + (f.alert ? -0.8 : 0);
+  const mv = (pts) => pts.map(([x, y]) => [x + hdx, y + hdy]);
+  // Front legs drop straight to a forward paw; back legs angle back to the hock first.
+  const top = legC === fur ? by : by + bry * 0.55; // dark legs start lower, not inside the body
+  const front = (x) => [[x, Math.max(top, by + 1)], [x + 0.2, feet - 0.7], [x - 0.5, feet]];
+  const back = (x) => [[x - 0.4, top], [x + 0.9, top + (feet - top) * 0.55], [x + 0.3, feet - 0.7], [x - 0.4, feet]];
+  const tails = o.tails || [];
+  const tail = tails[f.alert ? tails.length - 1 : f.tail || 0] || tails[0];
+  if (tail) thick(g, tail, o.tailW || 1, o.tailColor || fur);
+  thick(g, front(ff), w * 0.9, far); // the far legs, behind the body and in shadow
+  thick(g, back(bf), w * 0.9, far);
+  if (o.hump) ellipse(g, ...o.hump, fur);
+  ellipse(g, o.bx ?? 17, by, o.brx ?? 9, bry, fur);
+  thick(g, front(fn), w, legC);
+  thick(g, back(bn), w, legC);
+  if (legC === fur) ellipse(g, bn + 0.4, by + 0.5, w * 2.2, bry * 0.75, fur); // haunch
+  if (o.neck) thick(g, [o.neck[0], ...mv(o.neck.slice(1))], o.neckW ?? 1.4, fur);
+  ellipse(g, (o.hx ?? 8) + hdx, (o.hy ?? 14) + hdy, o.hrx ?? 4.4, o.hry ?? 3.7, o.headColor || fur);
+  if (o.snout) tri(g, ...mv(o.snout), o.snoutColor || o.headColor || fur);
+  for (const e of o.ears || []) tri(g, ...mv(e), o.earColor || fur);
+  if (o.earBlob) ellipse(g, o.earBlob[0] + hdx, o.earBlob[1] + hdy, o.earBlob[2], o.earBlob[3], o.earColor || fur);
+  outline(g, LINE);
+  if (o.mark) o.mark(g);
+  // The belly follows the underside of the body, in the animal's own belly colour.
+  const bx = o.bx ?? 17, brx = o.brx ?? 9, belly = o.belly || shade(fur, 0.84);
+  const inBody = (x, y) => ((x + 0.5) / S - bx) ** 2 / brx ** 2 + ((y + 0.5) / S - by) ** 2 / bry ** 2 <= 1;
+  recolor(g, (x, y, c) => c === fur && inBody(x, y) && y / S > by && (!inBody(x, y + 3) || (!inBody(x, y + 4) && (x + y) % 2 === 0)), belly);
+  // Light from above: a lighter back and a darker lower flank; dithered only where they meet.
+  const lit = o.lit || shade(fur, 1.12), dim = shade(fur, 0.86);
+  recolor(g, (x, y, c) => {
+    if (c !== fur || !inBody(x, y)) return false;
+    const d = ((y + 0.5) / S - by) / bry;
+    return d < -0.62 || (d < -0.5 && (x + y) % 2 === 0);
+  }, lit);
+  recolor(g, (x, y, c) => {
+    if (c !== fur || !inBody(x, y)) return false;
+    const d = ((y + 0.5) / S - by) / bry;
+    return d > 0.42 || (d > 0.3 && (x + y) % 2 === 0);
+  }, dim);
+  if (o.dorsal) recolor(g, (x, y, c) => inBody(x, y) && !inBody(x, y - 2) && c !== LINE, o.dorsal); // a darker stripe down the back
+  // Toes: the bottom pixel row of every foot a shade darker.
+  if (!o.noToes) recolor(g, (x, y, c) => y > (by + bry * 0.6) * S && g[y + 1]?.[x] === LINE && !g[y + 2]?.[x], (x, y) => shade(g[y][x], 0.62));
+  const [ex, ey] = o.eye, edy = Math.round(hdy * S), edx = Math.round(hdx * S);
+  px(g, ex + edx, ey + edy, f.blink ? g[ey + edy - 1]?.[ex + edx] || LINE : "#111");
+  if (o.nose) px(g, o.nose[0] + edx + (o.noseDx || 0), o.nose[1] + edy, o.noseColor || "#111");
+  return g;
+}
+// A steady pseudo-random number per pixel, for speckled fur.
+function hash(x, y) {
+  let h = (x * 374761393 + y * 668265263) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+// A soft-edged patch of colour (fine-grid centre and radii) over the given colours only.
+function patch(g, cx, cy, rx, ry, c, over) {
+  recolor(g, (x, y, cur) => {
+    if (!over.includes(cur)) return false;
+    const d = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2;
+    return d <= 0.65 || (d <= 1 && (x + y) % 2 === 0);
+  }, c);
+}
+function recolor(g, test, c) {
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) if (g[y][x] && g[y][x] !== LINE && test(x, y, g[y][x])) g[y][x] = typeof c === "function" ? c(x, y) : c;
+}
+// Idle for wildlife: breathing, the tail (or a bird's head) moves, a blink, then the
+// animal's own move (ACTS) now and then.
+function idle(make, name) {
+  return animated(idleWildFrames(make, name));
+}
+function idleWildFrames(make, name) {
+  const rest = make({ tail: 0 });
+  const acts = (ACTS[name] || []).map(([f, d]) => [make({ tail: 0, ...f }), d]);
+  return [
+    [rest, jitter(1.4)],
+    [breathe(rest), 0.7],
+    [make({ tail: 1 }), jitter(0.9)],
+    [rest, jitter(1.2)],
+    [make({ tail: 0, blink: true }), 0.18],
+    [breathe(rest), 0.7],
+    [rest, jitter(0.8)],
+    ...acts,
+    [rest, jitter(1.2)],
+    [breathe(rest), 0.7],
+  ];
+}
+// Walking in: legs swinging (four-legged animals) or hopping (the rest).
+function walker(make) {
+  return animated(walkerFrames(make));
+}
+function walkerFrames(make) {
+  const a = make({ walk: 1 }), b = make({ walk: 2 });
+  if (JSON.stringify(a) === JSON.stringify(b)) return [[make({}), 0.25], [lift(make({}), 2), 0.18]];
+  return [[a, 0.18], [make({}), 0.12], [b, 0.18], [make({}), 0.12]];
+}
+// On alert: head up, tail up, holding still apart from a blink.
+function alertWild(make) {
+  return animated(alertWildFrames(make));
+}
+function alertWildFrames(make) {
+  const a = make({ alert: true });
+  return [[a, jitter(2.4)], [make({ alert: true, blink: true }), 0.18], [a, 1.2]];
+}
+const ACTS = {
+  Raccoon: [[{ act: 1 }, 0.22], [{ act: 2 }, 0.22], [{ act: 1 }, 0.22], [{ act: 2 }, 0.22], [{ act: 1 }, 0.22]], // rubbing its paws
+  Opossum: [[{ act: 1 }, 0.2], [{ act: 2 }, 0.2], [{ act: 1 }, 0.2], [{ act: 2 }, 0.2]], // sniffing
+  Skunk: [[{ act: 1 }, 1.4]], // tail raised
+  Rat: [[{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12]], // nose twitching
+  Fox: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]], // ear flick
+  Coyote: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]],
+  Bear: [[{ act: 1 }, 0.6], [{ act: 2 }, 0.6]], // head swing
+  Deer: [[{ act: 1 }, 0.3], [{ act: 2 }, 1.6], [{ act: 1 }, 0.3]], // grazing
+  Rabbit: [[{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12], [{}, 0.12]], // nose twitch
+  Groundhog: [[{ act: 1 }, 0.4], [{ act: 2 }, 1], [{ act: 1 }, 0.4]], // up to look about
+  Squirrel: [[{ act: 1 }, 0.25], [{ act: 2 }, 0.25], [{ act: 1 }, 0.25], [{ act: 2 }, 0.25], [{ tail: 2 }, 0.15], [{}, 0.15], [{ tail: 2 }, 0.15]], // nibbling, tail flick
+  Chipmunk: [[{ tail: 1 }, 0.12], [{}, 0.12], [{ tail: 1 }, 0.12], [{}, 0.12]], // tail flick
+  Stoat: [[{ act: 1 }, 1.2]], // up on its haunches to look
+  Dog: [[{ tail: 1 }, 0.14], [{}, 0.14], [{ tail: 1 }, 0.14], [{}, 0.14], [{ tail: 1 }, 0.14], [{}, 0.14]], // wagging
+  Chicken: [[{ act: 1 }, 0.25], [{}, 0.2], [{ act: 1 }, 0.25], [{}, 0.2]], // pecking
+  Bird: [[{ act: 2 }, 0.2], [{}, 0.2], [{ act: 1 }, 0.15], [{}, 0.2], [{ act: 2 }, 0.2]], // hop and peck
+};
+
+const WILD = {
+  Raccoon: (f) => quad({
+    fur: "#8d8a86", belly: "#b4b0a8", by: 19.5, brx: 9.5, bry: 7, legs: f.act === 1 ? [12.3, 13.8, 20, 23] : f.act === 2 ? [10.9, 15.2, 20, 23] : [11.5, 14.5, 20, 23], legW: 1.2, feet: 28,
+    hx: 8.5, hy: 15, hrx: 5, hry: 4.2, snout: [[4, 14.5], [1, 17.5], [5, 18]],
+    ears: [[[4.5, 13], [5, 8.5], [8, 11]], [[9.5, 11], [12, 8.5], [12.5, 12.5]]],
+    tails: [[[24.5, 18], [27.6, 19.6], [28.6, 23.6]], [[24.5, 18], [27.9, 19], [29, 22.8]]], tailW: 2.4,
+    eye: [9, 21], nose: [2, 26],
+    mark(g) {
+      recolor(g, (x, y) => y >= 20 && y <= 22 && x >= 5 && x <= 17, "#2e2c2a"); // the mask
+      recolor(g, (x, y) => y >= 24 && y <= 27 && x >= 3 && x <= 10, "#d7d2c8"); // muzzle
+      recolor(g, (x, y, c) => x >= 36 && c === "#8d8a86" && !(((x + 0.5) / S - 17) ** 2 / 90 + ((y + 0.5) / S - 19.5) ** 2 / 49 <= 1), (x, y) => (Math.floor((x + y) / 2.5) % 2 === 1 || y >= 38 ? "#2e2c2a" : "#6b6864")); // ringed tail, dark tip
+      px(g, 11, 21, "#e8e3d8");
+      recolor(g, (x, y, c) => c === "#8d8a86" && y >= 38 && x <= 37, "#2e2c2a"); // dark paws
+    },
+  }, f),
+  Opossum: (f) => quad({
+    fur: "#a9a6a1", belly: "#d6d1c8", by: 20, brx: 9, bry: 5, legs: [11.5, 14.5, 20.5, 23.5], legW: 1, feet: 27.3, legColor: "#26242a",
+    headColor: "#efebe4", hx: 7.5, hy: 17, hrx: 4.3, hry: 3.6,
+    snout: [[4, 15.5], f.act === 1 ? [0, 18.5] : f.act === 2 ? [0.3, 19.9] : [0, 19.2], [4.5, 19.8]],
+    ears: [[[8, 14], [8.6, 10.8], [11.2, 13.4]]], earColor: "#26242a",
+    tails: [[[25.5, 21], [28.5, 24.4], [30.8, 25.2], [31.4, 23]], [[25.5, 21], [28.6, 24.1], [31, 24.4], [31.5, 22.1]]], tailW: 0.8, tailColor: "#e7b1b1",
+    eye: [9, 24], nose: [1, f.act === 1 ? 27 : f.act === 2 ? 29 : 28], noseColor: "#e48a95",
+    mark(g) {
+      recolor(g, (x, y, c) => c === "#a9a6a1" && y <= 33 && hash(x, y) % 6 === 0, "#f2efe8"); // white guard hairs
+      recolor(g, (x, y, c) => c === "#a9a6a1" && hash(x, y) % 6 === 1, "#8f8c87"); // dark underfur
+      recolor(g, (x, y, c) => c === "#e7b1b1" && x <= 41, "#26242a"); // the tail's dark base
+      recolor(g, (x, y, c) => c === "#26242a" && y >= 41 && x >= 12, "#e7b1b1"); // pink toes
+      for (const [x, y] of [[8, 23], [10, 23], [8, 24], [10, 24]]) px(g, x, y, "#4a4648"); // dark around the eye
+    },
+  }, f),
+  Fox: (f) => quad({
+    fur: "#d07a32", belly: "#ece2d2", by: 18, brx: 9, bry: 4.1, hump: [11.5, 18.4, 3.6, 4.2], hx: 7.5, hy: 13.5, hrx: 4.2, hry: 3.4, legColor: "#2b2422", legW: 0.75,
+    snout: [[4, 13], [0.5, 15.5], [4.5, 16.5]],
+    ears: [[[5, 11.5], [5.5, 6.5], [8.5, 10.5]], f.act === 1 ? [[8.5, 10.5], [11.8, 7.4], [11, 11.5]] : [[8.5, 10.5], [10.5, 6.5], [11, 11.5]]],
+    tails: [[[25, 18], [28.5, 20], [30.5, 23]], [[25, 18], [29, 18.5], [31, 20.5]]], tailW: 2,
+    eye: [9, 19], nose: [1, 23],
+    mark(g) {
+      recolor(g, (x, y) => y >= 22 && y <= 25 && x <= 10, "#f4ece0"); // muzzle
+      patch(g, 15, 27, 4, 5.5, "#f4ece0", ["#d07a32"]); // white throat and chest
+      recolor(g, (x) => x >= 43, "#f4ece0"); // tail tip
+    },
+  }, f),
+  Coyote: (f) => quad({
+    fur: "#a08a6c", belly: "#d3c4a8", by: 18, brx: 9, bry: 4.3, hump: [11.5, 18.4, 3.8, 4.4], hx: 7.5, hy: 13.5, hrx: 4.3, hry: 3.5, legW: 0.85,
+    snout: [[4, 13], [0.5, 15.5], [4.5, 16.5]],
+    ears: [[[5, 11.5], [5.5, 6.5], [8.5, 10.5]], f.act === 1 ? [[8.5, 10.5], [11.8, 7.4], [11, 11.5]] : [[8.5, 10.5], [10.5, 6.5], [11, 11.5]]],
+    tails: [[[25, 18], [28, 22], [29.5, 26]], [[25, 18], [28.5, 21.5], [30.5, 25]]], tailW: 1.5,
+    eye: [9, 19], nose: [1, 23],
+    mark(g) {
+      patch(g, 15, 27, 4, 5, "#d8ccb6", ["#a08a6c"]); // pale throat
+      recolor(g, (x, y, c) => c === "#a08a6c" && y <= 22 && x >= 14 && x <= 34 && hash(x, y) % 3 === 0, "#6f5f4b"); // grizzled saddle
+      recolor(g, (x, y) => x >= 42 && y >= 36, "#3a2f26"); // dark tail tip
+    },
+  }, f),
+  Skunk: (f) => quad({ ...SKUNK }, { ...f, tail: f.act ? 2 : f.tail }),
+};
+const SKUNK = {
+    fur: "#1f1f22", belly: "#1f1f22", bx: 16, by: 21.5, brx: 8.2, bry: 5, legs: [10.5, 12.8, 19.5, 21.8], legW: 0.8, feet: 27.6,
+    hx: 7.2, hy: 20, hrx: 3.3, hry: 2.8, snout: [[4.8, 18.8], [1.6, 21.6], [4.8, 22.4]],
+    ears: [[[7.6, 17.6], [8.4, 16.2], [9.6, 17.6]]],
+    tails: [[[23, 19], [27, 15.5], [27.5, 9.5], [24.5, 6.5]], [[23, 19], [27.4, 15.8], [28.2, 10], [25.6, 6.8]], [[23, 19], [26, 13.5], [26.2, 7.5], [24.8, 3.8]]], tailW: 3,
+    eye: [9, 29], nose: [2, 32],
+    mark(g) {
+      const inB = (x, y) => ((x + 0.5) / S - 16) ** 2 / 67 + ((y + 0.5) / S - 21.5) ** 2 / 25 <= 1;
+      recolor(g, (x, y, c) => c === "#1f1f22" && inB(x, y) && !inB(x, y - 3) && x >= 13, "#f2f0ea"); // stripes down the back
+      const inHead = (x, y) => ((x + 0.5) / S - 7.2) ** 2 / 10.9 + ((y + 0.5) / S - 20) ** 2 / 7.84 <= 1;
+      recolor(g, (x, y, c) => c === "#1f1f22" && x >= 8 && x <= 14 && inHead(x, y) && !inHead(x, y - 2), "#f2f0ea"); // the stripe over the crown, running on into the back
+      const deep = (x, y) => [[2, 0], [-2, 0], [0, 2], [0, -2], [1, 1], [-1, -1], [1, -1], [-1, 1]].every(([dx, dy]) => g[y + dy]?.[x + dx] && g[y + dy][x + dx] !== LINE);
+      const core = [];
+      for (let y = 0; y < 27; y++) for (let x = 33; x < N; x++) if (g[y][x] === "#1f1f22" && !inB(x, y) && deep(x, y)) core.push([x, y]);
+      for (const [x, y] of core) g[y][x] = "#f2f0ea"; // white through the plume, a black rim around it
+    },
+};
+Object.assign(WILD, {
+  Groundhog: (f) => GROUNDHOG(f),
+  Squirrel: (f) => SQUIRREL(f),
+});
+function GROUNDHOG(f) {
+  const hy = f.act === 1 ? -0.6 : f.act === 2 ? -1.4 : 0, dy = Math.round(hy * S);
+  return quad({
+    headDy: hy,
+    fur: "#7a5a3c", belly: "#a07c56", by: 21, brx: 9, bry: 6.5, legs: [11, 14, 20, 23], legW: 1,
+    hx: 8, hy: 17, hrx: 4.4, hry: 3.8, ears: [[[8.5, 13.6], [9.3, 12], [10.8, 13.8]]],
+    snout: [[4.5, 16], [2, 18.5], [5, 19.5]],
+    tails: [[[25.5, 22], [28, 21.5]], [[25.5, 22], [28, 20.5]]], tailW: 1.2, tailColor: "#33251a",
+    eye: [10, 24], nose: [3, 27],
+    mark(g) {
+      recolor(g, (x, y) => y >= 26 + dy && y <= 29 + dy && x >= 4 && x <= 10, "#c8ad8c"); // pale muzzle
+      recolor(g, (x, y, c) => y >= 39 && x <= 38 && c !== "#c8ad8c", "#33251a"); // dark mitts
+      recolor(g, (x, y, c) => c === "#7a5a3c" && hash(x, y) % 5 === 0, "#8f6c4a"); // grizzled coat
+    },
+  }, f);
+}
+function SQUIRREL(f) {
+  return quad({
+    headDy: f.act === 1 ? 0.4 : 0, noseDx: f.act === 1 ? 1 : 0,
+    fur: "#8a5a36", by: 22, brx: 6, bry: 4.5, legs: [13, 15.5, 19.5, 21.5], legW: 0.6,
+    hx: 10.5, hy: 18.5, hrx: 3, hry: 2.6, ears: [[[10.5, 16.5], [11, 14.5], [12.5, 16.5]]],
+    snout: [[8, 18], [6.5, 19.5], [8.5, 20.5]],
+    tails: [[[23, 22], [27, 18], [27.5, 12], [25, 9]], [[23, 22], [27.5, 18.5], [28.5, 12.5], [26.5, 9.5]], [[23, 22], [26.4, 17.5], [26, 11.5], [23.5, 9]]], tailW: 2,
+    eye: [14, 27], nose: [10, 29],
+    belly: "#d9a46a",
+  }, f);
+}
+Object.assign(WILD, {
+  Chipmunk: (f) => quad({
+    fur: "#a2723f", belly: "#efe2c8", by: 23.5, brx: 5, bry: 3.6, legs: [14, 16, 19.5, 21], legW: 0.55,
+    hx: 11.5, hy: 21, hrx: 2.7, hry: 2.3, ears: [[[11.5, 19.2], [12, 17.6], [13.2, 19.2]]],
+    snout: [[9.2, 20.5], [8, 22], [9.5, 22.8]],
+    tails: [[[21.5, 23], [24, 19], [24, 15]], [[21.5, 23], [24.5, 19.5], [25, 15.5]]], tailW: 0.9,
+    eye: [16, 31], nose: [12, 33],
+    mark(g) {
+      recolor(g, (x, y) => (y === 31 || y === 33) && x >= 20 && x <= 31, "#2c2018"); // back stripes
+      recolor(g, (x, y) => y === 32 && x >= 20 && x <= 31, "#efe2c8");
+    },
+  }, f),
+  Dog: (f) => quad({
+    fur: "#9a6a3e", belly: "#c39a6c", by: 18.5, bry: 4.2, brx: 8.6, hx: 8, hy: 12.5, hrx: 4.3, hry: 3.8, legW: 1, neck: [[11, 15], [9, 13]],
+    snout: [[4.5, 12], [1, 14.5], [4.5, 16.2]],
+    earBlob: [10.8, 13.4, 1.2, 2.5], earColor: "#5f3f22",
+    tails: [[[25, 16], [28, 12.5], [29, 10]], [[25, 16], [28.8, 13.5], [30.5, 11.5]]], tailW: 0.9,
+    eye: [10, 18], nose: [1, 21],
+  }, f),
+});
+
+// The stoat: long and low, brown above and cream below, a black-tipped tail.
+WILD.Stoat = (f) => quad({
+  headDy: f.act ? -3 : 0,
+  fur: "#8a5b34", belly: "#efe2c4", bx: 17, by: 22.5, brx: 8, bry: 2.8, legs: [11, 12.8, 21, 22.8], legW: 0.6, feet: 27,
+  neck: [[10.5, 22], [8.5, 20]], neckW: 1.8, hx: 7.5, hy: 19.2, hrx: 2.8, hry: 2.2,
+  snout: [[5.5, 18.5], [3.5, 20], [5.5, 21]],
+  ears: [[[8, 17.4], [8.5, 16], [9.8, 17.2]]],
+  tails: [[[24.5, 22], [28, 21], [30.5, 19]], [[24.5, 22], [28.2, 21.6], [31, 20.6]]], tailW: 0.8,
+  eye: [10, 28], nose: [5, 30],
+  mark(g) {
+    patch(g, 10, f.act ? 27.5 : 32, 4, 3, "#efe2c4", ["#8a5b34"]); // cream throat and chin
+    recolor(g, (x, y, c) => c === "#8a5b34" && x >= 43, "#1d1a18"); // black tail tip
+  },
+}, f);
+WILD.Rat = (f) => quad({
+  fur: "#6e6359", belly: "#a99f94", by: 23, brx: 6, bry: 3.8, legs: [12.5, 14.5, 19.5, 21.5], legW: 0.55,
+  hx: 9.5, hy: 21.5, hrx: 3, hry: 2.4, snout: [[7.5, 20.5], [5, 22.5], [7.8, 23.4]],
+  ears: [[[10, 19.8], [10.5, 17.6], [12.3, 19.6]]], earColor: "#d9a0a0",
+  tails: [[[22, 23.5], [26, 25.5], [30, 24.5]], [[22, 23.5], [26, 25], [29.6, 23]]], tailW: 0.4, tailColor: "#d9a0a0",
+  eye: [13, 31], nose: [8, 34], noseColor: "#e48a95", noseDx: f.act ? -1 : 0,
+}, f);
+WILD.Bear = (f) => quad({
+  fur: "#1f1b1a", belly: "#1f1b1a", lit: "#3a3431", by: 17.5, brx: 11, bry: 7, bx: 18, legs: [10.5, 14, 22, 25.5], legW: 1.7, feet: 28.5,
+  hump: [13, 15, 6.5, 5.6], headDy: f.act ? 0.7 : 0, headDx: f.act === 2 ? -0.5 : 0,
+  hx: 6.5, hy: 15, hrx: 4.2, hry: 3.8, snout: [[3.5, 15], [0.5, 17.5], [4, 18.6]], snoutColor: "#9a7652",
+  ears: [[[7.5, 11.8], [8.5, 9.4], [10.4, 11.6]]],
+  tails: [[[28.5, 16.5], [29.6, 16.8]], [[28.5, 16.5], [29.6, 16]]], tailW: 0.7,
+  eye: [8, 21], nose: [1, 26],
+}, f);
+// The rabbit sits up; its ear twitches instead of a tail.
+WILD.Rabbit = (f) => {
+  const g = grid();
+  const fur = "#9b8063", pale = "#e3d6c2", ear = "#8a6f54";
+  ellipse(g, 18.5, 22, 6, 4.4, fur); // body
+  ellipse(g, 21.5, 22.6, 4.2, 4, fur); // haunch
+  thick(g, [[16, 26.6], [22.6, 26.6]], 0.8, fur); // the long back foot
+  thick(g, [[12.8, 22], [12.6, 26.4]], 0.6, fur); // front leg
+  thick(g, [[13.5, 19], [12, 17]], 1.6, fur); // neck
+  ellipse(g, 11.2, 16.8, 3.1, 2.6, fur); // head
+  tri(g, [9, 15.8], [7.4, 17.6], [9.4, 18.6], fur); // muzzle
+  thick(g, [[12.6, 14.6], [14.6, 7.6]], 0.75, ear); // far ear
+  thick(g, f.tail ? [[11.6, 14.6], [11.9, 7.4]] : [[11.6, 14.6], [12.6, 7.6]], 0.8, fur); // near ear
+  ellipse(g, 25.2, 21, 1.4, 1.4, "#f2efe8"); // cotton tail
+  outline(g, LINE);
+  const inB = (x, y) => ((x + 0.5) / S - 18.5) ** 2 / 36 + ((y + 0.5) / S - 22) ** 2 / 19.36 <= 1;
+  recolor(g, (x, y, c) => c === fur && inB(x, y) && (!inB(x, y - 2) || (!inB(x, y - 3) && (x + y) % 2 === 0)), shade(fur, 1.12)); // lit back
+  recolor(g, (x, y, c) => c === fur && inB(x, y) && y / S > 22 && (!inB(x, y + 2) || (!inB(x, y + 3) && (x + y) % 2 === 0)), pale); // pale belly
+  recolor(g, (x, y, c) => c === fur && x >= 11 && x <= 14 && y >= 25 && y <= 27, pale); // pale chin
+  const [e0, e1] = f.tail ? [[17.4, 21.9], [17.85, 11.1]] : [[17.4, 21.9], [18.9, 11.4]];
+  for (let y = 13; y <= 20; y++) px(g, Math.round(e0[0] + ((e0[1] - y) / (e0[1] - e1[1])) * (e1[0] - e0[0])), y, "#d9a0a0"); // inside the near ear
+  px(g, 14, 24, f.blink ? fur : "#111"); px(g, 13, 24, f.blink ? fur : "#2b2018"); // eye
+  px(g, 11, f.act ? 25 : 26, "#e48a95"); // nose
+  return g;
+};
+
+// The deer stands taller: long legs, a neck and a white tail that flicks.
+WILD.Deer = (f) => quad({
+  headDy: f.act === 1 ? 5 : f.act === 2 ? 13 : 0, headDx: f.act === 1 ? -0.5 : f.act === 2 ? -1.2 : 0,
+  dorsal: "#8a6242",
+  fur: "#a77a52", belly: "#eadfcf", bx: 17.5, by: 14.5, brx: 9, bry: 4.6, legs: [10.5, 13.5, 21, 24], legW: 0.6, feet: 29,
+  neck: [[10.5, 13], [8, 8]], neckW: 1.5, hx: 7, hy: 6.5, hrx: 3, hry: 2.2,
+  snout: [[5, 5.4], [2.8, 7.4], [5, 8.2]],
+  ears: [[[8.5, 4.8], [11, 2], [10.5, 5.6]]],
+  tails: [[[26, 12.4], [26.6, 13]], [[26, 11.6], [26.6, 10.8]]], tailW: 1.2, tailColor: "#eadfcf",
+  eye: [9, 9], nose: [4, 11],
+  mark(g) {
+    patch(g, 13, 17, 2.5, 4, "#eadfcf", ["#a77a52"]); // white throat
+    recolor(g, (x, y, c) => y >= 42 && c !== LINE, "#2b2422"); // hooves
+  },
+}, f);
+
+// Birds: a small songbird and a hen; the head bobs.
+// A robin: grey-brown back, dark head, orange breast, white eye-ring; the head bobs.
+WILD.Bird = (f) => {
+  const g = grid();
+  const back = "#5f554d", head = "#2c2724", breast = "#d1652c";
+  const dy = f.act === 2 ? 2.4 : f.tail ? 0.6 : 0;
+  ellipse(g, 17, 22, 5.2, 3.6, back);
+  thick(g, [[21, 21.5], [25.5, 23.5]], 1, back);
+  ellipse(g, 12.5, 18.8 + dy, 2.7, 2.4, head);
+  tri(g, [10, 18.4 + dy], [7.6, 19.4 + dy], [10, 20.2 + dy], "#e2b04a");
+  outline(g, LINE);
+  patch(g, 21.5, 35, 6.5, 4, breast, [back]); // the orange breast
+  recolor(g, (x, y, c) => c === back && x >= 31 && y >= 36, "#e9e4dc"); // white under the tail
+  recolor(g, (x, y, c) => c === back && g[y - 2]?.[x] === LINE, shade(back, 1.18)); // lit back
+  for (const lx of [16, 18.5]) {
+    thick(g, [[lx, 25.5], [lx, 28.4]], 0.2, "#c9873e");
+    const fx = Math.round(lx * S), fy = Math.round(28.8 * S);
+    for (let x = fx - 2; x <= fx + 1; x++) px(g, x, fy, "#c9873e"); // toes
+  }
+  const ey = Math.round((18.8 + dy) * S) - 1;
+  px(g, 18, ey, f.blink ? head : "#111");
+  px(g, 18, ey - 1, "#f2efe8"); px(g, 18, ey + 1, "#f2efe8"); // white eye-ring
+  return f.act === 1 ? lift(g, 3) : g;
+};
+WILD.Chicken = (f) => {
+  const g = grid();
+  const c = "#f1ece3";
+  const dy = f.act ? 5 : f.tail ? 1 : 0, dx = f.act ? -2 : 0;
+  ellipse(g, 17, 20, 7, 5.5, c);
+  thick(g, [[23, 18], [26, 14]], 1.6, c);
+  thick(g, [[12, 18], [11 + dx, 14 + dy]], 1.5, c);
+  ellipse(g, 10.5 + dx, 12.5 + dy, 2.6, 2.4, c);
+  tri(g, [8.2 + dx, 12 + dy], [6 + dx, 13 + dy], [8.2 + dx, 13.8 + dy], "#e2b04a");
+  ellipse(g, 10.5 + dx, 9.8 + dy, 1.8, 1, "#d23b2f");
+  ellipse(g, 8.6 + dx, 14.6 + dy, 0.7, 0.9, "#d23b2f");
+  outline(g, LINE);
+  // The wing: a folded oval tipped toward the tail, edged and feathered in grey.
+  const w = grid();
+  ellipse(w, 18, 19.8, 4.6, 3, 1);
+  tri(w, [20, 17.6], [25.5, 21], [19.5, 22.6], 1);
+  const edge = "#a9a091", fill = c;
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      if (!w[y][x] || !g[y][x] || g[y][x] === LINE) continue;
+      const rim = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy2]) => !w[y + dy2]?.[x + dx]);
+      g[y][x] = rim || (x >= 30 && x % 3 === 0 && y >= 28) ? edge : fill;
+    }
+  const inB = (x, y) => ((x + 0.5) / S - 17) ** 2 / 49 + ((y + 0.5) / S - 20) ** 2 / 30.25 <= 1;
+  recolor(g, (x, y, k) => k === c && inB(x, y) && y / S > 20 && (!inB(x, y + 3) || (!inB(x, y + 4) && (x + y) % 2 === 0)), "#ddd6ca"); // soft grey underside
+  // Legs and feet: three toes forward, one back.
+  for (const lx of [15, 19]) {
+    thick(g, [[lx, 25.5], [lx, 28.8]], 0.3, "#e2b04a");
+    const fx = Math.round(lx * S), fy = Math.round(29 * S);
+    for (let x = fx - 3; x <= fx + 1; x++) px(g, x, fy, "#e2b04a");
+    px(g, fx - 3, fy - 1, "#e2b04a");
+  }
+  px(g, 16 + Math.round(dx * S), Math.round((12.5 + dy) * S) - 1, f.blink ? c : "#111");
+  return g;
+};
+
+// Whether a colour sits in the middle tones, where a lightening shows most.
+function midTone(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return l > 0.2 && l < 0.8;
+}
+// A colour made lighter (k > 1) or darker (k < 1).
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (v) => Math.max(0, Math.min(255, Math.round(v * k))).toString(16).padStart(2, "0");
+  return "#" + ch(n >> 16) + ch((n >> 8) & 255) + ch(n & 255);
+}
+
+// --- Pixel sprites ------------------------------------------------------------------------------
+// Animated 48x48 sprites for animals: a cat drawn from its Appearance setting (coat, patterns,
+// extras), or a wildlife kind by name. Shown on a canvas, frame by frame; motion follows the
+// device's reduced-motion setting (the first frame holds still).
+// Ready-made looks, picked by name on an animal's page (its Sprite setting).
+const SPRITE_PRESETS = {
+  calico_collar: { detail: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
+  grey_chest_spot: { detail: true, fur: "#7c7e84", chestPatch: true },
+  longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
+  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
+  black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
+  smoky_banded_tail: { detail: true, tall: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
+};
+// An appearance may name a preset; its own settings then change that look.
+function spriteLook(look) {
+  const { preset, ...own } = look || {};
+  return { ...(SPRITE_PRESETS[preset] || {}), ...own };
+}
+const SPRITE_FRAMES = new Map();
+function spriteFrames(spec) {
+  const key = JSON.stringify(spec);
+  if (!SPRITE_FRAMES.has(key)) {
+    let frames = [];
+    if (spec.cat) frames = spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat)) : idleCatFrames(spriteLook(spec.cat));
+    else if (spec.wild && WILD[spec.wild]) {
+      const make = WILD[spec.wild];
+      if (spec.mode === "alert") frames = alertWildFrames(make);
+      else frames = idleWildFrames(make, spec.wild);
+      // Newly seen: it walks in first (a few steps), then idles.
+      if (spec.mode === "walk") frames = [...[0, 1, 2].flatMap(() => walkerFrames(make)), ...frames];
+    }
+    SPRITE_FRAMES.set(key, frames.map(([g, d]) => [spriteImage(g), d]));
+    if (SPRITE_FRAMES.size > 200) SPRITE_FRAMES.delete(SPRITE_FRAMES.keys().next().value);
+  }
+  return SPRITE_FRAMES.get(key);
+}
+function spriteImage(g) {
+  const img = new ImageData(N, N);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const c = g[y][x];
+      if (!c) continue;
+      const n = parseInt((c.length === 4 ? c.replace(/#(.)(.)(.)/, "#$1$1$2$2$3$3") : c).slice(1), 16);
+      const i = (y * N + x) * 4;
+      img.data[i] = n >> 16;
+      img.data[i + 1] = (n >> 8) & 255;
+      img.data[i + 2] = n & 255;
+      img.data[i + 3] = 255;
+    }
+  return img;
+}
+// Plays a sprite on a canvas until stopped; a walk-in plays once, then the idle loops.
+function playSprite(canvas, spec) {
+  const frames = spriteFrames(spec);
+  const ctx = canvas.getContext("2d");
+  if (!frames.length || !ctx) return () => {};
+  const loopFrom = spec.mode === "walk" ? frames.length - spriteFrames({ ...spec, mode: "idle" }).length : 0;
+  // Held still (reduced motion), it shows its resting frame, never one caught mid-move.
+  let i = reducedMotion() ? loopFrom : spec.mode === "walk" ? 0 : Math.floor(Math.random() * frames.length);
+  let timer = null;
+  const step = () => {
+    ctx.clearRect(0, 0, N, N);
+    ctx.putImageData(frames[i][0], 0, 0);
+    if (reducedMotion()) return;
+    const wait = frames[i][1] * 1000;
+    i = i + 1 >= frames.length ? loopFrom : i + 1;
+    timer = setTimeout(step, wait);
+  };
+  step();
+  return () => clearTimeout(timer);
+}
+// Mounts every sprite canvas under root (data-sprite holds its spec); returns a stop function.
+function mountSprites(root) {
+  const stops = [];
+  root.querySelectorAll("canvas[data-sprite]").forEach((cv) => {
+    try {
+      stops.push(playSprite(cv, JSON.parse(cv.dataset.sprite)));
+    } catch (e) {}
+  });
+  return () => stops.forEach((s) => s());
+}
+// Whether a photo is a night-vision (infrared) picture: almost no colour in it. A collar's
+// colour can't be told from those, so the sprite shows it grey.
+const IR_PHOTOS = new Map();
+function isInfrared(url) {
+  if (!url) return Promise.resolve(false);
+  if (!IR_PHOTOS.has(url))
+    IR_PHOTOS.set(
+      url,
+      new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const c = document.createElement("canvas");
+            c.width = c.height = 32;
+            const x = c.getContext("2d");
+            x.drawImage(img, 0, 0, 32, 32);
+            const d = x.getImageData(0, 0, 32, 32).data;
+            let sat = 0;
+            for (let i = 0; i < d.length; i += 4) sat += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
+            resolve(sat / (d.length / 4) < 12);
+          } catch (e) {
+            resolve(false);
+          }
+        };
+        img.onerror = () => resolve(false);
+        img.src = url;
+      }),
+    );
+  return IR_PHOTOS.get(url);
+}
+const spriteKind = (name) => Object.keys(WILD).find((k) => k.toLowerCase() === String(name || "").toLowerCase());
+
+// A card with one animated sprite: a cat by its appearance, or a wildlife kind.
+//   type: custom:neighborhood-watch-sprite
+//   preset: brown_tabby   and/or   appearance: { fur: "#7c7e84", tabby: true, ... }   (or)   kind: Raccoon
+//   name: optional caption; size: pixels (default 96)
+class NeighborhoodWatchSprite extends HTMLElement {
+  setConfig(config) {
+    if (!config || (!config.appearance && !config.kind && !config.preset)) throw new Error("Set a preset or an appearance (a cat), or a kind (wildlife).");
+    this._config = config;
+    this._draw();
+  }
+  set hass(h) {}
+  connectedCallback() {
+    if (this._config && !this._stop) this._draw();
+  }
+  disconnectedCallback() {
+    this._stop?.();
+    this._stop = null;
+  }
+  _draw() {
+    this._stop?.();
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    const c = this._config;
+    const spec = c.appearance || c.preset ? { cat: { ...(c.preset ? { preset: c.preset } : {}), ...(c.appearance || {}) } } : { wild: spriteKind(c.kind) || c.kind };
+    const size = Number(c.size) || 96;
+    this.shadowRoot.innerHTML = `<style>
+        :host { display: block; }
+        .wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+        canvas { width: ${size}px; height: ${size}px; image-rendering: pixelated; }
+        .name { font-size: 0.85em; color: var(--secondary-text-color); }
+      </style><div class="wrap"><canvas width="48" height="48" data-sprite="${esc(JSON.stringify(spec))}" role="img" aria-label="${esc(c.name || c.kind || "Animal")}"></canvas>${
+        c.name ? `<div class="name">${esc(c.name)}</div>` : ""
+      }</div>`;
+    this._stop = mountSprites(this.shadowRoot);
+  }
+  getCardSize() {
+    return 2;
+  }
+  getGridOptions() {
+    return { columns: 3, rows: 2, min_columns: 2, min_rows: 1 };
+  }
+  static getStubConfig() {
+    return { kind: "Raccoon" };
+  }
+}
+customElements.define("neighborhood-watch-sprite", NeighborhoodWatchSprite);
+window.customCards.push({
+  type: "neighborhood-watch-sprite",
+  name: "Neighborhood Watch sprite",
+  description: "One animated pixel animal: a cat from its appearance, or a wildlife kind.",
+  preview: true,
+  documentationURL: "https://github.com/b2dmx/neighborhood-watch",
+});
+  return { mountSprites, isInfrared, spriteKind, hasCollar: (look) => !!spriteLook(look).collar };
+})();

@@ -178,7 +178,7 @@ class LastDetection(WatchEntity, SensorEntity):
 
 class LastSeen(WatchEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _unrecorded_attributes = frozenset({"looks", "photo_id"})
+    _unrecorded_attributes = frozenset({"looks", "photo_id", "appearance"})
     _attr_icon = "mdi:clock-outline"
 
     @property
@@ -195,6 +195,8 @@ class LastSeen(WatchEntity, SensorEntity):
             "looks": f"{a.description} {a.tips}"[:600],
             # The sighting the photo came from: the card shows its crop (small and quick).
             "photo_id": self.watch.photo_sighting(a),
+            # How the card draws it (its pixel sprite), when set.
+            "appearance": ({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None,
         }
 
 

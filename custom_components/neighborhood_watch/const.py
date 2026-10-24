@@ -138,6 +138,18 @@ CONF_DESCRIPTION = "description"
 CONF_TIPS = "tips"
 CONF_PATTERN = "pattern"
 CONF_BASE = "base"
+CONF_APPEARANCE = "appearance"  # how the card draws the animal (its pixel sprite)
+CONF_SPRITE = "sprite"  # a ready-made sprite look, by name (the card holds the looks)
+SPRITE_PRESETS = (
+    "calico_collar",
+    "grey_chest_spot",
+    "longhair_tuxedo",
+    "brown_tabby",
+    "charcoal_white_chest",
+    "black",
+    "smoky_banded_tail",
+    "bicolour_mask_paw_up",
+)
 CONF_PRIORITY = "priority"
 CONF_ALWAYS_STRICT = "always_strict"
 CONF_REFERENCE_UPLOAD = "reference_upload"

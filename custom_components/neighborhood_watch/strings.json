@@ -131,12 +131,16 @@
             "data": {
               "pattern": "Coat pattern",
               "base": "Main tone at night (infrared)",
-              "tips": "Identification tips"
+              "tips": "Identification tips",
+              "appearance": "Sprite, custom (optional)",
+              "sprite": "Sprite"
             },
             "data_description": {
               "pattern": "For a priority animal, both AI models must report this pattern.",
               "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-              "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
+              "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+              "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar.",
+              "sprite": "Optional. A ready-made pixel sprite for the card instead of the drawn face."
             }
           },
           "rules": {
@@ -568,12 +572,16 @@
               "data": {
                 "pattern": "Coat pattern",
                 "base": "Main tone at night (infrared)",
-                "tips": "Identification tips"
+                "tips": "Identification tips",
+                "appearance": "Sprite, custom (optional)",
+                "sprite": "Sprite"
               },
               "data_description": {
                 "pattern": "For a priority animal, both AI models must report this pattern.",
                 "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
+                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+                "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar.",
+                "sprite": "Optional. A ready-made pixel sprite for the card instead of the drawn face."
               }
             },
             "rules": {
@@ -628,12 +636,16 @@
               "data": {
                 "pattern": "Coat pattern",
                 "base": "Main tone at night (infrared)",
-                "tips": "Identification tips"
+                "tips": "Identification tips",
+                "appearance": "Sprite, custom (optional)",
+                "sprite": "Sprite"
               },
               "data_description": {
                 "pattern": "For a priority animal, both AI models must report this pattern.",
                 "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with."
+                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
+                "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar.",
+                "sprite": "Optional. A ready-made pixel sprite for the card instead of the drawn face."
               }
             },
             "rules": {
@@ -732,6 +744,18 @@
     "person_choice": {
       "options": {
         "add_new": "+ Add a person"
+      }
+    },
+    "sprite": {
+      "options": {
+        "calico_collar": "Calico with a collar and bell",
+        "grey_chest_spot": "Grey with a white chest spot",
+        "longhair_tuxedo": "Long-haired tuxedo with one white leg",
+        "brown_tabby": "Dark brown tabby",
+        "charcoal_white_chest": "Charcoal with a white chest and back feet",
+        "black": "All black",
+        "smoky_banded_tail": "Smoky tabby with a banded tail",
+        "bicolour_mask_paw_up": "Black and white, lopsided mask, often a paw up"
       }
     }
   },

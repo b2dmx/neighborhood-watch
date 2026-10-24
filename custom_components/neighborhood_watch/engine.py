@@ -88,6 +88,8 @@ from .const import (
     CONF_ABSENT_DAYS,
     CONF_ADDED,
     CONF_ALWAYS_STRICT,
+    CONF_APPEARANCE,
+    CONF_SPRITE,
     CONF_BASE,
     CONF_CAMERA,
     CONF_COOLDOWN,
@@ -210,6 +212,8 @@ class AnimalConfig:
     added: datetime | None
     known_last_seen: datetime | None = None
     known_location: str | None = None
+    appearance: dict[str, Any] | None = None
+    sprite: str | None = None
     alert_at: frozenset[str] | str = logic.EVERY
     critical_at: frozenset[str] | str = frozenset()
 
@@ -484,6 +488,8 @@ class WatchEngine:
                 added=_dt(d.get(CONF_ADDED)),
                 known_last_seen=_local_dt(d.get(CONF_KNOWN_LAST_SEEN)),
                 known_location=d.get(CONF_KNOWN_LOCATION),
+                appearance=d.get(CONF_APPEARANCE) or None,
+                sprite=d.get(CONF_SPRITE) or None,
                 alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
                 critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
             )

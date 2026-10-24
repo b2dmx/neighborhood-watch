@@ -297,6 +297,19 @@ order: recent
 columns: 3
 ```
 
+### Pixel sprites
+
+Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page (in *Looks*), pick a **Sprite**: calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask. To change one, or draw your own, use **Sprite, custom**: a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
+
+A single sprite can go anywhere, e.g. for an indoor pet:
+
+```yaml
+type: custom:neighborhood-watch-sprite
+preset: brown_tabby                        # and/or appearance: { fur: "#7c7e84", tabby: true }; or kind: Raccoon
+name: Pepper
+size: 96
+```
+
 ## Actions
 
 | Action | What it does |
@@ -327,4 +340,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.13.16 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.14.0 by Goobis<br>AI was used to help develop this integration.</p>
