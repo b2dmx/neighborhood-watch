@@ -1354,10 +1354,14 @@ function catGrid(o) {
   const bare = (x, y) => bareTop !== null && y >= bareTop && x <= 22 && x >= (bareLeft[y] ?? N);
   if (o.spottedBelly) {
     const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
-    const half = { 29: 3, 30: 4, 31: 4, 32: 3 };
-    const inBelly = (x, y) => bare(x, y) || (y >= 29 && (y <= 32 ? Math.abs(x + 0.5 - 24) <= half[y] : x >= 23 && x <= 24)); // rounded, then down between the legs to the ground
-    const spots = [[21, 30], [26, 30], [22, 32], [25, 32]]; // even, single-pixel, mirrored, staggered
-    on(inBelly, (x, y) => (!o.plainBelly && spots.some(([sx, sy]) => sx === x && sy === y) ? spot : pale)); // pale (spotted) belly, kept off the legs
+    const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
+    const half = { 0: 3, 1: 4, 2: 4, 3: 3 };
+    const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // rounded, then down between the legs to the ground
+    // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
+    // strip between the legs, and on any belly a lifted leg uncovers.
+    const spots = [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
+    const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
+    on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
   }
   if (o.whiteChest) on((x, y) => bare(x, y) || y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
   for (const [colour, runs] of o.marks || []) {
@@ -1429,6 +1433,11 @@ function catGrid(o) {
     // Just the hind foot on that side, set apart by one short mark; no toe lines.
     px(g, 20, 42, line); px(g, 20, 43, line);
   }
+  // Shoulders, when asked for: a darker curve where each front leg rises into the body.
+  const shoulder = (x0) => {
+    const k = shade(fur, 0.68), outer = x0 < 23 ? x0 : x0 + 6, dir = x0 < 23 ? 1 : -1;
+    for (const [dx, y] of [[0, 32], [0, 31], [1, 30], [2, 29], [3, 29]]) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
+  };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
       // Starting the lick: the paw just lifted off the ground, the leg otherwise as it stands.
@@ -1443,6 +1452,7 @@ function catGrid(o) {
       continue;
     }
     if (o.pawUp && x0 === 16) {
+      if (o.shoulders) shoulder(x0);
       // Paw up: this front paw held up, curled against the chest, three feet on the ground.
       const pc = g[38][19] && g[38][19] !== line ? g[38][19] : fur;
       const ps = o.pawShift || 0; // a little shuffle: the paw settles a pixel lower
@@ -1458,6 +1468,7 @@ function catGrid(o) {
       continue;
     }
     for (let y = 33; y <= 40; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); } // the arm
+    if (o.shoulders) shoulder(x0);
     for (let y = 41; y <= 43; y++) { px(g, x0 - 1, y, line); px(g, x0 + 7, y, line); } // the paw, a touch wider
     px(g, x0, 41, line); px(g, x0 + 6, 41, line);
     for (const y of [42, 43]) { px(g, x0, y, g[y][x0 + 1]); px(g, x0 + 6, y, g[y][x0 + 5]); }
@@ -1533,11 +1544,16 @@ function catGrid(o) {
     // The foreleg below the raised paw: the same width as the standing leg (outlined columns
     // at x 17 and 23), running down from the paw into the chest.
     const legC = o.legColor || (o.tuxedo ? fur : g[30]?.[17] && g[30][17] !== line ? g[30][17] : fur);
-    const top = 24 + dy, bottom = up ? 37 : 31;
+    // Held low (the paw at or below the shoulder), the leg rises from the paw to the shoulder;
+    // held higher, it runs down from the paw into the chest to a closed elbow.
+    const low = up && 20 + dy >= 29;
+    const top = low ? 27 : 24 + dy, bottom = low ? 19 + dy : up ? 37 : 31;
     for (let y = top; y <= bottom; y++) {
       px(g, 17, y, line); px(g, 23, y, line);
       for (let x = 18; x <= 22; x++) px(g, x, y, legC);
     }
+    if (low) for (let x = 18; x <= 22; x++) px(g, x, top - 1, line); // the shoulder, rounded over the top
+    else if (up) for (let x = 18; x <= 22; x++) px(g, x, bottom + 1, line); // the elbow: closed below, its corners stepped in
     // The paw, toes up: the same size and shape as a standing paw, turned over.
     for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
     for (let y = 21 + dy; y <= 23 + dy; y++) {
@@ -1546,6 +1562,7 @@ function catGrid(o) {
     }
     px(g, 17, 21 + dy, line); px(g, 23, 21 + dy, line); // rounded shoulders of the paw
     px(g, 19, 21 + dy, line); px(g, 21, 21 + dy, line); // toes
+    if (low) for (let x = 17; x <= 23; x++) px(g, x, 24 + dy, line); // nothing below a low paw: its underside closes it
     if (!up) {
       px(g, 25, 21, "#e48a95");
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
@@ -1989,7 +2006,7 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
   black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, tall: true, bellyDrop: 2, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
