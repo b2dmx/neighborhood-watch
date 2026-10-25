@@ -1113,15 +1113,15 @@ function idleCatFrames(o) {
 // (tail 5, 6, 7); unwrapping plays the same steps back.
 const wrapIn = (o) => [[catGrid({ ...o, tail: 5 }), 0.22], [catGrid({ ...o, tail: 6 }), 0.22]];
 const wrapOut = (o) => [[catGrid({ ...o, tail: 6 }), 0.22], [catGrid({ ...o, tail: 5 }), 0.22]];
-// wrapped: the tail lies curled round the paw throughout, so the tail-swinging moves are left out.
+// wrapped: the tail lies curled round the paw throughout; in place of the swings, only its tip moves.
 function idleFrames(o, wrapped = false) {
   const t0 = wrapped ? 7 : 0, c = (f) => catGrid({ ...o, ...f });
   const rest = c({ tail: t0 });
   return [
     [rest, jitter(1.2)],
-    !wrapped && [c({ tail: 1 }), 0.5],
-    !wrapped && [c({ tail: 2 }), jitter(1.2)],
-    !wrapped && [c({ tail: 1 }), 0.5],
+    [c({ tail: wrapped ? 8 : 1 }), 0.5],
+    [c({ tail: wrapped ? 9 : 2 }), jitter(1.2)],
+    [c({ tail: wrapped ? 8 : 1 }), 0.5],
     [breathe(rest), 0.7],
     [rest, jitter(1)],
     [c({ tail: t0, blink: true }), 0.18],
@@ -1130,7 +1130,7 @@ function idleFrames(o, wrapped = false) {
     [rest, 0.3],
     [c({ tail: t0, earFlick: true }), 0.22],
     [breathe(rest), 0.7],
-    !wrapped && [c({ tail: 3 }), jitter(1.2)],
+    [c({ tail: wrapped ? 9 : 3 }), jitter(1.2)],
     [rest, jitter(0.8)],
     [c({ tail: t0, halfBlink: true }), 0.3],
     [c({ tail: t0, blink: true }), 0.6],
@@ -1186,6 +1186,9 @@ function catGrid(o) {
     [[23, 25.5], [26.5, 26.2], [29, 26.4], [30.6, 25.2]],
     [[23, 25.5], [26.2, 27.2], [27.6, 28.6], [26.4, 29.4], [24.6, 29.6]],
     [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [18.8, 29.6], [17.4, 29]],
+    // Still wrapped, the tip moves: 8 lifted a little, 9 curled up.
+    [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [19, 29.3], [18, 28.3]],
+    [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [19.2, 29.4], [18.3, 28.4], [18.9, 27.6]],
   ];
   let tailPath = tails[o.alert ? 4 : o.tail || 0];
   if (o.tall) {
@@ -1622,28 +1625,24 @@ function catGrid(o) {
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
     }
   }
-  if (!o.alert && (o.tail === 6 || o.tail === 7)) {
+  if (!o.alert && o.tail >= 6 && o.tail <= 9) {
     const tg = grid();
     thick(tg, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), o.tailColor || fur);
     outline(tg, line);
     const tail = (x, y) => tg[y]?.[x] && tg[y][x] !== line;
-    // Where the tail lies against the body it's set apart: a solid line between them, the
-    // body's edge there catching a little light, and the tail's root a shade darker.
-    const touches = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => tail(x + dx, y + dy));
-    for (let y = 0; y < N; y++)
-      for (let x = 0; x < N; x++) {
-        if (tail(x, y) || !g[y][x] || g[y][x] === line || x < 30 || !touches(x, y)) continue;
-        g[y][x] = line; // the dividing line, on the body's side
-        for (const [dx, dy] of [[-1, 0], [0, -1], [0, 1]]) {
-          const c = g[y + dy]?.[x + dx];
-          if (c && c !== line && !tail(x + dx, y + dy) && lum(c) < 70) g[y + dy][x + dx] = shade(c, 1.7);
-        }
-      }
+    // Where the tail comes round the body's back corner it's set apart: one straight line down
+    // the body's edge, a single even rim of light beside it (dark coats only), and the tail's
+    // root a shade darker.
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (tg[y][x] && (y >= 39 || x >= 33)) g[y][x] = tg[y][x];
+    for (let y = 36; y <= 40; y++) {
+      px(g, 33, y, line);
+      const c = g[y][32];
+      if (c && c !== line && lum(c) < 70) g[y][32] = shade(c, 1.5);
+    }
     const [rx, ry] = [tailPath[0][0] * S, tailPath[0][1] * S];
     for (let y = 0; y < N; y++)
       for (let x = 0; x < N; x++)
-        if (tail(x, y) && Math.hypot(x + 0.5 - rx, y + 0.5 - ry) < 3.2) g[y][x] = shade(tg[y][x], 0.7); // the root, in the body's shadow
+        if (tail(x, y) && Math.hypot(x + 0.5 - rx, y + 0.5 - ry) < 3.2) g[y][x] = shade(tg[y][x], 0.85); // the root, in the body's shadow
   }
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
