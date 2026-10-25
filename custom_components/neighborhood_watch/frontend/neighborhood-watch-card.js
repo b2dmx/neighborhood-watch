@@ -1225,6 +1225,10 @@ function catGrid(o) {
     const [a, b] = tailPath.slice(-2);
     if (b[1] < a[1]) tailPath = [...tailPath, [b[0] + (b[0] - a[0]) * 1.3, b[1] + (b[1] - a[1]) * 1.3]]; // carried on further (not when curled over)
   }
+  // Resting, swaying, curled and alert tails are drawn on their own layer at the end (tailLayer);
+  // only the tail wrapped round to the front (5-9) is still drawn here.
+  const ownTail = !o.fluffy && (o.alert || (o.tail || 0) <= 4); // a long-haired tail keeps its own drawing
+  if (ownTail) tailPath = [[100, 100], [101, 100]];
   const w0 = o.tailW || (o.fluffy ? 1.6 : 1.1);
   const taper = o.tailTaper || (o.fluffy ? null : [w0 * 1.3, w0 * 0.9]); // every tail tapers toward the tip
   // The tail as a round tube: for a pixel near it, how far along it is (in pixels, and as a
@@ -1355,6 +1359,8 @@ function catGrid(o) {
     if (taper && !o.tailTaper) on((x, y) => x >= 33 && isFur(g[y][x]) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1 && (() => { const t = tube(x, y); return t.d <= t.r + 0.5 && (t.f > 0.88 || t.s % 4 < 2); })(), st); // rings round the tail, a dark tip
     else on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
+  // legBars: faint tabby bars across the front legs, on these rows.
+  if (o.legBars) on((x, y) => o.legBars.includes(y) && ((x >= 17 && x <= 20 && !o.lick && !o.pawUp) || (x >= 27 && x <= 30)), o.legBarColor || shade(fur, 0.86)); // only on a leg that is down, never across the belly
   if (o.tuxedo) {
     // White muzzle and cheeks running down into the chest; only a small chin patch is black.
     on((x, y) => y >= 11 && y <= 17 && Math.abs(x - cx) <= (y - 10.5) * 0.8, WHITE);
@@ -1466,17 +1472,24 @@ function catGrid(o) {
   const bareLeft = { 33: 20, 34: 19, 35: 19, 36: 19, 37: 19, 38: 19, 39: 19, 40: 19, 41: 20, 42: 21, 43: 21 }; // rounded, narrowing to the ground
   const bare = (x, y) => bareTop !== null && y >= bareTop && x <= 22 && x >= (bareLeft[y] ?? N);
   if (o.spottedBelly) {
-    const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.82); // spots a soft shade, not too dark
+    const pale = o.bellyPale || o.pale || shade(fur, 1.35), spot = shade(fur, 0.82); // spots a soft shade, not too dark; bellyPale: a belly paler than the fur but not as pale as the muzzle
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
     const half = { 0: d ? 2 : 3, 1: 4, 2: 4, 3: 3 }; // a lowered belly's top is a narrow cap
     const inBelly = (x, y) => bare(x, y) || (between(x, y) && y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
     const spots = d
-      ? [[23, t + 2], [24, t + 5], [23, t + 8], [24, t + 11]] // a lowered belly: alternating down the strip
+      ? [[23, t + 1], [24, t + 3], [23, t + 5], [24, t + 7], [23, t + 9], [24, t + 11]] // a lowered belly: alternating down the strip
       : [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
     const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
-    on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
+    if (o.softSpots) {
+      // Soft spots: a mid tone between the belly and the fur, eased in by a lighter ring of
+      // pixels round each one.
+      const mix = (a, b, k) => { const p = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)), [A, B] = [p(a), p(b)]; return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, "0")).join(""); };
+      const mid = mix(pale, fur, 0.5), edge = mix(pale, fur, 0.15);
+      const nearSpot = (x, y) => [[0, 1], [0, -1]].some(([dx, dy]) => spotted(x + dx, y + dy));
+      on(inBelly, (x, y) => (spotted(x, y) ? mid : nearSpot(x, y) ? edge : pale));
+    } else on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
   }
   if (o.whiteChest) on((x, y) => bare(x, y) || between(x, y) && y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
   for (const [colour, runs] of o.marks || []) {
@@ -1558,7 +1571,8 @@ function catGrid(o) {
           else if (d > 0.97) fac[y][x] = 1.05;
         }
         if (y >= 22 && y < 26 && !inHead(x, y) && g[y][x] && g[y][x] !== line && (g[y][x - 1] === line || g[y][x - 2] === line)) fac[y][x] = 0.94; // the shoulders, up to the neck
-        if (y >= 23 && y <= 28 && !inHead(x, y) && (inHead(x, y - 2) || inHead(x, y - 3))) fac[y][x] = 0.95; // the band under the jaw, a row down
+        const jaw = o.jawUp || 0, inJaw = (x, y) => inHead(x, y + jaw); // jawUp: the jaw (and the band under it) n rows higher
+        if (y >= 23 - jaw && y <= 28 && !inJaw(x, y) && (inJaw(x, y - 2) || inJaw(x, y - 3))) fac[y][x] = 0.95; // the band under the jaw, a row down
         if (y < 24 && inHead(x, y) && !underEar(x, y) && (!inHead(x, y - 2) || (!inHead(x, y - 3) && (x + y) % 2 === 0))) fac[y][x] = "lit";
       }
     for (let y = 0; y < N; y++) for (let x = 24; x < N; x++) fac[y][x] = fac[y][47 - x];
@@ -1597,7 +1611,7 @@ function catGrid(o) {
     const put = (x, y, c) => { if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, c); };
     for (const y of [29, 30, 31, 32]) put(outer, y, line);
     put(outer, 28, k);
-    for (const y of [26, 27]) put(outer + dir, y, k);
+    for (const y of o.shoulderLean === false ? [27] : [26, 27]) put(outer + dir, y, k); // shoulderLean: false leaves out its topmost pixel
     // The inner outline, two pixels up (three on a tall cat, whose stretched chest rows would
     // otherwise leave it starting far below the shoulder line).
     const innerTop = o.tall === 2 ? 30 : 31;
@@ -1646,12 +1660,13 @@ function catGrid(o) {
 
   // Inner ears.
   const pink = o.innerEar || "#d98f9c";
-  for (const [x, y] of [[15, 8], [15, 9], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x + (o.earFlick ? 1 : 0), y + (o.earFlick ? 1 : 0), pink); } // the flicked ear's inside moves with it
+  for (const [x, y] of [[15, 8], [15, 9], [15, 10], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x + (o.earFlick ? 1 : 0), y + (o.earFlick ? 1 : 0), pink); } // the flicked ear's inside moves with it
   // Eyes: 3 wide, 3 tall, a slit pupil, a glint.
   const eye = o.eyes || "#d9b23a";
   for (const ex of [18, 27]) {
     if (o.blink || o.yawn === 2 || o.lick === 1 || o.lick === 2) { for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 14, o.lid || "#141416"); continue; }
-    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) px(g, ex + dx, 13 + dy, eye);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) px(g, ex + dx, 13 + dy, dy === 2 && o.eyeLow ? o.eyeLow : eye); // eyeLow: the lower part a warmer tone
+    if (o.lidLine && !o.halfBlink && o.yawn !== 1) for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 12, o.lidLine); // lidLine: a dark upper lid, so the eye reads almond
     if (o.alert) { px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); px(g, ex, 14, "#111"); } // round pupils
     else { px(g, ex + 1, 13, "#111"); px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); }
     px(g, ex + (ex < 23 ? 2 : 0), 13, "#fff");
@@ -1799,10 +1814,12 @@ function catGrid(o) {
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
     const rows = g.slice(1, 45).map((r) => r.slice()), from = rows.map((r, i) => i + 1); // each row's source row
-    rows.splice(27, 0, rows[26].slice()); from.splice(27, 0, from[26]); // chest rows, clear of the belly spots and the tail's bend
-    rows.splice(29, 0, rows[28].slice()); from.splice(29, 0, from[28]);
+    // tallAt: where the repeated rows go (chest rows by default; leg rows give longer legs).
+    const [t1, t2, t3] = o.tallAt || [27, 29, 30];
+    rows.splice(t1, 0, rows[t1 - 1].slice()); from.splice(t1, 0, from[t1 - 1]); // chest rows, clear of the belly spots and the tail's bend
+    rows.splice(t2, 0, rows[t2 - 1].slice()); from.splice(t2, 0, from[t2 - 1]);
     // tall: 2 adds two more body rows (copies of a plain row, so they're coloured like it).
-    if (o.tall === 2) { rows.splice(30, 0, rows[30].slice(), rows[30].slice()); from.splice(30, 0, from[30], from[30]); }
+    if (o.tall === 2) { rows.splice(t3, 0, rows[t3].slice(), rows[t3].slice()); from.splice(t3, 0, from[t3], from[t3]); }
     const old = g.map((r) => r.slice()), drop = o.tall === 2 ? 3 : 1; // the tail moves down with the body
     // The tail (with the outline round it) moves down whole, never stretched or cut: its
     // pixels come from drop rows up; anything else from the stretched rows.
@@ -1839,6 +1856,7 @@ function catGrid(o) {
   // clear. tailBase ones apply only while the tail is in one of its resting swings.
   const place = ([x, y, c]) => px(g, x, y, c === "line" ? line : c);
   (o.pixels || []).forEach(place);
+  if (!o.lick && !o.pawUp) (o.leftLegPixels || []).forEach(place); // leftLegPixels: only while that front leg is down
   if (!o.alert && (o.tail || 0) <= 3) (o.tailBasePixels || []).forEach(place);
   // Pin-holes inside the outline (between the paws, at the tail's root) are filled.
   for (let pass = 0; pass < 2; pass++)
@@ -1855,7 +1873,111 @@ function catGrid(o) {
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++)
       if (was[y][x] && ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => was[y + dy]?.[x + dx])) g[y][x] = null;
+  if (ownTail && !o.noTail) tailLayer(g, o, line);
   return g;
+}
+
+// --- the tail -------------------------------------------------------------------------------
+// Drawn by itself on an empty grid, cleaned so its edges never jog by a single pixel, then set
+// behind the finished cat (only where nothing else is). Centre lines are [x, height above the
+// ground]; "R" is the root lying along the ground. Heights scale with the cat's height.
+const TAIL_POSES = {
+  rest: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.6, 13], [41, 16.5], [40.8, 19]],
+  sway1: [[30, "R"], [36, "R"], [39, 3.5], [40.8, 8], [41.8, 13], [42.4, 16.5], [42.6, 19]],
+  sway2: [[30, "R"], [36, "R"], [39.4, 3.5], [41.6, 8], [43, 13], [43.8, 16.5], [44, 19]],
+  curlIn: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.8, 13], [41.4, 15.6], [41.2, 17.6], [40.4, 18.2]],
+  curlOut: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.6, 13], [41.2, 16], [42, 18], [43, 18.6]],
+  alert: [[30, "R"], [35.5, "R"], [38.4, 4], [40, 9], [41, 15], [41.4, 19], [41.4, 21.5]],
+};
+function tailLayer(g, o, line) {
+  const fur = o.fur;
+  // The ground line (the lowest outlined row) and the cat's height, for scaling.
+  let yG = N - 1;
+  while (yG > 0 && !g[yG].some((c) => c)) yG--;
+  let top = 0;
+  while (top < N && !g[top].some((c) => c)) top++;
+  const k = Math.max(0.9, Math.min(1.2, (yG - top) / 41));
+  const pose = o.alert ? "alert" : ["rest", "sway1", "sway2", o.curlOut ? "curlOut" : "curlIn"][o.tail || 0];
+  const w = o.tailW || 1.1;
+  const [r0, r1] = o.fluffy ? [3.4, 1.6] : [w * 1.95, w * 1.35]; // radius in pixels, root to tip
+  // A long-haired tail is fuller, so it sits a little further out and lower, clear of the ruff.
+  const fl = (x, h) => (o.fluffy && h !== "R" ? [x + Math.min(2, h * 0.2), h * 0.9] : [x, h]);
+  let pts = TAIL_POSES[pose].map(([x0, h0]) => { const [x, h] = fl(x0, h0); return [x, h === "R" ? yG - 0.5 - r0 : yG - 0.5 - r0 - (h * k)]; });
+  const segL = pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]));
+  const total = segL.reduce((t, l) => t + l, 0);
+  // Inside the frame, outline included.
+  let run = 0;
+  pts = pts.map(([x, y], i) => { if (i) run += segL[i - 1]; return [Math.min(x, N - 1.6 - (r0 + (r1 - r0) * (run / total))), y]; });
+  const near = (x, y) => {
+    let best = null, at = 0;
+    pts.slice(1).forEach((q, i) => {
+      const a = pts[i], l = segL[i] || 1;
+      const t = Math.max(0, Math.min(1, ((x + 0.5 - a[0]) * (q[0] - a[0]) + (y + 0.5 - a[1]) * (q[1] - a[1])) / (l * l)));
+      const dx = x + 0.5 - (a[0] + (q[0] - a[0]) * t), dy = y + 0.5 - (a[1] + (q[1] - a[1]) * t), d = Math.hypot(dx, dy);
+      if (!best || d < best.d) best = { d, dx, dy, s: at + l * t };
+      at += l;
+    });
+    best.f = best.s / total;
+    best.r = r0 + (r1 - r0) * best.f;
+    return best;
+  };
+  // The tail and its outline as one shape.
+  const inS = Array.from({ length: N }, () => Array(N).fill(false));
+  const fillAt = (x, y) => y < yG && near(x, y).d <= near(x, y).r;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (fillAt(x, y)) inS[y][x] = true;
+  const dil = inS.map((r) => r.slice());
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++)
+      if (!inS[y][x] && y <= yG && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inS[y + dy]?.[x + dx])) dil[y][x] = true;
+  // No single-pixel jogs: wherever one row's (or one column's) edge sticks out or dips in by
+  // itself, it's set level with its neighbours.
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    const span = (get, len, i) => { let a = -1, b = -1, runs = 0, prev = false; for (let j = 0; j < len; j++) { const v = get(i, j); if (v && !prev) { runs++; if (a < 0) a = j; } if (v) b = j; prev = v; } return runs === 1 ? [a, b] : null; };
+    const fixAxis = (get, set, len) => {
+      const sp = Array.from({ length: N }, (_, i) => span(get, len, i));
+      for (let i = 1; i < N - 1; i++) {
+        const [p, c, n] = [sp[i - 1], sp[i], sp[i + 1]];
+        if (!p || !c || !n) continue;
+        for (const e of [0, 1]) {
+          const a = p[e], b = c[e], d = n[e];
+          if ((b > a && b > d) || (b < a && b < d)) {
+            const t = b > a ? Math.max(a, d) : Math.min(a, d); // level with the nearer neighbour
+            if (e === 1) for (let j = Math.min(b, t) + 1; j <= Math.max(b, t); j++) set(i, j, t > b);
+            else for (let j = Math.min(b, t); j < Math.max(b, t); j++) set(i, j, t < b);
+            c[e] = t; changed = true;
+          }
+        }
+      }
+    };
+    fixAxis((y, x) => dil[y][x], (y, x, v) => { if (y <= yG) dil[y][x] = v; }, N); // rows
+    fixAxis((x, y) => y <= yG && dil[y][x], (x, y, v) => { if (y <= yG) dil[y][x] = v; }, N); // columns
+    if (!changed) break;
+  }
+  // Outline: the shape's own edge. The rest is fur, coloured and shaded as a round tube.
+  const base = o.tailColor || (o.calico ? "#323034" : fur);
+  const band = o.ringColor || (o.tabby ? o.tabbyDark || shade(fur, 0.45) : shade(fur, 0.55));
+  const layer = grid();
+  for (let y = 0; y <= yG; y++)
+    for (let x = 0; x < N; x++) {
+      if (!dil[y][x]) continue;
+      if (y === yG || [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !dil[y + dy]?.[x + dx])) { layer[y][x] = line; continue; }
+      const t = near(x, y);
+      let c = base;
+      if (o.bandedTail && o.ringPeriod) c = t.f > 0.9 || (t.s > 9 && t.s % o.ringPeriod < 1) ? band : base;
+      else if (o.tabby) c = t.f > 0.86 || t.s % 4 < 2 ? band : base;
+      else if (o.calico && y > yG - 18 && Math.floor((y + Math.round(Math.sin(x * 1.3) * 1.5)) / 2) % 3 === 0) c = "#c9935c";
+      const r = t.r + 0.5, nx = t.dx / r, ny = t.dy / r, nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      const d = -0.6 * ny + 0.8 * nz - 0.15 * nx;
+      const kk = d < 0.15 ? 0.8 : d < 0.45 ? 0.9 : d > 0.95 ? 1.08 : 1;
+      layer[y][x] = kk === 1 ? c : shade(c, kk);
+    }
+  // Behind the cat: only where the sprite is empty.
+  for (let y = 0; y <= yG; y++) for (let x = 0; x < N; x++) if (layer[y][x] && !g[y][x]) g[y][x] = layer[y][x];
+  // A one-pixel slot left between the tail and the cat is closed with outline.
+  for (let y = 1; y < yG; y++)
+    for (let x = 30; x < N - 1; x++)
+      if (!g[y][x] && layer[y][x + 1] && g[y][x - 1]) g[y][x] = line;
 }
 
 // --- wildlife: side-on, facing left ---------------------------------------------------------
@@ -2070,18 +2192,22 @@ Object.assign(WILD, {
   Squirrel: (f) => SQUIRREL(f),
 });
 function GROUNDHOG(f) {
+  // Beaver-like: near-black brown frosted with grey-blue tips, a big round hunched body the
+  // head runs smoothly into, and a long, broad dark tail. Only the feet are darker.
   const hy = f.act === 1 ? -0.6 : f.act === 2 ? -1.4 : 0, dy = Math.round(hy * S);
+  const fur = "#3a2f29", frost = "#544e52", dark = "#1d1815", muzzle = "#5e544f";
   return quad({
     headDy: hy,
-    fur: "#7a5a3c", belly: "#a07c56", by: 22.2, brx: 10, bry: 5, legs: [11, 14, 21, 24], legW: 1,
-    hx: 7.6, hy: 19, hrx: 4.2, hry: 3.4, ears: [[[8.2, 15.9], [9, 14.5], [10.4, 16.1]]],
-    snout: [[4, 18.2], [1.6, 20.5], [4.6, 21.4]],
-    tails: [[[26.5, 21.5], [29.5, 20.8], [31.6, 21.4]], [[26.5, 21.5], [29.5, 20], [31.4, 19.4]]], tailW: 1.2, tailColor: "#33251a",
-    eye: [9, 27], nose: [3, 30],
+    fur, belly: "#43372f", bx: 15.2, brx: 9.4, by: 21.6, bry: 6.4, legs: [9.4, 12.4, 18.6, 21.6], legW: 1.05,
+    neck: [[12, 20.6], [8.4, 20.2]], neckW: 3.2,
+    hx: 6.4, hy: 20.4, hrx: 4.4, hry: 3.6, earBlob: [8.2, 17.2, 1, 0.9],
+    snout: [[3, 19.6], [0.8, 21.8], [3.6, 22.8]],
+    tails: [[[22.6, 23.2], [26.6, 24.2], [30, 25]], [[22.6, 23.2], [26.6, 23.4], [29.8, 22.4]]], tailW: 1.7, tailColor: "#241d19",
+    eye: [7, 29], nose: [2, 32],
     mark(g) {
-      recolor(g, (x, y) => y >= 29 + dy && y <= 32 + dy && x >= 3 && x <= 9, "#c8ad8c"); // pale muzzle
-      recolor(g, (x, y, c) => y >= 39 && x <= 38 && c !== "#c8ad8c", "#33251a"); // dark mitts
-      recolor(g, (x, y, c) => c === "#7a5a3c" && hash(x, y) % 5 === 0, "#8f6c4a"); // grizzled coat
+      recolor(g, (x, y) => y >= 30 + dy && y <= 33 + dy && x >= 2 && x <= 7, muzzle); // a greyer muzzle
+      recolor(g, (x, y, c) => y >= 41 && x <= 36 && c !== muzzle, dark); // darker feet
+      recolor(g, (x, y, c) => c === fur && hash(x, y) % 4 === 0 && y < 38, frost); // grizzled: pale tips through the coat
     },
   }, f);
 }
@@ -2294,8 +2420,8 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, small: true, fur: "#3b281e", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, curlOut: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
-  bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
+  smoky_banded_tail: { detail: true, slim: true, shoulderLean: false, pixels: [[30, 26, "#69615a"], [30, 28, "#3a3532"], [31, 28, "#69615a"], [31, 30, "#3a3532"]], leftLegPixels: [[17, 26, "#69615a"], [17, 28, "#3a3532"], [16, 28, "#69615a"], [16, 30, "#3a3532"]], softSpots: true, bellyPale: "#bbb3aa", tearMarks: true, mouth: "#8d7f78", legBars: [31, 34, 37], curlOut: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#e8e3dc", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#ddd7cf", paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", eyeLow: "#b0a548", lidLine: "#3d3833", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-47;8:0-47;9:0-47;10:0-17,30-47;11:0-15,32-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#e8e3dc", "22:23-24"], ["#57504a", "24:13-17,30-34;25:18-21,26-29"], ["#857d76", "26:22-25"], ["#9a928a", "23:21,26"], ["#c9c2b9", "23:22-25"], ["#a29a92", "24:22,25"], ["#b8b0a8", "24:23-24"], ["#8c847d", "25:22,25;26:22,25;27:22,25"], ["#a8a098", "25:23-24;26:23-24;27:23-24"], ["#918982", "28:22,25"], ["#7f7770", "29:22,25"], ["#aea69e", "28:23-24;29:23-24"], ["#b6aea6", "30:23-24;31:23-24"], ["#45403b", "15:16,31;16:14-15,32-33"]] },
+  bicolour_mask_paw_up: { detail: true, short: true, jawUp: 1, pixels: [[25, 10, "#1d1d20"], [26, 10, "#1d1d20"], [14, 16, "#1d1d20"], [24, 12, "#f1ece3"], [24, 13, "#f1ece3"], [30, 13, "#f1ece3"], [31, 13, "#f1ece3"], [30, 14, "#f1ece3"], [31, 14, "#f1ece3"], [22, 16, "#f1ece3"], [22, 17, "#f1ece3"], [27, 19, "#f1ece3"]], fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-31,33-47;13:30-31,33-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:23-26;16:22-28;17:22-28;18:21-28;19:21-27;20:21-26;21:22-25;22:23-24"], ["#1d1d20", "7:24-26;8:24-26;9:24,27;10:24,28-29;11:24,29;12:24;13:23;14:23-26;16:16-17,21"], ["#1d1d20", "14:18-19;15:18-20"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
 function spriteLook(look) {
