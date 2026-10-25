@@ -1667,7 +1667,7 @@ function catGrid(o) {
     }
     px(g, 17, 21 + dy, line); px(g, 23, 21 + dy, line); // rounded shoulders of the paw
     px(g, 19, 21 + dy, line); px(g, 21, 21 + dy, line); // toes
-    const bean = o.beans || (lum(pw) > 120 ? "#d98f9c" : shade(pw, 1.6)); // pink on a pale paw
+    const bean = o.beans || o.innerEar || (lum(pw) > 120 ? "#d98f9c" : shade(pw, 1.6)); // the face's own pink if it has one; pink on a pale paw
     for (const x of [18, 20, 22]) px(g, x, 22 + dy, bean); // toe beans
     for (const x of [19, 20, 21]) px(g, x, 23 + dy, bean); // the main pad
     if (!up) {
@@ -1862,7 +1862,7 @@ const ACTS = {
   Fox: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]], // ear flick
   Coyote: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]],
   Bear: [[{ act: 1 }, 0.6], [{ act: 2 }, 0.6]], // head swing
-  Deer: [[{ act: 1 }, 0.3], [{ act: 2 }, 1.6], [{ act: 1 }, 0.3]], // grazing
+  Deer: [[{ act: 1 }, 0.2], [{}, 0.5], [{ act: 1 }, 0.2], [{ tail: 1 }, 0.3], [{}, 0.3], [{ tail: 1 }, 0.3]], // an ear flick, then the tail
   Rabbit: [[{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12], [{}, 0.12]], // nose twitch
   Groundhog: [[{ act: 1 }, 0.4], [{ act: 2 }, 1], [{ act: 1 }, 0.4]], // up to look about
   Squirrel: [[{ act: 1 }, 0.25], [{ act: 2 }, 0.25], [{ act: 1 }, 0.25], [{ act: 2 }, 0.25], [{ tail: 2 }, 0.15], [{}, 0.15], [{ tail: 2 }, 0.15]], // nibbling, tail flick
@@ -1954,13 +1954,13 @@ function GROUNDHOG(f) {
   const hy = f.act === 1 ? -0.6 : f.act === 2 ? -1.4 : 0, dy = Math.round(hy * S);
   return quad({
     headDy: hy,
-    fur: "#7a5a3c", belly: "#a07c56", by: 21, brx: 9, bry: 6.5, legs: [11, 14, 20, 23], legW: 1,
-    hx: 8, hy: 17, hrx: 4.4, hry: 3.8, ears: [[[8.5, 13.6], [9.3, 12], [10.8, 13.8]]],
-    snout: [[4.5, 16], [2, 18.5], [5, 19.5]],
-    tails: [[[25.5, 22], [28, 21.5]], [[25.5, 22], [28, 20.5]]], tailW: 1.2, tailColor: "#33251a",
-    eye: [10, 24], nose: [3, 27],
+    fur: "#7a5a3c", belly: "#a07c56", by: 22.2, brx: 10, bry: 5, legs: [11, 14, 21, 24], legW: 1,
+    hx: 7.6, hy: 19, hrx: 4.2, hry: 3.4, ears: [[[8.2, 15.9], [9, 14.5], [10.4, 16.1]]],
+    snout: [[4, 18.2], [1.6, 20.5], [4.6, 21.4]],
+    tails: [[[26.5, 21.5], [29.5, 20.8], [31.6, 21.4]], [[26.5, 21.5], [29.5, 20], [31.4, 19.4]]], tailW: 1.2, tailColor: "#33251a",
+    eye: [9, 27], nose: [3, 30],
     mark(g) {
-      recolor(g, (x, y) => y >= 26 + dy && y <= 29 + dy && x >= 4 && x <= 10, "#c8ad8c"); // pale muzzle
+      recolor(g, (x, y) => y >= 29 + dy && y <= 32 + dy && x >= 3 && x <= 9, "#c8ad8c"); // pale muzzle
       recolor(g, (x, y, c) => y >= 39 && x <= 38 && c !== "#c8ad8c", "#33251a"); // dark mitts
       recolor(g, (x, y, c) => c === "#7a5a3c" && hash(x, y) % 5 === 0, "#8f6c4a"); // grizzled coat
     },
@@ -2019,14 +2019,36 @@ WILD.Rat = (f) => quad({
   tails: [[[22, 23.5], [26, 25.5], [30, 24.5]], [[22, 23.5], [26, 25], [29.6, 23]]], tailW: 0.4, tailColor: "#d9a0a0",
   eye: [13, 31], nose: [8, 34], noseColor: "#e48a95", noseDx: f.act ? -1 : 0,
 }, f);
-WILD.Bear = (f) => quad({
-  fur: "#1f1b1a", belly: "#1f1b1a", lit: "#3a3431", by: 17.5, brx: 11, bry: 7, bx: 18, legs: [10.5, 14, 22, 25.5], legW: 1.7, feet: 28.5,
-  hump: [13, 15, 6.5, 5.6], headDy: f.act ? 0.7 : 0, headDx: f.act === 2 ? -0.5 : 0,
-  hx: 6.5, hy: 15, hrx: 4.2, hry: 3.8, snout: [[3.5, 15], [0.5, 17.5], [4, 18.6]], snoutColor: "#9a7652",
-  ears: [[[7.5, 11.8], [8.5, 9.4], [10.4, 11.6]]],
-  tails: [[[28.5, 16.5], [29.6, 16.8]], [[28.5, 16.5], [29.6, 16]]], tailW: 0.7,
-  eye: [8, 21], nose: [1, 26],
-}, f);
+// The bear, drawn whole (side-on, facing left): a shoulder hump, the head carried low in front
+// of it with round ears and a long tan muzzle, heavy legs, a stub of a tail.
+WILD.Bear = (f) => {
+  const g = grid();
+  const fur = "#2b2421", far = "#1a1513", lit = "#463c37", muzzle = "#9a7652";
+  const hy = f.act ? 0.8 : 0, hx = f.act === 2 ? -0.4 : 0; // its own move: the head swings low
+  const sw = f.walk ? (f.walk === 1 ? 0.8 : -0.8) : 0;
+  thick(g, [[14 - sw, 21], [14.3 - sw, 27.6]], 1.5, far); // far front leg
+  thick(g, [[22 + sw, 21], [22.4 + sw, 27.6]], 1.5, far); // far hind leg
+  thick(g, [[30, 15.6], [31, 15.2 - (f.tail ? 0.6 : 0)]], 0.7, fur); // the tail
+  ellipse(g, 19.5, 18.5, 10, 5.6, fur); // body
+  ellipse(g, 13.5, 15.6, 5.6, 4.6, fur); // shoulder hump
+  ellipse(g, 25.5, 17.6, 5, 5, fur); // rump
+  thick(g, [[11 + sw, 20], [11.2 + sw, 27.6]], 1.9, fur); // near front leg
+  thick(g, [[25 - sw, 20], [25.6 - sw, 24.5], [25.2 - sw, 27.6]], 2.1, fur); // near hind leg
+  thick(g, [[10, 16.4 + hy / 2], [7.5 + hx, 17.4 + hy]], 2.4, fur); // neck
+  ellipse(g, 6.4 + hx, 17.4 + hy, 3.4, 3, fur); // head
+  ellipse(g, 6.2 + hx, 14.5 + hy, 1.1, 1.1, far); // far ear
+  ellipse(g, 8.2 + hx, 14.6 + hy, 1.2, 1.2, fur); // near ear
+  ellipse(g, 2.8 + hx, 18.6 + hy, 2.3, 1.4, muzzle); // the long muzzle
+  outline(g, LINE);
+  // Light along the top of the back, the far legs set back in shadow.
+  const edge = (x, y) => !g[y]?.[x] || g[y][x] === LINE;
+  recolor(g, (x, y, c) => c === fur && y < 30 && (edge(x, y - 1) || (edge(x, y - 2) && (x + y) % 2 === 0)), lit); // the top of the head, ears, hump and back
+  const ey = Math.round((16.6 + hy) * S), ex = Math.round((5.6 + hx) * S);
+  px(g, ex, ey, f.blink ? fur : "#6b4a30"); // a small brown eye
+  px(g, Math.round((0.8 + hx) * S), Math.round((18.2 + hy) * S), "#111"); // the nose, at the muzzle's tip
+  recolor(g, (x, y, c) => y >= 40 && c !== LINE && c !== muzzle, (x, y) => shade(g[y][x], 0.7)); // dark paws
+  return g;
+};
 // The rabbit sits up; its ear twitches instead of a tail.
 WILD.Rabbit = (f) => {
   const g = grid();
@@ -2055,12 +2077,11 @@ WILD.Rabbit = (f) => {
 
 // The deer stands taller: long legs, a neck and a white tail that flicks.
 WILD.Deer = (f) => quad({
-  headDy: f.act === 1 ? 5 : f.act === 2 ? 13 : 0, headDx: f.act === 1 ? -0.5 : f.act === 2 ? -1.2 : 0,
   dorsal: "#8a6242",
   fur: "#a77a52", belly: "#eadfcf", bx: 17.5, by: 14.5, brx: 9, bry: 4.6, legs: [10.5, 13.5, 21, 24], legW: 0.6, feet: 29,
   neck: [[10.5, 13], [8, 8]], neckW: 1.5, hx: 7, hy: 6.5, hrx: 3, hry: 2.2,
   snout: [[5, 5.4], [2.8, 7.4], [5, 8.2]],
-  ears: [[[8.5, 4.8], [11, 2], [10.5, 5.6]]],
+  ears: [f.act === 1 ? [[8.5, 4.8], [12, 3.4], [10.5, 5.6]] : [[8.5, 4.8], [11, 2], [10.5, 5.6]]], // act 1: the ear flicks back
   tails: [[[26, 12.4], [26.6, 13]], [[26, 11.6], [26.6, 10.8]]], tailW: 1.2, tailColor: "#eadfcf",
   eye: [9, 9], nose: [4, 11],
   mark(g) {
@@ -2154,7 +2175,7 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, fur: "#4a3326", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, grow: true, tailBasePixels: [[36, 35, null], [37, 35, null], [36, 36, "line"], [37, 36, "line"], [37, 40, "line"]], tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, tall: 2, tailBasePixels: [[37, 42, "#6e665e"], [37, 43, "line"]], bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
@@ -2170,8 +2191,7 @@ function spriteFrames(spec) {
     if (spec.cat) frames = spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat)) : idleCatFrames(spriteLook(spec.cat));
     else if (spec.wild && WILD[spec.wild]) {
       const make = WILD[spec.wild];
-      if (spec.mode === "alert") frames = alertWildFrames(make);
-      else frames = idleWildFrames(make, spec.wild);
+      frames = idleWildFrames(make, spec.wild); // wildlife has no alert pose: it just idles
       // Newly seen: it walks in first (a few steps), then idles.
       if (spec.mode === "walk") frames = [...[0, 1, 2].flatMap(() => walkerFrames(make)), ...frames];
     }
