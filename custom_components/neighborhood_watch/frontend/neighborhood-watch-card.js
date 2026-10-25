@@ -1355,7 +1355,7 @@ function catGrid(o) {
   if (o.spottedBelly) {
     const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
-    const half = { 0: 3, 1: 4, 2: 4, 3: 3 };
+    const half = { 0: d ? 2 : 3, 1: 4, 2: 4, 3: 3 }; // a lowered belly's top is a narrow cap
     const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
@@ -1435,10 +1435,16 @@ function catGrid(o) {
   }
   // Shoulders, when asked for: a darker curve where each front leg rises into the body.
   const shoulder = (x0) => {
-    // The leg's outer edge carries on up the chest, leaning in toward the neck.
-    const k = shade(fur, 0.55), outer = x0 < 23 ? x0 : x0 + 6, dir = x0 < 23 ? 1 : -1;
-    const run = [[0, 32], [0, 31], [0, 30], [0, 29], [1, 28], [1, 27], [1, 26], [1, 25], [2, 24], [2, 23], [2, 22]];
-    for (const [dx, y] of run) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
+    // The leg's outer outline carries on up four rows, then a softer line leans in toward
+    // the neck; its inner edge steps in one, beside the belly's top.
+    const k = shade(fur, 0.55), left = x0 < 23, dir = left ? 1 : -1;
+    const outer = left ? x0 : x0 + 6, inner = left ? x0 + 6 : x0;
+    const put = (x, y, c) => { if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, c); };
+    for (const y of [29, 30, 31, 32]) put(outer, y, line);
+    put(outer, 28, k);
+    for (const y of [25, 26, 27]) put(outer + dir, y, k);
+    put(inner - dir, 32, line);
+    for (const y of [30, 31]) put(inner - dir, y, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
     const side = x0 < 23 ? [[13, 36], [13, 35], [14, 34], [15, 33]] : [[34, 36], [34, 35], [33, 34], [32, 33]];
     for (const [x, y] of side) if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, k);
@@ -2016,7 +2022,7 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
   black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 2, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
