@@ -1576,16 +1576,33 @@ function catGrid(o) {
   // Depth: what shows behind the front legs low down (between them, and where a lifted leg
   // was) darkens gently toward the ground, its top rounded (the edge pixels a step lighter).
   {
+    // Light coats need a deeper step to show at all.
     const fade = { 39: 0.97, 40: 0.94, 41: 0.91, 42: 0.88, 43: 0.86 };
+    const fadeLight = { 39: 0.94, 40: 0.89, 41: 0.84, 42: 0.8, 43: 0.77 };
     const behind = (x, y) => g[y]?.[x] && g[y][x] !== line && ((x >= 23 && x <= 24) || bare(x, y));
     const was = g.map((r) => r.slice());
     for (let y = 39; y <= 43; y++)
       for (let x = 17; x <= 30; x++) {
         if (!behind(x, y)) continue;
         const edge = y <= 41 && (!behind(x - 1, y) || !behind(x + 1, y));
-        const f = edge ? fade[y - 1] ?? 1 : fade[y];
+        const t = lum(was[y][x]) > 170 ? fadeLight : fade;
+        const f = edge ? t[y - 1] ?? 1 : t[y];
         if (f < 1) g[y][x] = shade(was[y][x], f);
       }
+    // Where the front legs stand so close that no gap shows, the shadow falls on their inner
+    // edges instead: the pixel just inside each leg's inner outline.
+    for (let y = 39; y <= 43; y++) {
+      if (behind(23, y) || behind(24, y)) continue;
+      let l = 23, r = 24;
+      while (l > 17 && was[y][l] !== line) l--;
+      while (r < 30 && was[y][r] !== line) r++;
+      while (l > 17 && was[y][l - 1] === line) l--;
+      while (r < 30 && was[y][r + 1] === line) r++;
+      for (const x of [l - 1, r + 1]) {
+        const c = was[y][x];
+        if (c && c !== line) g[y][x] = shade(c, (lum(c) > 170 ? fadeLight : fade)[y]);
+      }
+    }
   }
   if (o.lick && o.lick !== "up") {
     // A front paw raised to the mouth (over the whiskers), toes up, a lick of tongue on it.
@@ -1666,6 +1683,11 @@ function catGrid(o) {
         if (l && r && u && d) g[y][x] = [u, l, r, d].find((c) => c !== line) || line;
         else if (l && r && d && (y >= 40) && g[y + 1][x] === line) g[y][x] = line; // a notch in the ground line
       }
+  // A pixel left on its own (nothing above, below or beside it) is a stray: removed.
+  const was = g.map((r) => r.slice());
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++)
+      if (was[y][x] && ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => was[y + dy]?.[x + dx])) g[y][x] = null;
   return g;
 }
 
