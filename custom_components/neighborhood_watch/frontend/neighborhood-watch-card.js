@@ -1094,79 +1094,72 @@ function idleCat(o) {
   return animated(idleCatFrames(o));
 }
 function idleCatFrames(o) {
-  if (!o.pawUp) return o.tailWrap ? [...idleFrames(o), ...wrapFrames(o)] : idleFrames(o);
-  const down = { ...o, pawUp: false }, c = (f) => catGrid({ ...o, ...f });
-  const shuffle = [[c({ tail: 0, pawShift: 1 }), 0.3], [c({ tail: 0 }), 0.7], [c({ tail: 0, pawShift: 1 }), 0.25], [c({ tail: 0 }), 0.5]];
-  const lower = [[catGrid({ ...down, tail: 0, lick: "up" }), 0.15]];
-  return [...idleFrames(o).slice(0, 14), ...shuffle, ...idleFrames(o).slice(14), ...lower, ...idleFrames(down), ...(o.tailWrap ? wrapFrames(down) : []), ...lower];
-}
-// tailWrap: now and then the tail sweeps down and round, lies curled round the front paw for a
-// while (a blink, a breath), then goes back.
-function wrapFrames(o) {
-  const c = (f) => catGrid({ ...o, ...f }), wrapped = c({ tail: 7 });
+  if (!o.pawUp) return o.tailWrap ? [...idleFrames(o), ...wrapIn(o), ...idleFrames(o, true), ...wrapOut(o)] : idleFrames(o);
+  const down = { ...o, pawUp: false };
+  const shuffle = (t) => [[catGrid({ ...o, tail: t, pawShift: 1 }), 0.3], [catGrid({ ...o, tail: t }), 0.7], [catGrid({ ...o, tail: t, pawShift: 1 }), 0.25], [catGrid({ ...o, tail: t }), 0.5]];
+  const lower = (t) => [[catGrid({ ...down, tail: t, lick: "up" }), 0.15]];
+  const up = [...idleFrames(o).slice(0, 14), ...shuffle(0), ...idleFrames(o).slice(14)];
+  if (!o.tailWrap) return [...up, ...lower(0), ...idleFrames(down), ...lower(0)];
+  // With tailWrap the tail also spends a stretch curled round the paw: it wraps in, the paws
+  // go down and up again with it wrapped, and it unwraps before the moves that swing it.
   return [
-    [c({ tail: 5 }), 0.22],
-    [c({ tail: 6 }), 0.22],
-    [wrapped, jitter(2.2)],
-    [c({ tail: 7, blink: true }), 0.18],
-    [wrapped, jitter(1.6)],
-    [breathe(wrapped), 0.7],
-    [wrapped, jitter(1.8)],
-    [c({ tail: 7, halfBlink: true }), 0.5],
-    [c({ tail: 7, blink: true }), 0.5],
-    [c({ tail: 7, halfBlink: true }), 0.5],
-    [wrapped, jitter(1.4)],
-    [c({ tail: 6 }), 0.22],
-    [c({ tail: 5 }), 0.22],
+    ...up, ...lower(0), ...idleFrames(down),
+    ...wrapIn(down), ...idleFrames(down, true), ...lower(7),
+    ...shuffle(7), ...idleFrames(o, true).slice(0, 12), ...wrapOut(o),
   ];
 }
-function idleFrames(o) {
-  const c = (f) => catGrid({ ...o, ...f });
-  const rest = c({ tail: 0 });
+// tailWrap: the tail sweeps down to the side, then onto the ground curled round the front paw
+// (tail 5, 6, 7); unwrapping plays the same steps back.
+const wrapIn = (o) => [[catGrid({ ...o, tail: 5 }), 0.22], [catGrid({ ...o, tail: 6 }), 0.22]];
+const wrapOut = (o) => [[catGrid({ ...o, tail: 6 }), 0.22], [catGrid({ ...o, tail: 5 }), 0.22]];
+// wrapped: the tail lies curled round the paw throughout, so the tail-swinging moves are left out.
+function idleFrames(o, wrapped = false) {
+  const t0 = wrapped ? 7 : 0, c = (f) => catGrid({ ...o, ...f });
+  const rest = c({ tail: t0 });
   return [
     [rest, jitter(1.2)],
-    [c({ tail: 1 }), 0.5],
-    [c({ tail: 2 }), jitter(1.2)],
-    [c({ tail: 1 }), 0.5],
+    !wrapped && [c({ tail: 1 }), 0.5],
+    !wrapped && [c({ tail: 2 }), jitter(1.2)],
+    !wrapped && [c({ tail: 1 }), 0.5],
     [breathe(rest), 0.7],
     [rest, jitter(1)],
-    [c({ tail: 0, blink: true }), 0.18],
+    [c({ tail: t0, blink: true }), 0.18],
     [rest, jitter(0.9)],
-    [c({ tail: 0, earFlick: true }), 0.22],
+    [c({ tail: t0, earFlick: true }), 0.22],
     [rest, 0.3],
-    [c({ tail: 0, earFlick: true }), 0.22],
+    [c({ tail: t0, earFlick: true }), 0.22],
     [breathe(rest), 0.7],
-    [c({ tail: 3 }), jitter(1.2)],
+    !wrapped && [c({ tail: 3 }), jitter(1.2)],
     [rest, jitter(0.8)],
-    [c({ tail: 0, halfBlink: true }), 0.3],
-    [c({ tail: 0, blink: true }), 0.6],
-    [c({ tail: 0, halfBlink: true }), 0.3],
+    [c({ tail: t0, halfBlink: true }), 0.3],
+    [c({ tail: t0, blink: true }), 0.6],
+    [c({ tail: t0, halfBlink: true }), 0.3],
     [rest, jitter(1.4)],
     [breathe(rest), 0.7],
     [rest, jitter(1)],
-    [c({ tail: 0, yawn: 1 }), 0.25],
-    [c({ tail: 0, yawn: 2 }), 1],
-    [c({ tail: 0, yawn: 1 }), 0.25],
+    [c({ tail: t0, yawn: 1 }), 0.25],
+    [c({ tail: t0, yawn: 2 }), 1],
+    [c({ tail: t0, yawn: 1 }), 0.25],
     [rest, jitter(1.6)],
-    [c({ tail: 0, lick: "up" }), 0.16],
-    [c({ tail: 0, lick: "mid", lickY: 14 }), 0.12],
-    [c({ tail: 0, lick: "mid", lickY: 9 }), 0.12],
-    [c({ tail: 0, lick: "mid", lickY: 4 }), 0.12],
-    [c({ tail: 0, lick: 1 }), 0.28],
-    [c({ tail: 0, lick: 2 }), 0.22],
-    [c({ tail: 0, lick: 1 }), 0.22],
-    [c({ tail: 0, lick: 2 }), 0.22],
-    [c({ tail: 0, lick: 1 }), 0.22],
-    [c({ tail: 0, lick: 2 }), 0.22],
-    [c({ tail: 0, lick: 1 }), 0.22],
-    [c({ tail: 0, lick: 2 }), 0.22],
-    [c({ tail: 0, lick: "mid", lickY: 4 }), 0.12],
-    [c({ tail: 0, lick: "mid", lickY: 9 }), 0.12],
-    [c({ tail: 0, lick: "mid", lickY: 14 }), 0.12],
-    [c({ tail: 0, lick: "up" }), 0.16],
+    [c({ tail: t0, lick: "up" }), 0.16],
+    [c({ tail: t0, lick: "mid", lickY: 14 }), 0.12],
+    [c({ tail: t0, lick: "mid", lickY: 9 }), 0.12],
+    [c({ tail: t0, lick: "mid", lickY: 4 }), 0.12],
+    [c({ tail: t0, lick: 1 }), 0.28],
+    [c({ tail: t0, lick: 2 }), 0.22],
+    [c({ tail: t0, lick: 1 }), 0.22],
+    [c({ tail: t0, lick: 2 }), 0.22],
+    [c({ tail: t0, lick: 1 }), 0.22],
+    [c({ tail: t0, lick: 2 }), 0.22],
+    [c({ tail: t0, lick: 1 }), 0.22],
+    [c({ tail: t0, lick: 2 }), 0.22],
+    [c({ tail: t0, lick: "mid", lickY: 4 }), 0.12],
+    [c({ tail: t0, lick: "mid", lickY: 9 }), 0.12],
+    [c({ tail: t0, lick: "mid", lickY: 14 }), 0.12],
+    [c({ tail: t0, lick: "up" }), 0.16],
     [rest, jitter(1.2)],
     [rest, jitter(1)],
-  ];
+  ].filter(Boolean);
 }
 // On alert: ears up, tail straight up, wide eyes; still apart from a blink.
 function alertCat(o) {
@@ -1576,11 +1569,20 @@ function catGrid(o) {
       px(g, 22, 27, line); px(g, 25, 27, line); px(g, 22, 28, line); px(g, 25, 28, line); px(g, 23, 29, line); px(g, 24, 29, line);
     }
   }
-  for (let y = 37; y <= 43; y++)
-    for (let x = 17; x <= 30; x++) {
-      const c = g[y][x];
-      if (c && c !== line && ((x >= 23 && x <= 24) || bare(x, y))) g[y][x] = shade(c, 0.86);
-    }
+  // Depth: what shows behind the front legs low down (between them, and where a lifted leg
+  // was) darkens gently toward the ground, its top rounded (the edge pixels a step lighter).
+  {
+    const fade = { 39: 0.97, 40: 0.94, 41: 0.91, 42: 0.88, 43: 0.86 };
+    const behind = (x, y) => g[y]?.[x] && g[y][x] !== line && ((x >= 23 && x <= 24) || bare(x, y));
+    const was = g.map((r) => r.slice());
+    for (let y = 39; y <= 43; y++)
+      for (let x = 17; x <= 30; x++) {
+        if (!behind(x, y)) continue;
+        const edge = y <= 41 && (!behind(x - 1, y) || !behind(x + 1, y));
+        const f = edge ? fade[y - 1] ?? 1 : fade[y];
+        if (f < 1) g[y][x] = shade(was[y][x], f);
+      }
+  }
   if (o.lick && o.lick !== "up") {
     // A front paw raised to the mouth (over the whiskers), toes up, a lick of tongue on it.
     const pw = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur;
@@ -1595,13 +1597,17 @@ function catGrid(o) {
     const low = up && 20 + dy >= 27;
     const top = up ? Math.min(27, 24 + dy) : 24 + dy, bottom = up ? Math.max(37, 26 + dy) : 31;
     const join = shade(fur, 0.68); // where the leg meets the body: soft, not a hard outline
+    // Held high, the leg below the paw slants out to where the leg really is (two pixels to the
+    // side by its base), not straight down the middle of the chest.
+    const out = (y) => (low ? 0 : -Math.round(((y - top) * 2) / Math.max(1, bottom - top)));
     for (let y = top; y <= bottom; y++) {
       const soft = up && low && y === top; // only the shoulder join is soft
       const elbow = up && y === bottom; // the bent elbow below the paw: rounded and closed
-      if (!elbow) { px(g, 17, y, soft ? join : line); px(g, 23, y, soft ? join : line); } // the elbow's corners stay body
-      for (let x = 18; x <= 22; x++) px(g, x, y, elbow && (x === 18 || x === 22) ? line : legC);
+      const o2 = out(y);
+      if (!elbow) { px(g, 17 + o2, y, soft ? join : line); px(g, 23 + o2, y, soft ? join : line); } // the elbow's corners stay body
+      for (let x = 18; x <= 22; x++) px(g, x + o2, y, elbow && (x === 18 || x === 22) ? line : legC);
     }
-    if (up) for (let x = 19; x <= 21; x++) px(g, x, bottom + 1, line);
+    if (up) for (let x = 19; x <= 21; x++) px(g, x + out(bottom), bottom + 1, line);
     // The paw, toes up: the same size and shape as a standing paw, turned over.
     for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
     for (let y = 21 + dy; y <= 23 + dy; y++) {
