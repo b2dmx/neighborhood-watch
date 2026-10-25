@@ -1356,7 +1356,7 @@ function catGrid(o) {
     const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
     const half = { 0: 3, 1: 4, 2: 4, 3: 3 };
-    const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // rounded, then down between the legs to the ground
+    const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
     const spots = [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
@@ -1436,7 +1436,7 @@ function catGrid(o) {
   // Shoulders, when asked for: a darker curve where each front leg rises into the body.
   const shoulder = (x0) => {
     const k = shade(fur, 0.68), outer = x0 < 23 ? x0 : x0 + 6, dir = x0 < 23 ? 1 : -1;
-    for (const [dx, y] of [[0, 32], [0, 31], [1, 30], [2, 29], [3, 29]]) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
+    for (const [dx, y] of [[0, 32], [0, 31], [0, 30], [0, 29], [1, 28], [2, 27], [3, 27]]) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
@@ -1548,12 +1548,12 @@ function catGrid(o) {
     // held higher, it runs down from the paw into the chest to a closed elbow.
     const low = up && 20 + dy >= 29;
     const top = low ? 27 : 24 + dy, bottom = low ? 19 + dy : up ? 37 : 31;
+    const join = shade(fur, 0.68); // where the leg meets the body: soft, not a hard outline
     for (let y = top; y <= bottom; y++) {
-      px(g, 17, y, line); px(g, 23, y, line);
+      const soft = up && (low ? y < top + 2 : y > bottom - 2);
+      px(g, 17, y, soft ? join : line); px(g, 23, y, soft ? join : line);
       for (let x = 18; x <= 22; x++) px(g, x, y, legC);
     }
-    if (low) for (let x = 18; x <= 22; x++) px(g, x, top - 1, line); // the shoulder, rounded over the top
-    else if (up) for (let x = 18; x <= 22; x++) px(g, x, bottom + 1, line); // the elbow: closed below, its corners stepped in
     // The paw, toes up: the same size and shape as a standing paw, turned over.
     for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
     for (let y = 21 + dy; y <= 23 + dy; y++) {
