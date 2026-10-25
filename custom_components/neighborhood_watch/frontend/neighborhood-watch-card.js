@@ -1196,6 +1196,10 @@ function catGrid(o) {
     [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [19.2, 29.4], [18.3, 28.4], [18.9, 27.6]],
   ];
   let tailPath = tails[o.alert ? 4 : o.tail || 0];
+  // The tail's root sits low, near the ground, so it doesn't float off the hip: the first two
+  // points drop a little (not for a long-haired tail, nor for one wrapped round to the front).
+  if (!o.tailPaths && !o.fluffy && !o.tailTaper && (o.alert || (o.tail || 0) <= 5))
+    tailPath = tailPath.map(([x, y], i) => (i < 2 ? [x, y + 1] : i === 2 ? [x, y + 0.5] : [x, y]));
   if (o.tall) {
     // A taller cat carries a longer tail, so the extra height isn't left empty beside it.
     const [a, b] = tailPath.slice(-2), l = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -1738,6 +1742,7 @@ function catGrid(o) {
         const l = g[y][x - 1], r = g[y][x + 1], u = g[y - 1][x], d = g[y + 1][x];
         if (l && r && u && d) g[y][x] = [u, l, r, d].find((c) => c !== line) || line;
         else if (l && r && d && (y >= 40) && g[y + 1][x] === line) g[y][x] = line; // a notch in the ground line
+        else if (x >= 33 && y >= 30 && l === line && r === line && d) g[y][x] = line; // a notch where the tail meets the body
       }
   // A pixel left on its own (nothing above, below or beside it) is a stray: removed.
   const was = g.map((r) => r.slice());
@@ -2180,10 +2185,10 @@ const SPRITE_PRESETS = {
   calico_collar: { detail: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
   grey_chest_spot: { detail: true, fur: "#7f7e7b", chestPatch: true },
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
-  brown_tabby: { detail: true, fur: "#3b281e", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
-  charcoal_white_chest: { detail: true, grow: true, tailBasePixels: [[36, 35, null], [37, 35, null], [36, 36, "line"], [37, 36, "line"], [37, 40, "line"]], tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
+  brown_tabby: { detail: true, fur: "#3b281e", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: 2, tailBasePixels: [[37, 42, "#6e665e"], [37, 43, "line"]], bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
