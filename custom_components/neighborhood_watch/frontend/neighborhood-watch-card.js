@@ -1347,14 +1347,19 @@ function catGrid(o) {
     on((x, y) => x >= 32 && y >= 24 && y <= 37 && ((x - 35) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides);
   }
   if (o.tailColor) on((x, y) => x >= 33 && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 > 1, o.tailColor); // the whole tail
+  // With a front leg lifted, the belly behind it shows: below the held-up paw, or the whole
+  // leg's length while licking.
+  const bareTop = o.lick === 1 || o.lick === 2 || o.lick === "mid" ? 33 : o.lick === "up" ? 41 : o.pawUp ? 40 + (o.pawShift || 0) : null;
+  const bareLeft = { 33: 20, 34: 19, 35: 19, 36: 19, 37: 19, 38: 19, 39: 19, 40: 19, 41: 20, 42: 21, 43: 21 }; // rounded, narrowing to the ground
+  const bare = (x, y) => bareTop !== null && y >= bareTop && x <= 22 && x >= (bareLeft[y] ?? N);
   if (o.spottedBelly) {
     const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
     const half = { 29: 3, 30: 4, 31: 4, 32: 3 };
-    const inBelly = (x, y) => y >= 29 && (y <= 32 ? Math.abs(x + 0.5 - 24) <= half[y] : x >= 23 && x <= 24); // rounded, then down between the legs to the ground
+    const inBelly = (x, y) => bare(x, y) || (y >= 29 && (y <= 32 ? Math.abs(x + 0.5 - 24) <= half[y] : x >= 23 && x <= 24)); // rounded, then down between the legs to the ground
     const spots = [[21, 30], [26, 30], [22, 32], [25, 32]]; // even, single-pixel, mirrored, staggered
     on(inBelly, (x, y) => (!o.plainBelly && spots.some(([sx, sy]) => sx === x && sy === y) ? spot : pale)); // pale (spotted) belly, kept off the legs
   }
-  if (o.whiteChest) on((x, y) => y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
+  if (o.whiteChest) on((x, y) => bare(x, y) || y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
   for (const [colour, runs] of o.marks || []) {
     const set = new Set();
     for (const row of String(runs).split(";")) {
