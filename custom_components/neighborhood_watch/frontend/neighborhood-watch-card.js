@@ -1015,6 +1015,7 @@ function thick(g, pts, r, c) {
     }
   }
 }
+const lum = (c) => { const n = parseInt((c.length === 4 ? c.replace(/#(.)(.)(.)/, "#$1$1$2$2$3$3") : c).slice(1), 16); return ((n >> 16) * 3 + ((n >> 8) & 255) * 6 + (n & 255)) / 10; };
 function outline(g, col) {
   const o = grid();
   for (let y = 0; y < N; y++)
@@ -1625,7 +1626,24 @@ function catGrid(o) {
     const tg = grid();
     thick(tg, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), o.tailColor || fur);
     outline(tg, line);
+    const tail = (x, y) => tg[y]?.[x] && tg[y][x] !== line;
+    // Where the tail lies against the body it's set apart: a solid line between them, the
+    // body's edge there catching a little light, and the tail's root a shade darker.
+    const touches = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => tail(x + dx, y + dy));
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        if (tail(x, y) || !g[y][x] || g[y][x] === line || x < 30 || !touches(x, y)) continue;
+        g[y][x] = line; // the dividing line, on the body's side
+        for (const [dx, dy] of [[-1, 0], [0, -1], [0, 1]]) {
+          const c = g[y + dy]?.[x + dx];
+          if (c && c !== line && !tail(x + dx, y + dy) && lum(c) < 70) g[y + dy][x + dx] = shade(c, 1.7);
+        }
+      }
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (tg[y][x] && (y >= 39 || x >= 33)) g[y][x] = tg[y][x];
+    const [rx, ry] = [tailPath[0][0] * S, tailPath[0][1] * S];
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++)
+        if (tail(x, y) && Math.hypot(x + 0.5 - rx, y + 0.5 - ry) < 3.2) g[y][x] = shade(tg[y][x], 0.7); // the root, in the body's shadow
   }
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
