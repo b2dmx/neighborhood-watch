@@ -1071,12 +1071,13 @@ function reducedMotion() {
 function jitter(d) {
   return +(d * (0.75 + Math.random() * 0.5)).toFixed(2);
 }
-// Breathing: everything above the chest rises a pixel (the chest row stretches).
-function breathe(g) {
+// Breathing: everything above the chest rises a pixel (the chest row stretches). Columns from
+// keep on (a cat's tail) stay put.
+function breathe(g, keep = N) {
   const rows = g.map((r, y) => (r.some((c) => c) ? y : -1)).filter((y) => y >= 0);
   const top = rows[0], mid = Math.round(top + (rows[rows.length - 1] - top) * 0.55);
   const out = g.map((r) => r.slice());
-  for (let y = Math.max(top - 1, 0); y < mid; y++) out[y] = g[y + 1].slice();
+  for (let y = Math.max(top - 1, 0); y < mid; y++) out[y] = [...g[y + 1].slice(0, keep), ...g[y].slice(keep)];
   return out;
 }
 // The whole sprite lifted off the ground (a hop).
@@ -1122,21 +1123,25 @@ function idleFrames(o, wrapped = false) {
     [c({ tail: wrapped ? 8 : 1 }), 0.5],
     [c({ tail: wrapped ? 9 : 2 }), jitter(1.2)],
     [c({ tail: wrapped ? 8 : 1 }), 0.5],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
     [rest, jitter(1)],
     [c({ tail: t0, blink: true }), 0.18],
     [rest, jitter(0.9)],
     [c({ tail: t0, earFlick: true }), 0.22],
     [rest, 0.3],
     [c({ tail: t0, earFlick: true }), 0.22],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
+    [rest, jitter(0.8)],
+    [c({ tail: t0, whiskerTwitch: true }), 0.16],
+    [rest, 0.25],
+    [c({ tail: t0, whiskerTwitch: true }), 0.16],
     [c({ tail: wrapped ? 9 : 3 }), jitter(1.2)],
     [rest, jitter(0.8)],
     [c({ tail: t0, halfBlink: true }), 0.3],
     [c({ tail: t0, blink: true }), 0.6],
     [c({ tail: t0, halfBlink: true }), 0.3],
     [rest, jitter(1.4)],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
     [rest, jitter(1)],
     [c({ tail: t0, yawn: 1 }), 0.25],
     [c({ tail: t0, yawn: 2 }), 1],
@@ -1174,13 +1179,13 @@ function catGrid(o) {
   const g = grid();
   const fur = o.fur, WHITE = "#f1ece3";
   const isFur = (c) => c === fur;
-  const bodyRx = o.fluffy || o.big ? 8.4 : o.small ? 6.8 : 7.5; // long hair or a big frame; a small cat narrower
+  const bodyRx = o.fluffy || o.big ? 8.4 : o.slim ? 6.3 : o.small ? 6.8 : 7.5; // long hair or a big frame; a small cat narrower
   const tails = o.tailPaths || [
     [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 16.5]],
     [[23, 25.5], [26.5, 25.5], [28.8, 22.5], [29, 19], [28.6, 16.6]],
     [[23, 25.5], [26.5, 25.5], [29, 22.8], [29.8, 19.5], [30, 16.8]],
     [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 17], [25.8, 17.6]], // the tip curled over
-    [[23, 25.5], [26.5, 25.5], [28.6, 22], [28.8, 17], [28.6, 13.5]], // straight up, on alert
+    [[23, 25.5], [25.6, 24.8], [26.4, 21.5], [26.6, 17], [26.4, 13]], // straight up and close, on alert
     // Wrapping the tail round to the front: 5 swept low to the side, 6 on the ground at the
     // side, 7 lying on the ground curled round the front paw.
     [[23, 25.5], [26.5, 26.2], [29, 26.4], [30.6, 25.2]],
@@ -1280,18 +1285,18 @@ function catGrid(o) {
       // Classic (marbled) tabby instead: a bullseye swirl on each side (a dark centre, then
       // a dark ring), the dark bands edged in a paler tan as marbling is; a band over each
       // shoulder. Mirrored.
-      const pale = shade(fur, 1.45), deep = o.tabbyDark || shade(fur, 0.32); // the darkest bands, near black
+      const pale = shade(fur, 1.45), band = shade(fur, 0.45);
       const ring = (x, y) => {
         const m = Math.min(x, 47 - x);
-        if (y < 22 || y > 42 || m > 19) return null;
+        if (y < 23 || y > 41 || m > 18) return null;
         const r = Math.hypot(m - 12.5, (y - 31.5) * 0.8);
-        if (r < 2 || (r > 2.6 && r < 5.2) || (r > 5.8 && r < 8.6)) return "dark"; // broad bands, most of the side
-        if ((r >= 2 && r <= 2.6) || (r >= 5.2 && r <= 5.8)) return "pale";
+        if (r < 1.5 || (r > 3 && r < 4.6) || (r > 6.2 && r < 7.6)) return "dark";
+        if ((r >= 1.5 && r < 2.1) || (r >= 4.6 && r < 5.2)) return "pale";
         return null;
       };
       on((x, y) => ring(x, y) === "pale", pale);
-      on((x, y) => ring(x, y) === "dark", deep);
-      on((x, y) => y >= 22 && y <= 25 && Math.min(x, 47 - x) >= 14 && Math.min(x, 47 - x) <= 19, deep); // a band over each shoulder
+      on((x, y) => ring(x, y) === "dark", band);
+      on((x, y) => y >= 23 && y <= 24 && Math.min(x, 47 - x) >= 15 && Math.min(x, 47 - x) <= 19, band); // a band over each shoulder
     } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
     else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
     on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
@@ -1428,7 +1433,7 @@ function catGrid(o) {
   if (o.chestPatch) on((x, y) => ((x - cx) ** 2) / 4 + ((y - 26) ** 2) / 6 <= 1, WHITE); // a small white chest patch
   if (o.tuxedo || o.whitePaws) on((x, y) => y >= 41 && ((x >= 16 && x <= 22 && !o.lick && !o.pawUp) || (x >= 25 && x <= 31)), WHITE);
   if (o.whiteBackPaws || o.whitePaws) on((x, y) => y >= 41 && (x <= 15 || (x >= 32 && x <= 35)), WHITE); // back feet only, not the tail beside them
-  if (o.whiteBackLegs) on((x, y) => (x <= 15 || (x >= 32 && x <= 35)) && y >= 35 + (x === 15 || x === 32 ? 1 : 0), WHITE); // the lower hind legs too, rounded where they meet the body
+  if (o.whiteBackLegs) on((x, y) => (x <= 15 || (x >= 32 && x <= 34)) && y >= (x === 15 || x === 32 ? 36 : x === 14 || x === 33 ? 37 : 38), WHITE); // the lower hind legs too, rounded where they meet the body
 
   outline(g, o.outline || "#141416");
   const line = o.outline || "#141416";
@@ -1550,10 +1555,10 @@ function catGrid(o) {
     px(g, ex + (ex < 23 ? 2 : 0), 13, "#fff");
     if (o.halfBlink || o.yawn === 1) for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 13, o.lid || "#141416"); // lids half down
   }
-  if (o.eyeliner && !o.blink && !o.lick && o.yawn !== 2) {
+  if (o.eyeliner) {
     const rim = o.eyeliner;
     for (const ex of [18, 27]) {
-      for (let dx = 0; dx < 3; dx++) { if (o.rimTop && !o.halfBlink && o.yawn !== 1) px(g, ex + dx, 12, rim); px(g, ex + dx, 16, rim); }
+      for (let dx = 0; dx < 3; dx++) { if (o.rimTop && !o.halfBlink && !o.blink && !o.yawn && !o.lick) px(g, ex + dx, 12, rim); px(g, ex + dx, 16, rim); }
       const inner = ex < 23 ? ex + 3 : ex - 1, outer = ex < 23 ? ex - 1 : ex + 3;
       for (const y of [13, 14, 15]) px(g, inner, y, rim);
       px(g, outer, 15, rim);
@@ -1575,7 +1580,8 @@ function catGrid(o) {
   }
   // Whiskers: fine lines across the cheeks and out past the face.
   const wk = o.whiskers || "#c9c5bd";
-  for (const [x, y] of [[19, 18], [18, 18], [17, 17], [16, 17], [15, 17], [14, 16], [13, 16], [12, 16], [19, 19], [18, 19], [17, 19], [16, 20], [15, 20], [14, 20], [13, 21], [12, 21]]) {
+  for (const [x, y0] of [[19, 18], [18, 18], [17, 17], [16, 17], [15, 17], [14, 16], [13, 16], [12, 16], [19, 19], [18, 19], [17, 19], [16, 20], [15, 20], [14, 20], [13, 21], [12, 21]]) {
+    const y = o.whiskerTwitch && x <= 14 ? y0 - 1 : y0; // a twitch: the outer ends lift
     px(g, x, y, wk); px(g, 47 - x, y, wk);
   }
   if (o.collar) {
@@ -1661,6 +1667,9 @@ function catGrid(o) {
     }
     px(g, 17, 21 + dy, line); px(g, 23, 21 + dy, line); // rounded shoulders of the paw
     px(g, 19, 21 + dy, line); px(g, 21, 21 + dy, line); // toes
+    const bean = o.beans || (lum(pw) > 120 ? "#d98f9c" : shade(pw, 1.6)); // pink on a pale paw
+    for (const x of [18, 20, 22]) px(g, x, 22 + dy, bean); // toe beans
+    for (const x of [19, 20, 21]) px(g, x, 23 + dy, bean); // the main pad
     if (!up) {
       px(g, 25, 21, "#e48a95");
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
@@ -1708,6 +1717,11 @@ function catGrid(o) {
     g.splice(24, 1);
     g.unshift(Array(N).fill(null));
   }
+  // Hand-placed pixels, last of all: [x, y, colour], colour "line" for the outline or null to
+  // clear. tailBase ones apply only while the tail is in one of its resting swings.
+  const place = ([x, y, c]) => px(g, x, y, c === "line" ? line : c);
+  (o.pixels || []).forEach(place);
+  if (!o.alert && (o.tail || 0) <= 3) (o.tailBasePixels || []).forEach(place);
   // Pin-holes inside the outline (between the paws, at the tail's root) are filled.
   for (let pass = 0; pass < 2; pass++)
     for (let y = 1; y < N - 1; y++)
@@ -1812,15 +1826,15 @@ function idleWildFrames(make, name) {
   const acts = (ACTS[name] || []).map(([f, d]) => [make({ tail: 0, ...f }), d]);
   return [
     [rest, jitter(1.4)],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
     [make({ tail: 1 }), jitter(0.9)],
     [rest, jitter(1.2)],
     [make({ tail: 0, blink: true }), 0.18],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
     [rest, jitter(0.8)],
     ...acts,
     [rest, jitter(1.2)],
-    [breathe(rest), 0.7],
+    [breathe(rest, 36), 0.7],
   ];
 }
 // Walking in: legs swinging (four-legged animals) or hopping (the rest).
@@ -2137,9 +2151,9 @@ const SPRITE_PRESETS = {
   calico_collar: { detail: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
   grey_chest_spot: { detail: true, fur: "#7f7e7b", chestPatch: true },
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
-  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
-  charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
-  black: { detail: true, small: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
+  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  charcoal_white_chest: { detail: true, grow: true, tailBasePixels: [[36, 35, null], [37, 35, null], [36, 36, "line"], [37, 36, "line"], [37, 40, "line"]], tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
+  black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
