@@ -1202,7 +1202,9 @@ function catGrid(o) {
     [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.4, 18.4], [26.2, 15.8], [25.7, 13.6]],
     [[23, 26.3], [26.2, 25.5], [28.2, 22.3], [28, 18.5], [27, 15.8], [26.7, 13.6]],
     [[23, 26.3], [26.4, 25.5], [28.6, 22.4], [28.6, 18.6], [27.8, 15.8], [27.6, 13.6]],
-    [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.4, 18.4], [26.2, 16], [24.9, 15]], // the tip curled over, toward the body
+    o.curlOut
+      ? [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.6, 18.6], [28, 16.2], [29.2, 15], [30.2, 15.6]] // curlOut: the tip hooked away from the body
+      : [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.4, 18.4], [26.2, 16], [24.9, 15]], // the tip curled over, toward the body
   ];
   const sShape = !o.tailPaths && !o.fluffy && !o.alert && (o.tail || 0) <= 3;
   let tailPath = sShape ? sTails[o.tail || 0] : tails[o.alert ? 4 : o.tail || 0];
@@ -1227,6 +1229,7 @@ function catGrid(o) {
   const tLens = tPts.slice(1).map((q, i) => Math.hypot(q[0] - tPts[i][0], q[1] - tPts[i][1]));
   const tailLen = tLens.reduce((t, l) => t + l, 0);
   const tubeMemo = new Map(); // each pixel worked out once
+  const tailMask = new Set(); // the tail's own pixels (a tube tail), for its edges later
   const tube = (x, y) => {
     const key = y * N + x;
     if (tubeMemo.has(key)) return tubeMemo.get(key);
@@ -1248,7 +1251,7 @@ function catGrid(o) {
     for (let y = Math.max(0, Math.floor(Math.min(...ys)) - pad); y <= Math.min(N - 1, Math.ceil(Math.max(...ys)) + pad); y++)
       for (let x = Math.max(0, Math.floor(Math.min(...xs)) - pad); x <= Math.min(N - 1, Math.ceil(Math.max(...xs)) + pad); x++) {
         const t = tube(x, y);
-        if (t.d <= t.r) g[y][x] = fur;
+        if (t.d <= t.r) { g[y][x] = fur; tailMask.add(y * N + x); }
       }
   } else if (taper) {
     const [r0, r1] = taper, segL = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1]));
@@ -1361,7 +1364,7 @@ function catGrid(o) {
     const M = [[20, 10], [21, 9], [22, 10], [25, 10], [26, 9], [27, 10]];
     on((x, y) => M.some(([mx, my]) => mx === x && my === y), st);
     on((x, y) => y >= 5 && y <= 8 && [22, 25].includes(x), st);
-    on((x, y) => y >= 29 && y <= 38 && (x <= 18 || x >= 29) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1 && y % 4 === 0 && hash(Math.min(x, 47 - x), y) % 3 !== 0, shade(fur, o.contrast ? 0.74 : 0.88)); // mirrored, so both sides match
+    on((x, y) => y >= 29 && y <= 38 && (x <= 15 || x >= 32) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1 && y % 4 === 0 && hash(Math.min(x, 47 - x), y) % 3 !== 0, shade(fur, o.contrast ? 0.74 : 0.88)); // mirrored, so both sides match; the sides only, never the front legs
   }
   if (o.tearMarks) on((x, y) => (x === 21 || x === 26) && (y === 12 || y === 13), shade(fur, 1.6)); // pale streaks by the inner eyes
   if (o.paleMuzzle) on((x, y) => y >= 17 && y <= 21 && Math.abs(x + 0.5 - 24) <= 4 - (y === 21 ? 1 : 0), o.pale || shade(fur, 1.3));
@@ -1488,7 +1491,26 @@ function catGrid(o) {
   if (o.whiteBackPaws || o.whitePaws) on((x, y) => y >= 41 && (x <= 15 || (x >= 32 && x <= 35)), WHITE); // back feet only, not the tail beside them
   if (o.whiteBackLegs) on((x, y) => (x <= 15 || (x >= 32 && x <= 34)) && y >= (x === 15 || x === 32 ? 36 : x === 14 || x === 33 ? 37 : 38), WHITE); // the lower hind legs too, rounded where they meet the body
 
+  // A one-row bump on the tail's outer edge gets the row above it too, so it isn't a lone step.
+  if (tailMask.size) {
+    const right = (y) => { for (let x = N - 1; x >= 33; x--) if (g[y][x] && tailMask.has(y * N + x)) return x; return -1; };
+    for (let y = 2; y < 40; y++) {
+      const r0 = right(y - 1), r1 = right(y), r2 = right(y + 1);
+      if (r0 >= 0 && r1 > r0 && r1 > r2 && r2 >= 0) { g[y - 1][r1] = g[y - 1][r1 - 1]; tailMask.add((y - 1) * N + r1); }
+    }
+  }
   outline(g, o.outline || "#141416");
+  // Where the tail lies against the body or head (no gap for the outline), its own edge is
+  // outlined, so it always reads as a separate shape.
+  if (tailMask.size) {
+    const inBodyOrHead = (x, y) => ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1 || ((x + 0.5 - 24) / 10.5) ** 2 + ((y + 0.5 - 15) / 9) ** 2 <= 1;
+    const isTail = (x, y) => tailMask.has(y * N + x) && !inBodyOrHead(x, y);
+    const edge = [];
+    for (let y = 0; y < N; y++)
+      for (let x = 33; x < N; x++)
+        if (isTail(x, y) && g[y][x] !== (o.outline || "#141416") && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const c = g[y + dy]?.[x + dx]; return c && c !== (o.outline || "#141416") && !isTail(x + dx, y + dy); })) edge.push([x, y]);
+    for (const [x, y] of edge) g[y][x] = o.outline || "#141416";
+  }
   const line = o.outline || "#141416";
   // The body's right edge mirrors its left edge, drawn across the tail's root so the tail
   // comes from behind.
@@ -1572,8 +1594,8 @@ function catGrid(o) {
     for (const y of [29, 30, 31, 32]) put(outer, y, line);
     put(outer, 28, k);
     for (const y of [26, 27]) put(outer + dir, y, k);
-    put(inner - dir, 32, line);
-    for (const y of [30, 31]) put(inner - dir, y, k);
+    for (const y of [31, 32]) put(inner - dir, y, line); // the inner outline, two pixels up
+    put(inner - dir, 30, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
@@ -2257,7 +2279,7 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, small: true, fur: "#3b281e", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, curlOut: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
