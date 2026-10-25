@@ -1546,14 +1546,18 @@ function catGrid(o) {
     const legC = o.legColor || (o.tuxedo ? fur : g[30]?.[17] && g[30][17] !== line ? g[30][17] : fur);
     // Held low (the paw at or below the shoulder), the leg rises from the paw to the shoulder;
     // held higher, it runs down from the paw into the chest to a closed elbow.
-    const low = up && 20 + dy >= 29;
-    const top = low ? 27 : 24 + dy, bottom = low ? 19 + dy : up ? 37 : 31;
+    // On its way up the whole foreleg shows: from the shoulder (when the paw is below it)
+    // down past the paw to the bent elbow, the paw held in front of it.
+    const low = up && 20 + dy >= 27;
+    const top = up ? Math.min(27, 24 + dy) : 24 + dy, bottom = up ? Math.max(37, 26 + dy) : 31;
     const join = shade(fur, 0.68); // where the leg meets the body: soft, not a hard outline
     for (let y = top; y <= bottom; y++) {
-      const soft = up && (low ? y < top + 2 : y > bottom - 2);
-      px(g, 17, y, soft ? join : line); px(g, 23, y, soft ? join : line);
-      for (let x = 18; x <= 22; x++) px(g, x, y, legC);
+      const soft = up && low && y === top; // only the shoulder join is soft
+      const elbow = up && y === bottom; // the bent elbow below the paw: rounded and closed
+      if (!elbow) { px(g, 17, y, soft ? join : line); px(g, 23, y, soft ? join : line); } // the elbow's corners stay body
+      for (let x = 18; x <= 22; x++) px(g, x, y, elbow && (x === 18 || x === 22) ? line : legC);
     }
+    if (up) for (let x = 19; x <= 21; x++) px(g, x, bottom + 1, line);
     // The paw, toes up: the same size and shape as a standing paw, turned over.
     for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
     for (let y = 21 + dy; y <= 23 + dy; y++) {
@@ -1562,7 +1566,6 @@ function catGrid(o) {
     }
     px(g, 17, 21 + dy, line); px(g, 23, 21 + dy, line); // rounded shoulders of the paw
     px(g, 19, 21 + dy, line); px(g, 21, 21 + dy, line); // toes
-    if (low) for (let x = 17; x <= 23; x++) px(g, x, 24 + dy, line); // nothing below a low paw: its underside closes it
     if (!up) {
       px(g, 25, 21, "#e48a95");
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
