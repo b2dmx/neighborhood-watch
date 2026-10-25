@@ -185,7 +185,7 @@ EVENT_ACTION = "mobile_app_notification_action"
 STORAGE_VERSION = 1
 SIGHTING_DAYS = 30
 SIGHTING_MAX = 4000
-AI_TIMEOUT = 90  # seconds per model call
+AI_TIMEOUT = 30  # seconds per model call; a picture normally takes 5-15
 SNAPSHOT_TIMEOUT = 15
 
 # Files. Frames and reference photos live in the media folder (the AI reads attachments

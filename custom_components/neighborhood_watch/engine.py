@@ -140,7 +140,10 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
-IDENTIFY_CAP_SECONDS = 240  # all AI calls of one check together
+IDENTIFY_CAP_SECONDS = 150  # all AI calls of one check together
+# A model that was overloaded or timed out sits out this long: under heavy demand every
+# call to it would fail slowly, so the next model in the chain is asked straight away.
+MODEL_REST = timedelta(minutes=10)
 STREAM_FRAME_PIXELS = 3_100_000  # a frame taken from the stream is scaled down to about this many pixels (a 180° panorama keeps its height)
 SNAPSHOT_RECHECK_SECONDS = 3600  # how often a camera's snapshot size is measured again
 _SNAPSHOT_SMALL = f"{DOMAIN}_snapshot_small"  # hass.data: {entity_id: (small, measured at)}
@@ -413,7 +416,8 @@ class WatchEngine:
         self.frames: dict[str, Frame] = {}
         self._queued: set[str] = set()
         self.hub_device_id: str | None = None
-        self._lock = asyncio.Lock()  # the AI calls and the recording: one check at a time
+        self._lock = asyncio.Lock()  # the recording: one check at a time (the AI runs in parallel)
+        self._resting: dict[str, datetime] = {}  # model -> until when it's skipped
         self._camera_locks: dict[str, asyncio.Lock] = {}  # snapshot and detector, per camera
         self._photo_locks: dict[str, asyncio.Lock] = {}  # an animal's photo and its .prev, per animal
         self.own_updates = 0  # entry updates made by add_note, which must not reload
@@ -947,8 +951,8 @@ class WatchEngine:
     async def async_check(self, slug: str, force: bool = False) -> dict[str, Any] | None:
         """Check one camera. `force` ignores the cooldown and the skip sensors.
 
-        The snapshot is taken (and the detector asked) as soon as the camera triggers; only
-        the AI calls and the recording wait for other cameras' checks.
+        The snapshot is taken, the detector asked and the AI asked as soon as the camera
+        triggers; only the recording waits for other cameras' checks.
         """
         async with self._camera_locks.setdefault(slug, asyncio.Lock()):
             cam = self.cameras.get(slug)
@@ -991,13 +995,13 @@ class WatchEngine:
                 and detector["animal"] < float(self.options.get(CONF_DETECTOR_MIN, 0.2))
                 and not self.any_missing_mode()  # in missing mode the AI always looks
             )
+            if skip:
+                verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
+                models = "Local detector (no animal)"
+            else:
+                verdict, models = await self._identify_capped(cam)
+            check = Check(cam, verdict, models, content, now, detector=detector)
             async with self._lock:
-                if skip:
-                    verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
-                    models = "Local detector (no animal)"
-                else:
-                    verdict, models = await self._identify_capped(cam)
-                check = Check(cam, verdict, models, content, now, detector=detector)
                 sends = await self._record(check)
         # Phones are told after the locks are released: a slow notify service must not
         # hold up the next check.
@@ -1179,8 +1183,10 @@ class WatchEngine:
             main = order.pop(0)
             at = next((i for i, (_, m) in enumerate(order) if m in paid), len(order))
             order.insert(at, main)
-        for index, model in order:
-            raw = await self._ask(model, prompt, attachments)
+        awake = set(self._awake([m for _, m in order]))
+        order = [(i, m) for i, m in order if m in awake]
+        for pos, (index, model) in enumerate(order):
+            raw = await self._ask(model, prompt, attachments, last=pos == len(order) - 1)
             if raw.strip():
                 first, first_model, first_label = logic.tidy(raw), model, self._model_label(model, index)
                 from_backup = index > 0
@@ -1199,12 +1205,14 @@ class WatchEngine:
         second, second_label = "", ""
         said["unconfirmed"] = backup_check
         if special or backup_check or wild_check:
-            for index, model in enumerate(self._chain(CONF_SECOND_OPINION, free_only=not special)):
-                if model == first_model:
-                    continue  # a model never second-guesses itself
+            chain = self._chain(CONF_SECOND_OPINION, free_only=not special)
+            awake = set(self._awake([m for m in chain if m != first_model]))
+            # A model never second-guesses itself; resting models are skipped.
+            order = [(i, m) for i, m in enumerate(chain) if m in awake]
+            for pos, (index, model) in enumerate(order):
                 if index and first_model is None:
                     break  # nobody answered the first look: only the main second model tries
-                raw = await self._ask(model, prompt, attachments)
+                raw = await self._ask(model, prompt, attachments, last=pos == len(order) - 1)
                 if raw.strip():
                     second, second_label = logic.tidy(raw), self._model_label(model, index)
                     said.update(second=second, second_label=second_label)
@@ -1223,9 +1231,18 @@ class WatchEngine:
             ai["models"] = {}
         return ai["models"].setdefault(model, {"calls": 0, "answers": 0, "errors": 0})
 
-    async def _ask(self, model: str, prompt: str, attachments: list[dict[str, str]]) -> str:
+    def _awake(self, models: list[str]) -> list[str]:
+        """The models not resting after an overload or a timeout; all of them when every one
+        is (better a slow answer than none)."""
+        now = dt_util.utcnow()
+        awake = [m for m in models if self._resting.get(m, now) <= now]
+        return awake or models
+
+    async def _ask(
+        self, model: str, prompt: str, attachments: list[dict[str, str]], last: bool = False
+    ) -> str:
         answer = await self._ask_once(model, prompt, attachments)
-        if answer is None:  # busy (503): one quick retry before moving on
+        if answer is None and last:  # busy, and no other model left: one quick retry
             await asyncio.sleep(BUSY_RETRY_SECONDS)
             answer = await self._ask_once(model, prompt, attachments)
         return answer or ""
@@ -1260,7 +1277,11 @@ class WatchEngine:
             stats["last_error"] = str(err)[:200] or type(err).__name__
             stats["last_error_at"] = _iso(dt_util.utcnow())
             _LOGGER.info("%s gave no answer: %s", model, stats["last_error"])
-            return None if _is_busy(err) else ""
+            if isinstance(err, TimeoutError) or _is_busy(err):
+                self._resting[model] = dt_util.utcnow() + MODEL_REST
+                stats["resting_until"] = _iso(self._resting[model])
+                return None
+            return ""
         data = response.get("data") if isinstance(response, dict) else None
         if not isinstance(data, str):
             stats["errors"] += 1
@@ -2033,12 +2054,11 @@ class WatchEngine:
         slug = f"scan_{sid}_{visit['n']}"
         place = f"{folder}/{visit['file']}"
         cam = CameraConfig("", f"scan of {place}", slug, "", [], [], logic.Cooldown(), [])
-        async with self._lock:
-            await self.hass.async_add_executor_job(_write, self.frame_path(slug), frame)
-            try:
-                verdict, models = await self._identify_capped(cam)
-            finally:
-                await self.hass.async_add_executor_job(remove_file, self.frame_path(slug))
+        await self.hass.async_add_executor_job(_write, self.frame_path(slug), frame)
+        try:
+            verdict, models = await self._identify_capped(cam)
+        finally:
+            await self.hass.async_add_executor_job(remove_file, self.frame_path(slug))
         now = dt_util.utcnow()
         row_id = uuid4().hex[:10]
         day = dt_util.as_local(now).date().isoformat()

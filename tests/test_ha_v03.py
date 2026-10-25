@@ -709,7 +709,7 @@ async def test_alerts_go_out_after_the_check_lock_is_released(hass, watch):
     assert held and not any(held)  # sent by the time identify returns, without the lock
 
 
-async def test_a_slow_ai_does_not_hold_up_other_cameras_snapshots(hass, watch):
+async def test_a_slow_ai_does_not_hold_up_other_cameras(hass, watch):
     w = watch["watch"]
     release = asyncio.Event()
     asked: list[str] = []
@@ -734,7 +734,7 @@ async def test_a_slow_ai_does_not_hold_up_other_cameras_snapshots(hass, watch):
     assert "yard" not in w.frames
     hass.states.async_set("binary_sensor.yard_motion", "on")
     await until(lambda: "yard" in w.frames)  # the yard's snapshot didn't wait for it
-    assert len(asked) == 1 and w._lock.locked()  # its AI call waits its turn
+    await until(lambda: len(asked) == 2)  # and its AI is asked without waiting either
     release.set()
     await hass.async_block_till_done()
     assert len(asked) == 2

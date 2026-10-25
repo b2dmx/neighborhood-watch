@@ -50,6 +50,8 @@ class FakeAI:
         model = call.data["entity_id"]
         self.calls.append(model)
         answer = self.script[model].pop(0) if self.script[model] else None
+        if isinstance(answer, TimeoutError):  # as the per-call time limit raises it
+            raise answer
         if answer is None or isinstance(answer, Exception):
             raise HomeAssistantError(str(answer or "no answer"))
         return {"conversation_id": "x", "data": answer}
@@ -564,10 +566,30 @@ async def test_resting_main_model_comes_before_paid(hass, setup):
 
 
 
-async def test_busy_model_is_retried_once(hass, setup):
-    setup["ai"].say(FIRST, HomeAssistantError("503 high demand"), "Milo|high|uniform|black|")
+async def test_a_busy_model_rests_and_the_next_one_answers(hass, setup):
+    setup["ai"].say(FIRST, HomeAssistantError("503 high demand"))
+    setup["ai"].say(BACKUP, "None|high|na|na|", "None|high|na|na|")
+    await trigger(hass, "yard")
+    assert setup["ai"].calls == [FIRST, BACKUP]  # no retry while another model is left
+    setup["ai"].calls.clear()
+    await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    assert setup["ai"].calls == [BACKUP]  # the busy model sits the next check out
+
+
+async def test_a_timed_out_model_rests_too(hass, setup):
+    setup["ai"].say(FIRST, TimeoutError())
+    setup["ai"].say(BACKUP, "None|high|na|na|", "None|high|na|na|")
+    await trigger(hass, "yard")
+    setup["ai"].calls.clear()
+    await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
+    assert setup["ai"].calls == [BACKUP]
+
+
+async def test_the_last_busy_model_is_retried_once(hass, setup):
+    setup["ai"].say(FIRST, HomeAssistantError("503 high demand"))
+    setup["ai"].say(BACKUP, HomeAssistantError("503 high demand"))
+    setup["ai"].say(PAID, HomeAssistantError("503 high demand"), "Milo|high|uniform|black|")
     with patch("custom_components.neighborhood_watch.engine.BUSY_RETRY_SECONDS", 0):
         await trigger(hass, "yard")
-    assert setup["ai"].calls == [FIRST, FIRST]
-    (event,) = setup["events"]
-    assert event.data["animal"] == "Milo"
+    assert setup["ai"].calls[:4] == [FIRST, BACKUP, PAID, PAID]
+    assert setup["events"][0].data["animal"] == "Milo"
