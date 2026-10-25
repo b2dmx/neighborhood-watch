@@ -1208,6 +1208,10 @@ function catGrid(o) {
   ];
   const sShape = !o.tailPaths && !o.fluffy && !o.alert && (o.tail || 0) <= 3;
   let tailPath = sShape ? sTails[o.tail || 0] : tails[o.alert ? 4 : o.tail || 0];
+  // Up at whisker height the tail keeps clear of the whiskers: its upper points sit further out
+  // (the root and the curve near the body stay where they are).
+  if (!o.fluffy && !o.tailPaths && (o.alert || (o.tail || 0) <= 4))
+    tailPath = tailPath.map(([x, y]) => [y < 21 ? x + Math.min(1.6, (21 - y) * 0.45) : x, y]);
   // The tail's root sits low, near the ground, so it doesn't float off the hip: the first two
   // points drop a little (not for a long-haired tail, nor for one wrapped round to the front).
   if (!sShape && !o.tailPaths && !o.fluffy && !o.tailTaper && (o.alert || (o.tail || 0) <= 5))
@@ -1462,7 +1466,7 @@ function catGrid(o) {
   const bareLeft = { 33: 20, 34: 19, 35: 19, 36: 19, 37: 19, 38: 19, 39: 19, 40: 19, 41: 20, 42: 21, 43: 21 }; // rounded, narrowing to the ground
   const bare = (x, y) => bareTop !== null && y >= bareTop && x <= 22 && x >= (bareLeft[y] ?? N);
   if (o.spottedBelly) {
-    const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
+    const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.82); // spots a soft shade, not too dark
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
     const half = { 0: d ? 2 : 3, 1: 4, 2: 4, 3: 3 }; // a lowered belly's top is a narrow cap
     const inBelly = (x, y) => bare(x, y) || (between(x, y) && y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
@@ -1594,8 +1598,11 @@ function catGrid(o) {
     for (const y of [29, 30, 31, 32]) put(outer, y, line);
     put(outer, 28, k);
     for (const y of [26, 27]) put(outer + dir, y, k);
-    for (const y of [31, 32]) put(inner - dir, y, line); // the inner outline, two pixels up
-    put(inner - dir, 30, k);
+    // The inner outline, two pixels up (three on a tall cat, whose stretched chest rows would
+    // otherwise leave it starting far below the shoulder line).
+    const innerTop = o.tall === 2 ? 30 : 31;
+    for (let y = innerTop; y <= 32; y++) put(inner - dir, y, line);
+    put(inner - dir, innerTop - 1, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
@@ -1791,15 +1798,23 @@ function catGrid(o) {
   }
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
-    const rows = g.slice(1, 45).map((r) => r.slice());
-    rows.splice(27, 0, rows[26].slice()); // chest rows, clear of the belly spots and the tail's bend
-    rows.splice(29, 0, rows[28].slice());
+    const rows = g.slice(1, 45).map((r) => r.slice()), from = rows.map((r, i) => i + 1); // each row's source row
+    rows.splice(27, 0, rows[26].slice()); from.splice(27, 0, from[26]); // chest rows, clear of the belly spots and the tail's bend
+    rows.splice(29, 0, rows[28].slice()); from.splice(29, 0, from[28]);
     // tall: 2 adds two more body rows (copies of a plain row, so they're coloured like it).
-    if (o.tall === 2) rows.splice(30, 0, rows[30].slice(), rows[30].slice());
+    if (o.tall === 2) { rows.splice(30, 0, rows[30].slice(), rows[30].slice()); from.splice(30, 0, from[30], from[30]); }
     const old = g.map((r) => r.slice()), drop = o.tall === 2 ? 3 : 1; // the tail moves down with the body
+    // The tail (with the outline round it) moves down whole, never stretched or cut: its
+    // pixels come from drop rows up; anything else from the stretched rows.
+    const nearTail = (x, y) => [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]].some(([dx, dy]) => tailMask.has((y + dy) * N + x + dx));
     for (let y = 0; y < rows.length + 1 && y < N; y++) {
       g[y] = rows[y] || Array(N).fill(null);
-      for (let x = 36; x < N; x++) g[y][x] = old[y - drop]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
+      for (let x = 32; x < N; x++) {
+        const src = y - drop;
+        if (x >= 36) g[y][x] = old[src]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
+        else if (src >= 0 && tailMask.size && nearTail(x, src) && !(((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((src + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1)) g[y][x] = old[src][x];
+        else if (from[y] !== undefined && tailMask.size && nearTail(x, from[y]) && !(((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((from[y] + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1)) g[y][x] = old[src]?.[x] ?? null; // a stretched copy of tail: replaced
+      }
     }
   }
   if (o.slim) {
