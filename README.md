@@ -340,4 +340,4 @@ MIT
 
 ---
 
-<p align="center">Neighborhood Watch v0.16.4 by Goobis<br>AI was used to help develop this integration.</p>
+<p align="center">Neighborhood Watch v0.16.5 by Goobis<br>AI was used to help develop this integration.</p>

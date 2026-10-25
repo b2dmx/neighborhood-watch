@@ -1600,7 +1600,7 @@ function catGrid(o) {
       while (r < 30 && was[y][r + 1] === line) r++;
       for (const x of [l - 1, r + 1]) {
         const c = was[y][x];
-        if (c && c !== line) g[y][x] = shade(c, (lum(c) > 170 ? fadeLight : fade)[y]);
+        if (c && c !== line) g[y][x] = shade(c, 1 - (1 - (lum(c) > 170 ? fadeLight : fade)[y]) * 0.4); // lighter than the gap: it's the leg itself
       }
     }
   }
@@ -2105,7 +2105,7 @@ const SPRITE_PRESETS = {
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
   brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
-  black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
+  black: { detail: true, small: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
