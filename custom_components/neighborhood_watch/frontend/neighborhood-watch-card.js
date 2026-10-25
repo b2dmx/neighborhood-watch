@@ -1270,7 +1270,23 @@ function catGrid(o) {
     on((x, y) => y === 16 && (x <= 15 || x >= 32), st); // cheeks
     on((x, y) => y >= 16 && y <= 21 && Math.abs(x - cx) <= 4, light); // paler muzzle and throat
     // Flank stripes: thin, broken, arcing down the sides only; the chest stays clear.
-    on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
+    if (o.classicTabby) {
+      // Classic (marbled) tabby instead: a bullseye swirl on each side (a dark centre, then
+      // a dark ring), the dark bands edged in a paler tan as marbling is; a band over each
+      // shoulder. Mirrored.
+      const pale = shade(fur, 1.45), deep = o.tabbyDark || shade(fur, 0.32); // the darkest bands, near black
+      const ring = (x, y) => {
+        const m = Math.min(x, 47 - x);
+        if (y < 22 || y > 42 || m > 19) return null;
+        const r = Math.hypot(m - 12.5, (y - 31.5) * 0.8);
+        if (r < 2 || (r > 2.6 && r < 5.2) || (r > 5.8 && r < 8.6)) return "dark"; // broad bands, most of the side
+        if ((r >= 2 && r <= 2.6) || (r >= 5.2 && r <= 5.8)) return "pale";
+        return null;
+      };
+      on((x, y) => ring(x, y) === "pale", pale);
+      on((x, y) => ring(x, y) === "dark", deep);
+      on((x, y) => y >= 22 && y <= 25 && Math.min(x, 47 - x) >= 14 && Math.min(x, 47 - x) <= 19, deep); // a band over each shoulder
+    } else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
     on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
     on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
@@ -1405,6 +1421,7 @@ function catGrid(o) {
   if (o.chestPatch) on((x, y) => ((x - cx) ** 2) / 4 + ((y - 26) ** 2) / 6 <= 1, WHITE); // a small white chest patch
   if (o.tuxedo || o.whitePaws) on((x, y) => y >= 41 && ((x >= 16 && x <= 22 && !o.lick && !o.pawUp) || (x >= 25 && x <= 31)), WHITE);
   if (o.whiteBackPaws || o.whitePaws) on((x, y) => y >= 41 && (x <= 15 || (x >= 32 && x <= 35)), WHITE); // back feet only, not the tail beside them
+  if (o.whiteBackLegs) on((x, y) => (x <= 15 || (x >= 32 && x <= 35)) && y >= 35 + (x === 15 || x === 32 ? 1 : 0), WHITE); // the lower hind legs too, rounded where they meet the body
 
   outline(g, o.outline || "#141416");
   const line = o.outline || "#141416";
@@ -1610,7 +1627,7 @@ function catGrid(o) {
     const up = o.lick === "mid", dy = up ? o.lickY ?? 9 : 0; // on the way up ("mid") it is lower, lickY rows below the mouth
     // The foreleg below the raised paw: the same width as the standing leg (outlined columns
     // at x 17 and 23), running down from the paw into the chest.
-    const legC = o.legColor || (o.tuxedo ? fur : g[30]?.[17] && g[30][17] !== line ? g[30][17] : fur);
+    const legC = o.legColor || (o.tuxedo || o.classicTabby ? fur : g[30]?.[17] && g[30][17] !== line ? g[30][17] : fur);
     // Held low (the paw at or below the shoulder), the leg rises from the paw to the shoulder;
     // held higher, it runs down from the paw into the chest to a closed elbow.
     // On its way up the whole foreleg shows: from the shoulder (when the paw is below it)
@@ -1673,6 +1690,11 @@ function catGrid(o) {
       g[y] = rows[y] || Array(N).fill(null);
       for (let x = 36; x < N; x++) g[y][x] = old[y - drop]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
     }
+  }
+  if (o.grow) {
+    // A pixel taller: a plain body row repeated, everything above it a row higher.
+    g.splice(30, 0, g[30].slice());
+    g.shift();
   }
   if (o.short) {
     // Shorter: one of the two shaded neck rows taken out, everything above it a row lower.
@@ -2106,10 +2128,10 @@ function shade(hex, k) {
 // Ready-made looks, picked by name on an animal's page (its Sprite setting).
 const SPRITE_PRESETS = {
   calico_collar: { detail: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
-  grey_chest_spot: { detail: true, fur: "#7c7e84", chestPatch: true },
+  grey_chest_spot: { detail: true, fur: "#7f7e7b", chestPatch: true },
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
-  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
-  charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
+  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, classicTabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, short: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
