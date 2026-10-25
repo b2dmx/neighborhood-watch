@@ -1214,6 +1214,9 @@ function catGrid(o) {
     }
   }
 
+  // Chest and belly colours stay between the front legs: the shoulder lines rise from row 29,
+  // so from there down they keep to the gap between the legs' inner edges.
+  const between = (x, y) => o.shoulders === false || y < 29 || (y <= 32 ? x >= 22 && x <= 25 : x >= 23 && x <= 24);
   const on = (fn, c) => {
     for (let y = 0; y < N; y++)
       for (let x = 0; x < N; x++) if (isFur(g[y][x]) && fn(x, y)) g[y][x] = typeof c === "function" ? c(x, y) : c;
@@ -1253,7 +1256,7 @@ function catGrid(o) {
     // White muzzle and cheeks running down into the chest; only a small chin patch is black.
     on((x, y) => y >= 11 && y <= 17 && Math.abs(x - cx) <= (y - 10.5) * 0.8, WHITE);
     on((x, y) => y >= 17 && y <= 22 && Math.abs(x - cx) <= 7.5, WHITE);
-    on((x, y) => y >= 22 && y <= 34 && Math.abs(x - cx) <= 8 - (y - 22) * 0.55 - (y >= 31 ? (y - 30) * 0.4 : 0), WHITE); // the bib: broad under the chin, narrowing to a rounded point above the legs
+    on((x, y) => between(x, y) && y >= 22 && y <= 34 && Math.abs(x - cx) <= 8 - (y - 22) * 0.55 - (y >= 31 ? (y - 30) * 0.4 : 0), WHITE); // the bib: broad under the chin, narrowing to a rounded point above the legs
     for (let y = 20; y <= 22; y++) for (let x = 0; x < N; x++) if (Math.abs(x - cx) <= 2.5 - (y - 20) * 0.5 && g[y][x]) g[y][x] = fur; // black chin
   }
   if (o.faintTabby) {
@@ -1356,7 +1359,7 @@ function catGrid(o) {
     const pale = o.pale || shade(fur, 1.35), spot = shade(fur, 0.7);
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
     const half = { 0: d ? 2 : 3, 1: 4, 2: 4, 3: 3 }; // a lowered belly's top is a narrow cap
-    const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
+    const inBelly = (x, y) => bare(x, y) || (between(x, y) && y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
     const spots = d
@@ -1365,7 +1368,7 @@ function catGrid(o) {
     const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
     on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
   }
-  if (o.whiteChest) on((x, y) => bare(x, y) || y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
+  if (o.whiteChest) on((x, y) => bare(x, y) || between(x, y) && y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
   for (const [colour, runs] of o.marks || []) {
     const set = new Set();
     for (const row of String(runs).split(";")) {
@@ -1448,8 +1451,11 @@ function catGrid(o) {
     put(inner - dir, 32, line);
     for (const y of [30, 31]) put(inner - dir, y, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
-    const side = x0 < 23 ? [[13, 36], [13, 35], [14, 34], [15, 33]] : [[34, 36], [34, 35], [33, 34], [32, 33]];
-    for (const [x, y] of side) if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, k);
+    // A darker arc over the thigh, the thigh below it a touch lighter, so it reads as its own bulge.
+    const arc = [[13, 37], [13, 36], [13, 35], [14, 34], [15, 33]].map(([x, y]) => [left ? x : 47 - x, y]);
+    const ink = shade(fur, 0.45);
+    for (let y = 35; y <= 41; y++) for (const x of left ? [14, 15] : [32, 33]) if (!(y === 35 && x === (left ? 14 : 33))) put(x, y, shade(g[y][x] || fur, 1.12));
+    for (const [x, y] of arc) put(x, y, ink);
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
