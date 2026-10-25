@@ -1196,10 +1196,19 @@ function catGrid(o) {
     [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [19, 29.3], [18, 28.3]],
     [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [19.2, 29.4], [18.3, 28.4], [18.9, 27.6]],
   ];
-  let tailPath = tails[o.alert ? 4 : o.tail || 0];
+  // Resting tails (not long-haired ones): a gentle curve rising close beside the body, low at
+  // the root, the tip easing in without a kink. 0 rest, 1 and 2 swaying out, 3 the tip curled over.
+  const sTails = [
+    [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.4, 18.4], [26.2, 15.8], [25.7, 13.6]],
+    [[23, 26.3], [26.2, 25.5], [28.2, 22.3], [28, 18.5], [27, 15.8], [26.7, 13.6]],
+    [[23, 26.3], [26.4, 25.5], [28.6, 22.4], [28.6, 18.6], [27.8, 15.8], [27.6, 13.6]],
+    [[23, 26.3], [26, 25.5], [27.8, 22.2], [27.4, 18.4], [26.2, 16], [24.9, 15]], // the tip curled over, toward the body
+  ];
+  const sShape = !o.tailPaths && !o.fluffy && !o.alert && (o.tail || 0) <= 3;
+  let tailPath = sShape ? sTails[o.tail || 0] : tails[o.alert ? 4 : o.tail || 0];
   // The tail's root sits low, near the ground, so it doesn't float off the hip: the first two
   // points drop a little (not for a long-haired tail, nor for one wrapped round to the front).
-  if (!o.tailPaths && !o.fluffy && !o.tailTaper && (o.alert || (o.tail || 0) <= 5))
+  if (!sShape && !o.tailPaths && !o.fluffy && !o.tailTaper && (o.alert || (o.tail || 0) <= 5))
     tailPath = tailPath.map(([x, y], i) => (i < 2 ? [x, y + 1] : i === 2 ? [x, y + 0.5] : [x, y]));
   if (o.tall) {
     // A taller cat carries a longer tail, so the extra height isn't left empty beside it.
@@ -1210,8 +1219,39 @@ function catGrid(o) {
     const [a, b] = tailPath.slice(-2);
     if (b[1] < a[1]) tailPath = [...tailPath, [b[0] + (b[0] - a[0]) * 1.3, b[1] + (b[1] - a[1]) * 1.3]]; // carried on further (not when curled over)
   }
-  if (o.tailTaper) {
-    const [r0, r1] = o.tailTaper, segL = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1]));
+  const w0 = o.tailW || (o.fluffy ? 1.6 : 1.1);
+  const taper = o.tailTaper || (o.fluffy ? null : [w0 * 1.3, w0 * 0.9]); // every tail tapers toward the tip
+  // The tail as a round tube: for a pixel near it, how far along it is (in pixels, and as a
+  // fraction), and its surface normal, for rings that wrap round it and for its shading.
+  const tPts = tailPath.map(([x, y]) => [x * S, y * S]);
+  const tLens = tPts.slice(1).map((q, i) => Math.hypot(q[0] - tPts[i][0], q[1] - tPts[i][1]));
+  const tailLen = tLens.reduce((t, l) => t + l, 0);
+  const tubeMemo = new Map(); // each pixel worked out once
+  const tube = (x, y) => {
+    const key = y * N + x;
+    if (tubeMemo.has(key)) return tubeMemo.get(key);
+    let best = null, run = 0;
+    tPts.slice(1).forEach((q, i) => {
+      const a = tPts[i], l = tLens[i] || 1;
+      const t = Math.max(0, Math.min(1, ((x + 0.5 - a[0]) * (q[0] - a[0]) + (y + 0.5 - a[1]) * (q[1] - a[1])) / (l * l)));
+      const dx = x + 0.5 - (a[0] + (q[0] - a[0]) * t), dy = y + 0.5 - (a[1] + (q[1] - a[1]) * t), d = Math.hypot(dx, dy);
+      if (!best || d < best.d) best = { d, dx, dy, s: run + l * t };
+      run += l;
+    });
+    best.f = best.s / (tailLen || 1);
+    best.r = (taper ? taper[0] + (taper[1] - taper[0]) * best.f : w0) * S;
+    tubeMemo.set(key, best);
+    return best;
+  };
+  if (taper && !o.tailTaper) {
+    const pad = Math.ceil(taper[0] * S) + 1, xs = tPts.map((q) => q[0]), ys = tPts.map((q) => q[1]);
+    for (let y = Math.max(0, Math.floor(Math.min(...ys)) - pad); y <= Math.min(N - 1, Math.ceil(Math.max(...ys)) + pad); y++)
+      for (let x = Math.max(0, Math.floor(Math.min(...xs)) - pad); x <= Math.min(N - 1, Math.ceil(Math.max(...xs)) + pad); x++) {
+        const t = tube(x, y);
+        if (t.d <= t.r) g[y][x] = fur;
+      }
+  } else if (taper) {
+    const [r0, r1] = taper, segL = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1]));
     const total = segL.reduce((t, l) => t + l, 0);
     let run = 0;
     tailPath.slice(1).forEach((b, i) => {
@@ -1222,7 +1262,7 @@ function catGrid(o) {
       }
       run += segL[i];
     });
-  } else thick(g, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), fur);
+  } else thick(g, tailPath, w0, fur);
   ellipse(g, 16, bodyCy, bodyRx, bodyRy, fur);
   ellipse(g, 9.8, 28.5, 1.7, 1.2, fur); // back feet
   ellipse(g, 22.2, 28.5, 1.7, 1.2, fur);
@@ -1305,13 +1345,14 @@ function catGrid(o) {
     } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
     else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
     on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
-    on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
+    if (taper && !o.tailTaper) on((x, y) => x >= 33 && isFur(g[y][x]) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1 && (() => { const t = tube(x, y); return t.d <= t.r + 0.5 && (t.f > 0.88 || t.s % 4 < 2); })(), st); // rings round the tail, a dark tip
+    else on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
   if (o.tuxedo) {
     // White muzzle and cheeks running down into the chest; only a small chin patch is black.
     on((x, y) => y >= 11 && y <= 17 && Math.abs(x - cx) <= (y - 10.5) * 0.8, WHITE);
     on((x, y) => y >= 17 && y <= 22 && Math.abs(x - cx) <= 7.5, WHITE);
-    on((x, y) => between(x, y) && y >= 22 && y <= 34 && Math.abs(x - cx) <= 8 - (y - 22) * 0.55 - (y >= 31 ? (y - 30) * 0.4 : 0), WHITE); // the bib: broad under the chin, narrowing to a rounded point above the legs
+    on((x, y) => between(x, y) && y >= 22 && y <= 34 && Math.abs(x - cx) <= Math.min(8 - (y - 22) * 0.55 - (y >= 31 ? (y - 30) * 0.4 : 0), 30.5 - y), WHITE); // narrowing a pixel a side per row into the gap between the legs // the bib: broad under the chin, narrowing to a rounded point above the legs
     for (let y = 20; y <= 22; y++) for (let x = 0; x < N; x++) if (Math.abs(x - cx) <= 2.5 - (y - 20) * 0.5 && g[y][x]) g[y][x] = fur; // black chin
   }
   if (o.faintTabby) {
@@ -1344,7 +1385,14 @@ function catGrid(o) {
         return at;
       };
       const start = 0, step = total / o.rings; // spaced over the whole tail; the rings behind him stay hidden
-      if (o.ringPeriod) {
+      if (o.ringPeriod && taper && !o.tailTaper) {
+        // Rings wrap round the tail: one pixel thick, one every ringPeriod pixels along it,
+        // and the last stretch dark for the tip.
+        on((x, y) => outside(x, y) && isFur(g[y][x]), (x, y) => {
+          const t = tube(x, y);
+          return t.f > 0.9 || (t.s > 2 && t.s % o.ringPeriod < 1) ? band : fur;
+        });
+      } else if (o.ringPeriod) {
         // Each ring is one straight pixel line across the tail (level where the tail rises, upright
         // where it runs along), one every ringPeriod pixels of tail; a ring that would touch the
         // previous one (at the bend) is left out, so they never merge.
@@ -1475,7 +1523,14 @@ function catGrid(o) {
     const fac = grid(); // 0.94 shadow, 0.95 under the jaw, "lit" highlight
     for (let y = 0; y < 44; y++)
       for (let x = 0; x <= 23; x++) {
-        if (y >= 25 && inB(x, y) && (!inB(x - 2, y) || (!o.small && !inB(x - 3, y) && (x + y) % 2 === 0))) fac[y][x] = 0.94; // no stray dither dots on a small cat
+        if (y >= 25 && inB(x, y)) {
+          // The body as a rounded form lit from above and in front: flat tones, no dither.
+          const nx = (x + 0.5 - 24) / brx, ny = (y + 0.5 - cy0) / ry0, nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+          const d = -0.5 * ny + 0.87 * nz;
+          if (d < 0.2) fac[y][x] = 0.84;
+          else if (d < 0.46) fac[y][x] = 0.92;
+          else if (d > 0.97) fac[y][x] = 1.05;
+        }
         if (y >= 22 && y < 26 && !inHead(x, y) && g[y][x] && g[y][x] !== line && (g[y][x - 1] === line || g[y][x - 2] === line)) fac[y][x] = 0.94; // the shoulders, up to the neck
         if (y >= 23 && y <= 28 && !inHead(x, y) && (inHead(x, y - 2) || inHead(x, y - 3))) fac[y][x] = 0.95; // the band under the jaw, a row down
         if (y < 24 && inHead(x, y) && !underEar(x, y) && (!inHead(x, y - 2) || (!inHead(x, y - 3) && (x + y) % 2 === 0))) fac[y][x] = "lit";
@@ -1487,6 +1542,19 @@ function catGrid(o) {
         if (!k || !c || c === line || c === "#d98f9c") continue;
         if (x > 23 && y >= 24 && !inB(x, y)) continue; // the tail keeps its own colours
         g[y][x] = shade(c, k === "lit" ? (midTone(c) ? 1.04 : 1.08) : k); // gentler on mid greys
+      }
+    // The tail, shaded as a round tube along its own path (light from above, toward us).
+    for (let y = 0; y < N; y++)
+      for (let x = 33; x < N; x++) {
+        const c = g[y][x];
+        if (!c || c === line || inB(x, y) || y >= 41) continue;
+        const t = tube(x, y), r = t.r + 0.5;
+        if (t.d > r + 0.5) continue; // not the tail
+        const best = [t.d, t.dx, t.dy];
+        const nx = best[1] / r, ny = best[2] / r, nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+        const d = -0.6 * ny + 0.8 * nz - 0.15 * nx;
+        const k = d < 0.15 ? 0.8 : d < 0.45 ? 0.9 : d > 0.95 ? 1.08 : 1;
+        if (k !== 1) g[y][x] = shade(c, k);
       }
   }
   if (o.lick || o.pawUp) {
