@@ -1442,7 +1442,7 @@ function catGrid(o) {
     const put = (x, y, c) => { if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, c); };
     for (const y of [29, 30, 31, 32]) put(outer, y, line);
     put(outer, 28, k);
-    for (const y of [25, 26, 27]) put(outer + dir, y, k);
+    for (const y of [26, 27]) put(outer + dir, y, k);
     put(inner - dir, 32, line);
     for (const y of [30, 31]) put(inner - dir, y, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
