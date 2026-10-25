@@ -1094,11 +1094,31 @@ function idleCat(o) {
   return animated(idleCatFrames(o));
 }
 function idleCatFrames(o) {
-  if (!o.pawUp) return idleFrames(o);
+  if (!o.pawUp) return o.tailWrap ? [...idleFrames(o), ...wrapFrames(o)] : idleFrames(o);
   const down = { ...o, pawUp: false }, c = (f) => catGrid({ ...o, ...f });
   const shuffle = [[c({ tail: 0, pawShift: 1 }), 0.3], [c({ tail: 0 }), 0.7], [c({ tail: 0, pawShift: 1 }), 0.25], [c({ tail: 0 }), 0.5]];
   const lower = [[catGrid({ ...down, tail: 0, lick: "up" }), 0.15]];
-  return [...idleFrames(o).slice(0, 14), ...shuffle, ...idleFrames(o).slice(14), ...lower, ...idleFrames(down), ...lower];
+  return [...idleFrames(o).slice(0, 14), ...shuffle, ...idleFrames(o).slice(14), ...lower, ...idleFrames(down), ...(o.tailWrap ? wrapFrames(down) : []), ...lower];
+}
+// tailWrap: now and then the tail sweeps down and round, lies curled round the front paw for a
+// while (a blink, a breath), then goes back.
+function wrapFrames(o) {
+  const c = (f) => catGrid({ ...o, ...f }), wrapped = c({ tail: 7 });
+  return [
+    [c({ tail: 5 }), 0.22],
+    [c({ tail: 6 }), 0.22],
+    [wrapped, jitter(2.2)],
+    [c({ tail: 7, blink: true }), 0.18],
+    [wrapped, jitter(1.6)],
+    [breathe(wrapped), 0.7],
+    [wrapped, jitter(1.8)],
+    [c({ tail: 7, halfBlink: true }), 0.5],
+    [c({ tail: 7, blink: true }), 0.5],
+    [c({ tail: 7, halfBlink: true }), 0.5],
+    [wrapped, jitter(1.4)],
+    [c({ tail: 6 }), 0.22],
+    [c({ tail: 5 }), 0.22],
+  ];
 }
 function idleFrames(o) {
   const c = (f) => catGrid({ ...o, ...f });
@@ -1167,6 +1187,11 @@ function catGrid(o) {
     [[23, 25.5], [26.5, 25.5], [29, 22.8], [29.8, 19.5], [30, 16.8]],
     [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 17], [25.8, 17.6]], // the tip curled over
     [[23, 25.5], [26.5, 25.5], [28.6, 22], [28.8, 17], [28.6, 13.5]], // straight up, on alert
+    // Wrapping the tail round to the front: 5 swept low to the side, 6 on the ground at the
+    // side, 7 lying on the ground curled round the front paw.
+    [[23, 25.5], [26.5, 26.2], [29, 26.4], [30.6, 25.2]],
+    [[23, 25.5], [26.2, 27.2], [27.6, 28.6], [26.4, 29.4], [24.6, 29.6]],
+    [[23, 25.5], [25.8, 27.4], [26.4, 28.9], [24.6, 29.7], [21.6, 29.8], [18.8, 29.6], [17.4, 29]],
   ];
   let tailPath = tails[o.alert ? 4 : o.tail || 0];
   if (o.tall) {
@@ -1451,11 +1476,6 @@ function catGrid(o) {
     put(inner - dir, 32, line);
     for (const y of [30, 31]) put(inner - dir, y, k);
     // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
-    // A darker arc over the thigh, the thigh below it a touch lighter, so it reads as its own bulge.
-    const arc = [[13, 37], [13, 36], [13, 35], [14, 34], [15, 33]].map(([x, y]) => [left ? x : 47 - x, y]);
-    const ink = shade(fur, 0.45);
-    for (let y = 35; y <= 41; y++) for (const x of left ? [14, 15] : [32, 33]) if (!(y === 35 && x === (left ? 14 : 33))) put(x, y, shade(g[y][x] || fur, 1.12));
-    for (const [x, y] of arc) put(x, y, ink);
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
@@ -1556,6 +1576,11 @@ function catGrid(o) {
       px(g, 22, 27, line); px(g, 25, 27, line); px(g, 22, 28, line); px(g, 25, 28, line); px(g, 23, 29, line); px(g, 24, 29, line);
     }
   }
+  for (let y = 37; y <= 43; y++)
+    for (let x = 17; x <= 30; x++) {
+      const c = g[y][x];
+      if (c && c !== line && ((x >= 23 && x <= 24) || bare(x, y))) g[y][x] = shade(c, 0.86);
+    }
   if (o.lick && o.lick !== "up") {
     // A front paw raised to the mouth (over the whiskers), toes up, a lick of tongue on it.
     const pw = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur;
@@ -1589,6 +1614,12 @@ function catGrid(o) {
       px(g, 25, 21, "#e48a95");
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
     }
+  }
+  if (!o.alert && (o.tail === 6 || o.tail === 7)) {
+    const tg = grid();
+    thick(tg, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), o.tailColor || fur);
+    outline(tg, line);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (tg[y][x] && (y >= 39 || x >= 33)) g[y][x] = tg[y][x];
   }
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
@@ -2031,7 +2062,7 @@ const SPRITE_PRESETS = {
   charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
   black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
-  bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
+  bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
 function spriteLook(look) {
