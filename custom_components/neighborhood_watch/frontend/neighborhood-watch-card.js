@@ -1262,10 +1262,16 @@ function catGrid(o) {
   if (o.tabby) {
     // A mackerel tabby: the forehead "M", a line from each eye, stripes curving down the
     // flanks, necklace bars on the chest, barred legs, a ringed tail with a dark tip.
-    const st = shade(fur, 0.45), light = shade(fur, 1.15);
+    const st = o.tabbyDark || shade(fur, 0.45), light = shade(fur, 1.15); // tabbyDark: the stripes' own colour
     const M = [[19, 11], [19, 10], [20, 9], [21, 10], [22, 11], [23, 10], [24, 10], [25, 11], [26, 10], [27, 9], [28, 10], [28, 11]];
     on((x, y) => M.some(([mx, my]) => mx === x && my === y), st);
     on((x, y) => y <= 8 && [21, 23, 24, 26].includes(x), st); // lines up the crown
+    if (o.tabbyBold) {
+      // Bolder: the crown lines doubled, bars over the temples and down the cheeks.
+      on((x, y) => y <= 9 && [19, 20, 27, 28].includes(x) && y >= 4, st);
+      on((x, y) => (y === 11 || y === 12) && (Math.abs(x - 15) <= 1 || Math.abs(x - 32) <= 1), st);
+      on((x, y) => (y === 17 || y === 18) && (x <= 14 || x >= 33), st);
+    }
     on((x, y) => (y === 14 && (x === 16 || x === 17)) || (y === 14 && (x === 30 || x === 31)), st); // from the eyes
     on((x, y) => y === 16 && (x <= 15 || x >= 32), st); // cheeks
     on((x, y) => y >= 16 && y <= 21 && Math.abs(x - cx) <= 4, light); // paler muzzle and throat
@@ -1286,7 +1292,8 @@ function catGrid(o) {
       on((x, y) => ring(x, y) === "pale", pale);
       on((x, y) => ring(x, y) === "dark", deep);
       on((x, y) => y >= 22 && y <= 25 && Math.min(x, 47 - x) >= 14 && Math.min(x, 47 - x) <= 19, deep); // a band over each shoulder
-    } else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
+    } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
+    else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
     on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
     on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
@@ -2130,7 +2137,7 @@ const SPRITE_PRESETS = {
   calico_collar: { detail: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
   grey_chest_spot: { detail: true, fur: "#7f7e7b", chestPatch: true },
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
-  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, classicTabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  brown_tabby: { detail: true, fur: "#4a3326", tabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
