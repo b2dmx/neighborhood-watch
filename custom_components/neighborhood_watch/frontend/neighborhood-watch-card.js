@@ -1180,6 +1180,7 @@ function catGrid(o) {
   const fur = o.fur, WHITE = "#f1ece3";
   const isFur = (c) => c === fur;
   const bodyRx = o.fluffy || o.big ? 8.4 : o.slim ? 6.3 : o.small ? 6.8 : 7.5; // long hair or a big frame; a small cat narrower
+  const bodyCy = 22.5 - 1 / 3, bodyRy = 8 + 1 / 3; // the body's top a pixel higher (a shorter neck), its bottom where it was
   const tails = o.tailPaths || [
     [[23, 25.5], [26.5, 25.5], [28.5, 22.5], [28, 19], [27, 16.5]],
     [[23, 25.5], [26.5, 25.5], [28.8, 22.5], [29, 19], [28.6, 16.6]],
@@ -1222,7 +1223,7 @@ function catGrid(o) {
       run += segL[i];
     });
   } else thick(g, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), fur);
-  ellipse(g, 16, 22.5, bodyRx, 8, fur);
+  ellipse(g, 16, bodyCy, bodyRx, bodyRy, fur);
   ellipse(g, 9.8, 28.5, 1.7, 1.2, fur); // back feet
   ellipse(g, 22.2, 28.5, 1.7, 1.2, fur);
   ellipse(g, 13, 28.4, 2.1, 1.5, fur); // front paws
@@ -1319,12 +1320,12 @@ function catGrid(o) {
     const M = [[20, 10], [21, 9], [22, 10], [25, 10], [26, 9], [27, 10]];
     on((x, y) => M.some(([mx, my]) => mx === x && my === y), st);
     on((x, y) => y >= 5 && y <= 8 && [22, 25].includes(x), st);
-    on((x, y) => y >= 29 && y <= 38 && (x <= 18 || x >= 29) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 <= 1 && y % 4 === 0 && hash(Math.min(x, 47 - x), y) % 3 !== 0, shade(fur, o.contrast ? 0.74 : 0.88)); // mirrored, so both sides match
+    on((x, y) => y >= 29 && y <= 38 && (x <= 18 || x >= 29) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1 && y % 4 === 0 && hash(Math.min(x, 47 - x), y) % 3 !== 0, shade(fur, o.contrast ? 0.74 : 0.88)); // mirrored, so both sides match
   }
   if (o.tearMarks) on((x, y) => (x === 21 || x === 26) && (y === 12 || y === 13), shade(fur, 1.6)); // pale streaks by the inner eyes
   if (o.paleMuzzle) on((x, y) => y >= 17 && y <= 21 && Math.abs(x + 0.5 - 24) <= 4 - (y === 21 ? 1 : 0), o.pale || shade(fur, 1.3));
   if (o.bandedTail) {
-    const outside = (x, y) => (x >= 35 || (y >= 16 && x >= 34)) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 > 1; // the tail, not the head's edge
+    const outside = (x, y) => (x >= 35 || (y >= 16 && x >= 34)) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1; // the tail, not the head's edge
     const band = o.ringColor || shade(fur, o.contrast ? 0.42 : 0.55);
     if (o.rings) {
       // Distance along the tail's path for each tail pixel; a thin ring every so often.
@@ -1403,7 +1404,7 @@ function catGrid(o) {
     on((x, y) => x <= 15 && y >= 24 && y <= 37 && ((x - 12) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides); // the dark back, showing past each side
     on((x, y) => x >= 32 && y >= 24 && y <= 37 && ((x - 35) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides);
   }
-  if (o.tailColor) on((x, y) => x >= 33 && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - 22.5 * S) / (8 * S)) ** 2 > 1, o.tailColor); // the whole tail
+  if (o.tailColor) on((x, y) => x >= 33 && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1, o.tailColor); // the whole tail
   // With a front leg lifted, the belly behind it shows: below the held-up paw, or the whole
   // leg's length while licking.
   const bareTop = o.lick === 1 || o.lick === 2 || o.lick === "mid" ? 33 : o.lick === "up" ? 41 : o.pawUp ? 40 + (o.pawShift || 0) : null;
@@ -1466,7 +1467,7 @@ function catGrid(o) {
     // shadow, the top of the head catches the light (not under the ears, which shade it).
     // Worked out on the left half and mirrored, so it is symmetrical; every colour shades
     // itself, markings included.
-    const brx = bodyRx * S + (o.small ? 1 : 0), cy0 = 22.5 * S, ry0 = 8 * S; // a small cat's shading sits a pixel further out, under its eased neck
+    const brx = bodyRx * S + (o.small ? 1 : 0), cy0 = bodyCy * S, ry0 = bodyRy * S; // a small cat's shading sits a pixel further out, under its eased neck
     const inB = (x, y) => ((x + 0.5 - 24) / brx) ** 2 + ((y + 0.5 - cy0) / ry0) ** 2 <= 1;
     const inHead = (x, y) => ((x + 0.5 - 24) / 10.5) ** 2 + ((y + 0.5 - 15) / 9) ** 2 <= 1;
     const isEar = (x, y) => !inHead(x, y) && g[y]?.[x] && g[y][x] !== line;
@@ -1475,8 +1476,8 @@ function catGrid(o) {
     for (let y = 0; y < 44; y++)
       for (let x = 0; x <= 23; x++) {
         if (y >= 25 && inB(x, y) && (!inB(x - 2, y) || (!o.small && !inB(x - 3, y) && (x + y) % 2 === 0))) fac[y][x] = 0.94; // no stray dither dots on a small cat
-        if (y >= 21 && y < 25 && !inHead(x, y) && g[y][x] && g[y][x] !== line && (g[y][x - 1] === line || g[y][x - 2] === line)) fac[y][x] = 0.94; // the shoulders, up to the neck
-        if (y >= 22 && y <= 27 && !inHead(x, y) && (inHead(x, y - 1) || inHead(x, y - 2))) fac[y][x] = 0.95;
+        if (y >= 22 && y < 26 && !inHead(x, y) && g[y][x] && g[y][x] !== line && (g[y][x - 1] === line || g[y][x - 2] === line)) fac[y][x] = 0.94; // the shoulders, up to the neck
+        if (y >= 23 && y <= 28 && !inHead(x, y) && (inHead(x, y - 2) || inHead(x, y - 3))) fac[y][x] = 0.95; // the band under the jaw, a row down
         if (y < 24 && inHead(x, y) && !underEar(x, y) && (!inHead(x, y - 2) || (!inHead(x, y - 3) && (x + y) % 2 === 0))) fac[y][x] = "lit";
       }
     for (let y = 0; y < N; y++) for (let x = 24; x < N; x++) fac[y][x] = fac[y][47 - x];
