@@ -1359,7 +1359,9 @@ function catGrid(o) {
     const inBelly = (x, y) => bare(x, y) || (y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
-    const spots = [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
+    const spots = d
+      ? [[23, t + 2], [24, t + 5], [23, t + 8], [24, t + 11]] // a lowered belly: alternating down the strip
+      : [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
     const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
     on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
   }
@@ -1433,7 +1435,7 @@ function catGrid(o) {
     // Just the hind foot on that side, set apart by one short mark; no toe lines.
     px(g, 20, 42, line); px(g, 20, 43, line);
   }
-  // Shoulders, when asked for: a darker curve where each front leg rises into the body.
+  // Shoulders (on unless shoulders: false): where each front leg rises into the body.
   const shoulder = (x0) => {
     // The leg's outer outline carries on up four rows, then a softer line leans in toward
     // the neck; its inner edge steps in one, beside the belly's top.
@@ -1463,7 +1465,7 @@ function catGrid(o) {
       continue;
     }
     if (o.pawUp && x0 === 16) {
-      if (o.shoulders) shoulder(x0);
+      if (o.shoulders !== false) shoulder(x0);
       // Paw up: this front paw held up, curled against the chest, three feet on the ground.
       const pc = g[38][19] && g[38][19] !== line ? g[38][19] : fur;
       const ps = o.pawShift || 0; // a little shuffle: the paw settles a pixel lower
@@ -1479,7 +1481,7 @@ function catGrid(o) {
       continue;
     }
     for (let y = 33; y <= 40; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); } // the arm
-    if (o.shoulders) shoulder(x0);
+    if (o.shoulders !== false) shoulder(x0);
     for (let y = 41; y <= 43; y++) { px(g, x0 - 1, y, line); px(g, x0 + 7, y, line); } // the paw, a touch wider
     px(g, x0, 41, line); px(g, x0 + 6, 41, line);
     for (const y of [42, 43]) { px(g, x0, y, g[y][x0 + 1]); px(g, x0 + 6, y, g[y][x0 + 5]); }
