@@ -1435,8 +1435,13 @@ function catGrid(o) {
   }
   // Shoulders, when asked for: a darker curve where each front leg rises into the body.
   const shoulder = (x0) => {
-    const k = shade(fur, 0.68), outer = x0 < 23 ? x0 : x0 + 6, dir = x0 < 23 ? 1 : -1;
-    for (const [dx, y] of [[0, 32], [0, 31], [0, 30], [0, 29], [1, 28], [2, 27], [3, 27]]) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
+    // The leg's outer edge carries on up the chest, leaning in toward the neck.
+    const k = shade(fur, 0.55), outer = x0 < 23 ? x0 : x0 + 6, dir = x0 < 23 ? 1 : -1;
+    const run = [[0, 32], [0, 31], [0, 30], [0, 29], [1, 28], [1, 27], [1, 26], [1, 25], [2, 24], [2, 23], [2, 22]];
+    for (const [dx, y] of run) if (g[y]?.[outer + dir * dx] && g[y][outer + dir * dx] !== line) px(g, outer + dir * dx, y, k);
+    // The hind leg's thigh, set apart from the body by a curve rising to the front leg.
+    const side = x0 < 23 ? [[13, 36], [13, 35], [14, 34], [15, 33]] : [[34, 36], [34, 35], [33, 34], [32, 33]];
+    for (const [x, y] of side) if (g[y]?.[x] && g[y][x] !== line) px(g, x, y, k);
   };
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
@@ -1576,10 +1581,12 @@ function catGrid(o) {
     const rows = g.slice(1, 45).map((r) => r.slice());
     rows.splice(27, 0, rows[26].slice()); // chest rows, clear of the belly spots and the tail's bend
     rows.splice(29, 0, rows[28].slice());
-    const old = g.map((r) => r.slice());
-    for (let y = 0; y < 46; y++) {
-      g[y] = rows[y];
-      for (let x = 36; x < N; x++) g[y][x] = old[y - 1]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
+    // tall: 2 adds two more body rows (copies of a plain row, so they're coloured like it).
+    if (o.tall === 2) rows.splice(30, 0, rows[30].slice(), rows[30].slice());
+    const old = g.map((r) => r.slice()), drop = o.tall === 2 ? 3 : 1; // the tail moves down with the body
+    for (let y = 0; y < rows.length + 1 && y < N; y++) {
+      g[y] = rows[y] || Array(N).fill(null);
+      for (let x = 36; x < N; x++) g[y][x] = old[y - drop]?.[x] ?? null; // the tail isn't stretched, so its rings stay even
     }
   }
   // Pin-holes inside the outline (between the paws, at the tail's root) are filled.
@@ -2009,7 +2016,7 @@ const SPRITE_PRESETS = {
   brown_tabby: { detail: true, fur: "#4a3326", tabby: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, fur: "#55585f", whiteBackPaws: true, whiteChest: true },
   black: { detail: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, tall: true, bellyDrop: 2, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
+  smoky_banded_tail: { detail: true, tall: 2, bellyDrop: 2, shoulders: true, contrast: true, tailW: 1.5, fur: "#6e665e", pale: "#bbb3aa", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#4d463f", spottedBelly: true, eyeliner: "#bbb3aa", rimTop: true, paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", marks: [["#5f5750", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#49433e", "11:20,27"], ["#5f5750", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-20,27-47;7:0-17,30-47;8:0-16,31-47;9:0-15,32-47;10:0-14,33-47;11:0-13,34-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#bbb3aa", "22:23-24"]] },
   bicolour_mask_paw_up: { detail: true, fur: "#f1ece3", tailW: 0.75, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-47;13:30-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22;16:16-21;17:17-20"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:22-23;16:21-24;17:20-24;18:20-25;19:20-24;20:21-24;21:22-23"], ["#1d1d20", "14:18-19;15:18-20;16:18-21;17:18-22;18:18-22"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
