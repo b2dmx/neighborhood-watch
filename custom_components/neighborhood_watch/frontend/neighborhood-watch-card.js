@@ -1107,7 +1107,7 @@ function idleCatFrames(o) {
   return [
     ...up, ...lower(0), ...idleFrames(down),
     ...wrapIn(down), ...idleFrames(down, true), ...lower(7),
-    ...shuffle(7), ...idleFrames(o, true).slice(0, 12), ...wrapOut(o),
+    ...shuffle(7), ...idleFrames(o, true), ...wrapOut(o), // the paw up about half the loop, the paws down the other half
   ];
 }
 // tailWrap: the tail sweeps down to the side, then onto the ground curled round the front paw
@@ -1221,6 +1221,11 @@ function catGrid(o) {
     const [a, b] = tailPath.slice(-2), l = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (b[1] < a[1]) tailPath = [...tailPath.slice(0, -1), [b[0] + ((b[0] - a[0]) / l) * 1.4, b[1] + ((b[1] - a[1]) / l) * 1.4]];
   }
+  // A wrapped tail lies on the ground in front of the paws. The taller cat's body pushes it down by
+  // as many rows as it grows, which would take its bottom edge (and outline) off the frame: so it
+  // starts that much higher, and lands level with the paws.
+  const wrapLift = o.tall && !o.alert && (o.tail || 0) >= 5 ? (o.tall === 2 ? 3 : 1) : 0; // in rows
+  if (wrapLift) tailPath = tailPath.map(([x, y], i) => [x, y - (wrapLift / S) * Math.min(1, i / 2)]);
   if (o.longTail) {
     const [a, b] = tailPath.slice(-2);
     if (b[1] < a[1]) tailPath = [...tailPath, [b[0] + (b[0] - a[0]) * 1.3, b[1] + (b[1] - a[1]) * 1.3]]; // carried on further (not when curled over)
@@ -1231,6 +1236,29 @@ function catGrid(o) {
   if (ownTail) tailPath = [[100, 100], [101, 100]];
   const w0 = o.tailW || (o.fluffy ? 1.6 : 1.1);
   const taper = o.tailTaper || (o.fluffy ? null : [w0 * 1.3, w0 * 0.9]); // every tail tapers toward the tip
+  // Inside the frame, outline included: no point so far right or low that the tail (as thick as
+  // it is there) runs off the edge and loses its outline. A taller cat's tail moves down later.
+  if (!ownTail) {
+    const segs = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1])), len = segs.reduce((t, l) => t + l, 0) || 1;
+    const down = o.tall ? (o.tall === 2 ? 3 : 1) : 0, lim = (N - 2) / S - 0.15;
+    // The tail is drawn a little shorter (shrunk toward its root), so it keeps its shape.
+    const [rx, ry] = tailPath[0];
+    let run = 0, k = 1;
+    tailPath.forEach(([x, y], i) => {
+      if (i) run += segs[i - 1];
+      const r = taper ? taper[0] + (taper[1] - taper[0]) * (run / len) : w0, mx = (o.tailTaper || o.fluffy ? lim : N / S - 0.35) - r, my = (o.tailTaper || o.fluffy ? lim : N / S) - r - down / S; // (the bottom row may hold the outline; a drawn-round fluffy tail spreads a little further)
+      if (i && x > mx && x > rx) k = Math.min(k, (mx - rx) / (x - rx));
+    });
+    if (k < 1) tailPath = tailPath.map(([x, y]) => [rx + (x - rx) * k, ry + (y - ry) * k]);
+    // Too low: those points rise just enough (a tail on the ground lies flat along it; shrinking
+    // toward the root instead would lift its tip off the ground).
+    run = 0;
+    tailPath = tailPath.map(([x, y], i) => {
+      if (i) run += segs[i - 1];
+      const r = taper ? taper[0] + (taper[1] - taper[0]) * (run / len) : w0;
+      return [x, Math.min(y, (o.tailTaper || o.fluffy ? lim : N / S) - r - down / S)];
+    });
+  }
   // The tail as a round tube: for a pixel near it, how far along it is (in pixels, and as a
   // fraction), and its surface normal, for rings that wrap round it and for its shading.
   const tPts = tailPath.map(([x, y]) => [x * S, y * S]);
@@ -1355,7 +1383,7 @@ function catGrid(o) {
       on((x, y) => y >= 23 && y <= 24 && Math.min(x, 47 - x) >= 15 && Math.min(x, 47 - x) <= 19, band); // a band over each shoulder
     } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
     else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
-    on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21) || (x >= 26 && x <= 30)), st); // barred legs
+    on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21 && !o.lick && !o.pawUp) || (x >= 26 && x <= 30)), st); // barred legs (only a leg that is down, never across the belly)
     if (taper && !o.tailTaper) on((x, y) => x >= 33 && isFur(g[y][x]) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1 && (() => { const t = tube(x, y); return t.d <= t.r + 0.5 && (t.f > 0.88 || t.s % 4 < 2); })(), st); // rings round the tail, a dark tip
     else on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
@@ -1475,13 +1503,14 @@ function catGrid(o) {
     const pale = o.bellyPale || o.pale || shade(fur, 1.35), spot = shade(fur, 0.82); // spots a soft shade, not too dark; bellyPale: a belly paler than the fur but not as pale as the muzzle
     const d = o.bellyDrop || 0, t = 29 + d; // bellyDrop: the belly starts that many rows lower
     const half = { 0: d ? 2 : 3, 1: 4, 2: 4, 3: 3 }; // a lowered belly's top is a narrow cap
-    const inBelly = (x, y) => bare(x, y) || (between(x, y) && y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
+    // A lowered belly is only a narrow strip: a lifted leg uncovers the fur of the side there, not a pale patch.
+    const inBelly = (x, y) => (!d && bare(x, y)) || (between(x, y) && y >= t && (y <= t + 3 && y < 33 ? Math.abs(x + 0.5 - 24) <= half[y - t] : x >= 23 && x <= 24)); // never onto the legs // rounded, then down between the legs to the ground
     // Even single-pixel spots, mirrored and staggered at the top, then alternating down the
     // strip between the legs, and on any belly a lifted leg uncovers.
     const spots = d
       ? [[23, t + 1], [24, t + 3], [23, t + 5], [24, t + 7], [23, t + 9], [24, t + 11]] // a lowered belly: alternating down the strip
       : [[21, t + 1], [26, t + 1], [22, t + 3], [25, t + 3], [23, t + 6], [24, t + 9], [23, t + 12]];
-    const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
+    const spotted = (x, y) => spots.some(([sx, sy]) => sx === x && sy === y) || (!d && bare(x, y) && ((x === 20 && y % 6 === 1) || (x === 22 && y % 6 === 4)));
     if (o.softSpots) {
       // Soft spots: a mid tone between the belly and the fur, eased in by a lighter ring of
       // pixels round each one.
@@ -1535,6 +1564,25 @@ function catGrid(o) {
     let x = g[y].findIndex((c) => c);
     if (x < 0 || x > 23) continue;
     for (; g[y][x] === line && x < 23; x++) if (g[y][47 - x]) g[y][47 - x] = line;
+  }
+  // The tail drawn here (wrapped round to the front, or long-haired) in its own colour: dark with
+  // orange bands on a calico, rings round a banded one. Where it lies against the body it is a
+  // shade darker, so the two read apart.
+  if (tailMask.size) {
+    const inBodyOrHead = (x, y) => ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1 || ((x + 0.5 - 24) / 10.5) ** 2 + ((y + 0.5 - 15) / 9) ** 2 <= 1;
+    const isTail = (x, y) => tailMask.has(y * N + x) && !inBodyOrHead(x, y) && g[y]?.[x] && g[y][x] !== line;
+    const base = o.tailColor || (o.calico ? "#323034" : null);
+    const band = o.ringColor || shade(fur, o.contrast ? 0.42 : 0.55);
+    const ringed = o.bandedTail && o.ringPeriod && taper && !o.tailTaper && !ownTail;
+    const cells = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (isTail(x, y)) cells.push([x, y]);
+    for (const [x, y] of cells) {
+      if (!ownTail && base && (g[y][x] === fur || g[y][x] === WHITE)) g[y][x] = base;
+      if (!ownTail && o.calico && taper && !o.tailTaper && Math.floor(tube(x, y).s / 2) % 3 === 0) g[y][x] = "#c9935c";
+      if (ringed) { const t = tube(x, y); if (t.f > 0.9 || (t.s > 9 && t.s % o.ringPeriod < 1)) g[y][x] = band; }
+    }
+    const against = cells.filter(([x, y]) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const c = g[y + dy]?.[x + dx]; return c && c !== line && !isTail(x + dx, y + dy); }));
+    for (const [x, y] of against) g[y][x] = shade(g[y][x], 0.88);
   }
   if (o.small) {
     // The narrower body pinches in under the head: move the deepest point of that notch
@@ -1622,7 +1670,7 @@ function catGrid(o) {
   for (const x0 of o.lick === 1 || o.lick === 2 || o.lick === "mid" ? [25] : [16, 25]) {
     if (o.lick === "up" && x0 === 16) {
       // Starting the lick: the paw just lifted off the ground, the leg otherwise as it stands.
-      const pc = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur, lift = 4;
+      const pc = g[42]?.[27] && g[42][27] !== line ? g[42][27] : fur, lift = 2; // just off the ground, so it still reads as the foot
       for (let y = 33; y <= 40 - lift; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); }
       for (let y = 41 - lift; y <= 43 - lift; y++) {
         px(g, x0 - 1, y, line); px(g, x0 + 7, y, line);
@@ -1630,6 +1678,7 @@ function catGrid(o) {
       }
       for (let x = x0; x <= x0 + 6; x++) px(g, x, 44 - lift, line); // the pad's underside, off the ground
       px(g, x0 + 2, 43 - lift, line); px(g, x0 + 4, 43 - lift, line); // toes
+      if (o.cuffs) for (const y of [39 - lift, 40 - lift]) for (let dx = 1; dx <= 2; dx++) px(g, x0 + dx, y, o.cuffs); // lifted with the paw
       continue;
     }
     if (o.pawUp && x0 === 16) {
@@ -1645,7 +1694,8 @@ function catGrid(o) {
       }
       for (let x = x0 + 2; x <= x0 + 6; x++) px(g, x, 39 + ps, line); // its underside, well off the ground
       px(g, x0 + 3, 38 + ps, line); px(g, x0 + 5, 38 + ps, line); // toes, hanging
-      if (o.cuffs) { px(g, x0 + 1, 35 + ps, o.cuffs); px(g, x0 + 2, 35 + ps, o.cuffs); }
+      // Cuffs: the same size as the standing leg's (two by two, on the outside), so the pair match.
+      if (o.cuffs) for (const y of [34 + ps, 35 + ps]) for (let x = x0 + 1; x <= x0 + 2; x++) px(g, x, y, o.cuffs);
       continue;
     }
     for (let y = 33; y <= 40; y++) { px(g, x0, y, line); px(g, x0 + 6, y, line); } // the arm
@@ -1776,6 +1826,14 @@ function catGrid(o) {
       for (let x = 18; x <= 22; x++) px(g, x + o2, y, elbow && (x === 18 || x === 22) ? line : legC);
     }
     if (up) for (let x = 19; x <= 21; x++) px(g, x + out(bottom), bottom + 1, line);
+    // Cuffs: the paw is turned over, so the back of the wrist shows: the cuff right across it,
+    // except its inside edge (toward the chest), a row of white clear of the toe beans.
+    if (o.cuffs) for (const y of o.short && dy === 0 ? [26, 27] : [25 + dy, 26 + dy]) for (let x = 18; x <= 21; x++) px(g, x + out(y), y, o.cuffs); // (a short cat loses row 24 later)
+    // The slanted leg leaves a one-pixel sliver of the side between it and the body's edge: plain
+    // fur there (a patch of colour would show as stray dark pixels between two lines).
+    for (let y = top; y <= bottom; y++)
+      for (let x = 12; x <= 17; x++)
+        if (g[y][x] && g[y][x] !== line && g[y][x - 1] === line && g[y][x + 1] === line) px(g, x, y, fur);
     // The paw, toes up: the same size and shape as a standing paw, turned over.
     for (let x = 17; x <= 23; x++) px(g, x, 20 + dy, line); // its top edge
     for (let y = 21 + dy; y <= 23 + dy; y++) {
@@ -1792,24 +1850,91 @@ function catGrid(o) {
       if (o.lick === 2) px(g, 25, 20, "#e48a95");
     }
   }
+  let zLayer = null; // the wrapped tail on its own, for cats drawn in layers (zTail)
   if (!o.alert && o.tail >= 6 && o.tail <= 9) {
-    const tg = grid();
-    thick(tg, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), o.tailColor || fur);
+    const tg = grid(), base = o.tailColor || (o.calico ? "#323034" : fur);
+    if (o.tailTaper) {
+      // Its own taper (fat at the root): drawn the same shape as the first pass, so the two
+      // passes' outlines land on each other instead of side by side.
+      const [r0, r1] = o.tailTaper, segL = tailPath.slice(1).map((b, i) => Math.hypot(b[0] - tailPath[i][0], b[1] - tailPath[i][1]));
+      const total = segL.reduce((t, l) => t + l, 0);
+      let run = 0;
+      tailPath.slice(1).forEach((b, i) => {
+        const a = tailPath[i], steps = Math.ceil(segL[i] * 4);
+        for (let k = 0; k <= steps; k++) {
+          const t = k / steps, r = r0 + (r1 - r0) * ((run + segL[i] * t) / total);
+          ellipse(tg, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, r, base);
+        }
+        run += segL[i];
+      });
+    } else thick(tg, tailPath, o.tailW || (o.fluffy ? 1.6 : 1.1), base);
+    // Along the tail (in pixels, and as a fraction): orange bands on a calico, rings on a banded one.
+    const wp = tailPath.map(([x, y]) => [x * S, y * S]), wl = wp.slice(1).map((q, i) => Math.hypot(q[0] - wp[i][0], q[1] - wp[i][1])), wTotal = wl.reduce((t, l) => t + l, 0);
+    const along = (x, y) => {
+      let best = Infinity, at = 0, run = 0;
+      wp.slice(1).forEach((q, i) => {
+        const a = wp[i], l = wl[i] || 1, t = Math.max(0, Math.min(1, ((x + 0.5 - a[0]) * (q[0] - a[0]) + (y + 0.5 - a[1]) * (q[1] - a[1])) / (l * l)));
+        const d = Math.hypot(a[0] + (q[0] - a[0]) * t - x - 0.5, a[1] + (q[1] - a[1]) * t - y - 0.5);
+        if (d < best) { best = d; at = run + l * t; }
+        run += l;
+      });
+      return at;
+    };
+    const band = o.ringColor || shade(fur, o.contrast ? 0.42 : 0.55);
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        if (!tg[y][x]) continue;
+        const s2 = along(x, y);
+        if (o.calico && Math.floor(s2 / 2) % 3 === 1) tg[y][x] = "#c9935c";
+        else if (o.bandedTail && o.ringPeriod && (s2 > wTotal * 0.9 || (s2 > 9 && s2 % o.ringPeriod < 1))) tg[y][x] = band;
+      }
     outline(tg, line);
+    zLayer = { tg: tg.map((r) => r.slice()), along, wp };
     const tail = (x, y) => tg[y]?.[x] && tg[y][x] !== line;
-    // Where the tail comes round the body's back corner it's set apart: one straight line down
-    // the body's edge, a single even rim of light beside it (dark coats only), and the tail's
-    // root a shade darker.
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (tg[y][x] && (y >= 39 || x >= 33)) g[y][x] = tg[y][x];
-    for (let y = 36; y <= 40; y++) {
-      px(g, 33, y, line);
-      const c = g[y][32];
-      if (c && c !== line && lum(c) < 70) g[y][32] = shade(c, 1.5);
-    }
-    const [rx, ry] = [tailPath[0][0] * S, tailPath[0][1] * S];
+    // The tail comes from behind the body: above the feet it shows only where the sprite is
+    // empty, and the body's outline runs down its edge (as on the other side). From the feet down
+    // it lies in front, over the feet and their outlines, so no lines cross it. (A lifted tail's
+    // "feet" line is lifted with it: the body is stretched down to meet it afterwards.)
+    const fy = 39 - wrapLift;
+    const shownM = grid();
     for (let y = 0; y < N; y++)
       for (let x = 0; x < N; x++)
-        if (tail(x, y) && Math.hypot(x + 0.5 - rx, y + 0.5 - ry) < 3.2) g[y][x] = shade(tg[y][x], 0.85); // the root, in the body's shadow
+        if (tg[y][x] && (!g[y][x] || y >= fy || (x >= 34 && (g[y][x] === line || tailMask.has(y * N + x))))) { g[y][x] = tg[y][x]; if (tail(x, y)) shownM[y][x] = 1; } // (tailMask: the same tail's first pass)
+    // Its top edge where it crosses in front of the leg keeps its outline (the leg is behind it).
+    for (let y = 0; y < fy; y++)
+      for (let x = 0; x <= Math.max(33, Math.floor(24 + bodyRx * S) - 1); x++) // (a wider body: as far as its edge)
+        if (tg[y][x] === line && [[0, 1], [1, 0], [-1, 0]].some(([dx, dy]) => y + dy >= fy && shownM[y + dy]?.[x + dx])) g[y][x] = line;
+    // The body's right edge (mirroring its left one) runs down beside the tail.
+    let lx = 0;
+    while (lx < 23 && g[fy - 2][lx] !== line) lx++;
+    const ex = lx < 23 ? N - 1 - lx : 33;
+    // Where the tail first shows in front of the body (behind it just above), its top edge is
+    // the body's lower edge: an outline there too, as far as the body's edge. Past it the tail
+    // is one piece, front and back joined: no line across it.
+    for (let x = 0; x <= ex; x++)
+      if (shownM[fy]?.[x] && !shownM[fy - 1]?.[x] && g[fy - 1][x] && g[fy - 1][x] !== line) g[fy - 1][x] = line;
+    for (let x = 1; x < ex; x++) // no one-pixel gap left in that line (over the tail only)
+      if (shownM[fy][x] && g[fy - 1][x] !== line && g[fy - 1][x - 1] === line && g[fy - 1][x + 1] === line && g[fy][x] !== line) { g[fy - 1][x] = line; shownM[fy - 1][x] = 0; }
+    const opened = [];
+    for (let x = ex + 1; x < N; x++)
+      if (g[fy - 1][x] === line && tail(x, fy - 2) && tail(x, fy) && g[fy - 2][x] !== line && g[fy][x] !== line) { g[fy - 1][x] = tg[fy - 1][x] && tg[fy - 1][x] !== line ? tg[fy - 1][x] : g[fy][x]; shownM[fy - 1][x] = 1; opened.push(x); }
+    for (let y = fy - 3; y < fy; y++) { px(g, ex, y, line); shownM[y][ex] = 0; }
+    // ...and joins the edge above it without a gap.
+    if (g[fy - 4]?.[ex] !== line && g[fy - 4]?.[ex + 1] !== line && g[fy - 5]?.[ex + 1] === line) { px(g, ex + 1, fy - 4, line); shownM[fy - 4][ex + 1] = 0; }
+    // Where the back of the tail rises beside the body, its own edge still runs on down to the front.
+    for (const x of opened) if (g[fy - 2][x] === line) { g[fy - 1][x] = line; shownM[fy - 1][x] = 0; }
+    // Where the tail meets the body it is a shade darker (the root most of all), so the two read apart.
+    const shown = (x, y) => shownM[y]?.[x] === 1;
+    const [rx, ry] = [tailPath[0][0] * S, tailPath[0][1] * S];
+    const against = [];
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        if (!shown(x, y)) continue;
+        const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const c = g[y + dy]?.[x + dx]; return c && !shown(x + dx, y + dy) && (tg[y + dy]?.[x + dx] !== line || (x + dx === ex && y + dy >= fy - 3 && y + dy < fy)); });
+        const dr = Math.hypot(x + 0.5 - rx, y + 0.5 - ry);
+        if (near || dr < 2.6) against.push([x, y, near ? 0.88 : 0.9 + (dr / 2.6) * 0.07]); // fading out from the root
+      }
+    for (const [x, y, k] of against) g[y][x] = shade(tg[y][x], k);
   }
   if (o.tall) {
     // Taller: two body rows repeated, the whole cat lifted a row (ear tips stay in frame).
@@ -1873,7 +1998,226 @@ function catGrid(o) {
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++)
       if (was[y][x] && ![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => was[y + dy]?.[x + dx])) g[y][x] = null;
-  if (ownTail && !o.noTail) tailLayer(g, o, line);
+  if (ownTail && !o.noTail) {
+    tailLayer(g, o, line);
+    // Where the tail's lower outline meets the back paw's corner, the corner takes the tail's
+    // shaded fur instead, so the two outlines don't run together into one block.
+    if (!o.alert && (o.tail || 0) <= 3) {
+      let lx = 0;
+      while (lx < 23 && g[39][lx] !== line) lx++;
+      const cx = (lx < 23 ? N - 1 - lx : 33) + 2;
+      if (g[40][cx] === line && g[41][cx] === line && g[39][cx - 1] && g[39][cx - 1] !== line) g[40][cx] = g[39][cx - 1];
+    }
+  }
+  // A normal-sized cat's wrapped tail, in layers: the body drawn whole (its right side the
+  // mirror of its left), the part of the tail behind it showing only where the body isn't, and
+  // the part lying on the ground in front of the paws drawn over everything.
+  if (zLayer && !o.noTail && !o.fluffy && !o.tailWrap) {
+    const body = catGrid({ ...o, tail: 0, noTail: true });
+    // A tall cat's tail moved down with its body (drop rows): the layer moves with it.
+    const dz = o.tall ? (o.tall === 2 ? 3 : 1) : 0;
+    const zt = (x, y) => zLayer.tg[y - dz]?.[x] ?? null;
+    let lx = 0;
+    while (lx < 23 && body[37][lx] !== line) lx++;
+    const ex = lx < 23 ? N - 1 - lx : 33; // the body's right edge
+    // The front part: from the bend at the bottom, where the tail turns along the ground toward
+    // the front paws. Everything before it (rising from behind the rump) stays behind the body.
+    let run = 0, cut = Infinity;
+    const wp = zLayer.wp;
+    wp.forEach(([x, y], i) => {
+      if (i) run += Math.hypot(x - wp[i - 1][0], y - wp[i - 1][1]);
+      if (cut === Infinity && i && wp[i + 1] && y + dz >= 42 && wp[i + 1][0] < x) cut = run;
+    });
+    // A gap boxed in by the tail and the body (inside the bend, where the tail turns) is tail
+    // fur, not a knot of outline: the tail is filled in there and outlined again.
+    const tf = grid().map((r, y) => r.map((_, x) => { const c = zt(x, y); return c && c !== line ? c : null; }));
+    const open = grid(), q = [];
+    const free = (x, y) => x >= 0 && y >= 0 && x < N && y < N && !tf[y][x] && !body[y][x];
+    for (let i = 0; i < N; i++) for (const [x, y] of [[i, 0], [i, N - 1], [0, i], [N - 1, i]]) if (free(x, y) && !open[y][x]) { open[y][x] = 1; q.push([x, y]); }
+    while (q.length) {
+      const [x, y] = q.pop();
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (free(x + dx, y + dy) && !open[y + dy][x + dx]) { open[y + dy][x + dx] = 1; q.push([x + dx, y + dy]); }
+    }
+    for (let pass = 0; pass < 4; pass++)
+      for (let y = 0; y < N; y++)
+        for (let x = 0; x < N; x++)
+          if (free(x, y) && !open[y][x]) tf[y][x] = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => tf[y + dy]?.[x + dx]).find(Boolean) || null;
+    outline(tf, line);
+    const layer = grid(); // which piece shows at each pixel: 0 back tail, 1 body, 2 front tail
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        const t = tf[y][x];
+        const front = t && zLayer.along(x, y - dz) >= cut;
+        g[y][x] = t && (!body[y][x] || front) ? t : body[y][x];
+        layer[y][x] = !g[y][x] ? -1 : t && front ? 2 : t && !body[y][x] ? 0 : 1;
+      }
+    // Where the front lies over the back, the front's own edge carries on as an outline
+    // part-way across the back, from the inside of the bend (next to the body) outward, so the
+    // two read as separate pieces without being cut apart.
+    const fill = (x, y) => tf[y]?.[x] && tf[y][x] !== line;
+    // (Which piece shows where is read from the drawing itself, not the path, so a tall cat's
+    // lowered tail gets its seam where its front really starts.)
+    const backPx = (x, y) => fill(x, y) && layer[y]?.[x] === 0;
+    const seam = new Set();
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++)
+        if (backPx(x, y) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => fill(x + dx, y + dy) && layer[y + dy]?.[x + dx] === 2)) seam.add(y * N + x);
+    const near = (k) => { const x = k % N, y = (k - x) / N; return [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]].map(([dx, dy]) => [x + dx, y + dy]); };
+    const bodyShown = (x, y) => body[y]?.[x] && g[y][x] === body[y][x];
+    let ring = [...seam].filter((k) => near(k).some(([x, y]) => bodyShown(x, y)));
+    const mark = new Set(ring);
+    for (let step = 1; step < 3; step++) {
+      ring = ring.flatMap((k) => near(k).map(([x, y]) => y * N + x)).filter((k) => seam.has(k) && !mark.has(k));
+      ring.forEach((k) => mark.add(k));
+    }
+    // ...reaching right to the body: a back pixel left between it and the body joins it.
+    for (const k of [...mark]) {
+      const x = k % N, y = (k - x) / N;
+      for (const [dx, dy] of [[1, 0], [-1, 0]]) if (backPx(x + dx, y) && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([ex, ey]) => bodyShown(x + dx + ex, y + ey))) mark.add(y * N + x + dx);
+    }
+    for (const k of mark) { g[Math.floor(k / N)][k % N] = line; layer[Math.floor(k / N)][k % N] = 0.5; }
+    // Each piece has its own outline, so where two pieces meet their lines lie side by side.
+    // Only one line is kept there: the upper piece's (or whichever is the cat's outer edge). The
+    // other takes the colour of the fur it borders, as long as all that fur is its own piece's
+    // (a line between two different pieces is the only thing keeping them apart, so it stays).
+    const D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const edge = (x, y) => D4.some(([dx, dy]) => !g[y + dy]?.[x + dx]);
+    for (let pass = 0; pass < 4; pass++) {
+      const was = g.map((r) => r.slice()), lw = layer.map((r) => r.slice());
+      for (let y = 30; y < N; y++)
+        for (let x = 1; x < N - 1; x++) {
+          const lp = lw[y][x];
+          if (was[y][x] !== line || lp < 0 || D4.some(([dx, dy]) => !was[y + dy]?.[x + dx])) continue;
+          const fur = D4.filter(([dx, dy]) => was[y + dy][x + dx] !== line);
+          if (!fur.length || fur.some(([dx, dy]) => lw[y + dy][x + dx] !== lp)) continue;
+          if (fur.some(([dx, dy]) => fur.some(([ex, ey]) => ex === -dx && ey === -dy))) continue; // fur on both sides: it parts two bits (like two paws)
+          const over = D4.some(([dx, dy]) => { const q = lw[y + dy]?.[x + dx]; return was[y + dy]?.[x + dx] === line && q !== lp && (q > lp || (lp === 2 && edge(x + dx, y + dy))); }); // (the body's own edge always stays)
+          if (over) g[y][x] = was[y + fur[0][1]][x + fur[0][0]];
+        }
+    }
+    // Inside the tail there is no black: a tail line with tail on every side (not on the cat's
+    // outer edge, not the seam, and not touching the body, where the tail is always outlined)
+    // is shading, a shade darker than the tail fur beside it.
+    for (let y = 30; y < N; y++)
+      for (let x = 1; x < N - 1; x++) {
+        const lp = layer[y][x];
+        if (g[y][x] !== line || (lp !== 0 && lp !== 2) || edge(x, y) || mark.has(y * N + x)) continue;
+        if ([...D4, [1, 1], [-1, 1], [1, -1], [-1, -1]].some(([dx, dy]) => layer[y + dy]?.[x + dx] === 1)) continue;
+        const tc = [...D4, [1, 1], [-1, 1], [1, -1], [-1, -1]].map(([dx, dy]) => tf[y + dy]?.[x + dx]).find((c) => c && c !== line);
+        if (tc) g[y][x] = shade(tc, 0.86);
+      }
+    // A single pixel boxed in by outline is a stray: it takes the colour around it.
+    const lines = (m, x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => m[y + dy]?.[x + dx] === line).length;
+    const was = g.map((r) => r.slice());
+    for (let y = 30; y < N - 1; y++)
+      for (let x = 1; x < N - 1; x++) {
+        const c = was[y][x];
+        if (!c || c === line || [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => was[y + dy]?.[x + dx] === c)) continue; // (two or more together are a real bit, like the back paw)
+        if (!(lines(was, x, y) === 4 || (c === body[y][x] && lines(was, x, y) === 3 && lines(body, x, y) < 3))) continue;
+        const n = {};
+        for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1], [2, 0], [-2, 0], [0, 2], [0, -2]]) { const v = was[y + dy]?.[x + dx]; if (v && v !== line && v !== c) n[v] = (n[v] || 0) + 1; }
+        const best = Object.keys(n).sort((p, q) => n[q] - n[p])[0];
+        if (best) g[y][x] = best;
+      }
+    // The tail is always outlined where it meets the body: tail fur touching body fur is outline.
+    const added = [];
+    for (let y = 30; y < N; y++)
+      for (let x = 0; x < N; x++)
+        if (g[y][x] && g[y][x] !== line && (layer[y][x] === 0 || layer[y][x] === 2) && D4.some(([dx, dy]) => layer[y + dy]?.[x + dx] === 1 && g[y + dy][x + dx] && g[y + dy][x + dx] !== line)) added.push([x, y]);
+    for (const [x, y] of added) g[y][x] = line;
+    // Where the back of the tail comes out from behind the body it is a shade darker, as when
+    // the tail is up: the pixel touching the body a little, the next one out barely.
+    const bodyAt = (x, y) => layer[y]?.[x] === 1;
+    const dark = [];
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++) {
+        if (layer[y][x] !== 0 || !g[y][x] || g[y][x] === line) continue;
+        const k = D4.some(([dx, dy]) => bodyAt(x + dx, y + dy)) ? 0.88 : bodyAt(x - 2, y) ? 0.95 : 1;
+        if (k < 1) dark.push([x, y, k]);
+      }
+    for (const [x, y, k] of dark) g[y][x] = shade(g[y][x], k);
+  }
+  // Outline clean-up low down: a background pixel boxed in by outline on three sides (a notch
+  // in the left side's edge where the body meets the paw) is closed; on a tail lying down, an
+  // outline pixel sticking out on its own from the tail's edge is removed.
+  for (let y = 36; y <= 41; y++)
+    for (let x = 1; x <= 16; x++)
+      if (!g[y][x] && [[0, -1], [0, 1], [1, 0], [-1, 0]].filter(([dx, dy]) => g[y + dy][x + dx] === line).length >= 3) g[y][x] = line;
+  if (!o.noTail && !o.alert && !o.tailWrap && o.tail >= 6 && o.tail <= 9)
+    for (let y = 36; y < N - 1; y++)
+      for (let x = 34; x < N - 1; x++)
+        if (g[y][x] === line && [[0, -1], [0, 1], [1, 0], [-1, 0]].filter(([dx, dy]) => g[y + dy][x + dx]).length === 1) g[y][x] = null;
+  // Hand-placed fixes for one pose, as data: { [tail]: { line: runs, under: runs } }, runs as in
+  // marks. "line" pixels become outline; "under" pixels show what the cat has there without a tail;
+// "fur" pixels become tail fur.
+  const fix = !o.noTail && !o.alert && o.tailFix?.[o.tail || 0];
+  if (fix) {
+    const at = (runs, f) => {
+      for (const row of String(runs || "").split(";").filter(Boolean)) {
+        const [y, xs] = row.split(":");
+        for (const run of xs.split(",")) {
+          const [a, b] = run.split("-").map(Number);
+          for (let x = a; x <= (Number.isNaN(b) || b === undefined ? a : b); x++) f(x, Number(y));
+        }
+      }
+    };
+    at(fix.line, (x, y) => (g[y][x] = line));
+    // "fur" pixels take the tail's own colour from beside them.
+    at(fix.fur, (x, y) => (g[y][x] = [g[y][x + 1], g[y][x - 1], g[y + 1]?.[x]].find((c) => c && c !== line) || g[y][x]));
+    if (fix.under) {
+      const bare = catGrid({ ...o, tail: 0, noTail: true });
+      at(fix.under, (x, y) => (g[y][x] = bare[y][x]));
+    }
+  }
+  // A tail lying wholly behind the body never draws on it: its outline over the body's fur is
+  // the body's fur again (the body's own edge already separates them).
+  if (!o.noTail && !o.fluffy && !o.tailWrap && !zLayer) {
+    const bare = catGrid({ ...o, tail: 0, noTail: true });
+    for (let y = 26; y < N; y++)
+      for (let x = N / 2; x < N; x++)
+        if (g[y][x] === line && bare[y][x] && bare[y][x] !== line) g[y][x] = bare[y][x];
+  }
+  // Where the body's right edge steps in (the ankle) and the tail fills the step, the edge runs
+  // straight on down past the tail instead: the outline moves out to the tail and the old edge
+  // pixel becomes the leg's fur, so it stays a single line.
+  if (!o.noTail && !o.fluffy && !o.tailWrap) {
+    const bare = catGrid({ ...o, tail: 0, noTail: true });
+    const re = (y) => { for (let x = N - 2; x > N / 2; x--) if (bare[y][x] === line && !bare[y][x + 1]) return x; return -1; };
+    for (let y = 31; y < N - 1; y++) {
+      const top = re(y - 1), e = re(y);
+      if (top < 0 || e < 0 || e >= top) continue;
+      const c = g[y][top];
+      const leg = [g[y][e - 1], g[y - 1][e]].find((v) => v && v !== line); // the leg's fur, beside or above
+      if (!c || c === line || g[y][e] !== line || !leg) continue;
+      g[y][top] = line;
+      for (let x = e; x < top; x++) g[y][x] = leg;
+      // ...and a tail line right beside the new edge would double it: that one is tail fur.
+      const tf2 = [g[y][top + 2], g[y - 1][top + 1]].find((v) => v && v !== line);
+      if (g[y][top + 1] === line && !bare[y][top + 1] && tf2) g[y][top + 1] = tf2;
+      // The tail fur now touching the body there takes the shade the touching pixel had.
+      const nx = g[y][top + 1];
+      if (nx && nx !== line && !bare[y][top + 1]) g[y][top + 1] = shade(nx, zLayer ? 0.93 : 0.88);
+      bare[y][top] = line; bare[y][top + 1] = null; // the next row steps from here
+      for (let x = e; x < top; x++) bare[y][x] = leg;
+    }
+  }
+  // A black pixel never stands alone: one with no black anywhere around it (corners included)
+  // takes the colour most of its neighbours have.
+  const pre = g.map((r) => r.slice());
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      if (pre[y][x] !== line) continue;
+      const n = {};
+      let alone = true;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const c = pre[y + dy]?.[x + dx];
+          if (c === line) alone = false;
+          else n[c ?? ""] = (n[c ?? ""] || 0) + 1;
+        }
+      if (alone) g[y][x] = Object.keys(n).sort((a, b) => n[b] - n[a])[0] || null;
+    }
   return g;
 }
 
@@ -1882,12 +2226,13 @@ function catGrid(o) {
 // behind the finished cat (only where nothing else is). Centre lines are [x, height above the
 // ground]; "R" is the root lying along the ground. Heights scale with the cat's height.
 const TAIL_POSES = {
-  rest: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.6, 13], [41, 16.5], [40.8, 19]],
-  sway1: [[30, "R"], [36, "R"], [39, 3.5], [40.8, 8], [41.8, 13], [42.4, 16.5], [42.6, 19]],
-  sway2: [[30, "R"], [36, "R"], [39.4, 3.5], [41.6, 8], [43, 13], [43.8, 16.5], [44, 19]],
-  curlIn: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.8, 13], [41.4, 15.6], [41.2, 17.6], [40.4, 18.2]],
-  curlOut: [[30, "R"], [36, "R"], [38.6, 3.5], [39.8, 8], [40.6, 13], [41.2, 16], [42, 18], [43, 18.6]],
-  alert: [[30, "R"], [35.5, "R"], [38.4, 4], [40, 9], [41, 15], [41.4, 19], [41.4, 21.5]],
+  // The root sits behind the haunch, above the back foot, so the tail comes out of the rump.
+  rest: [[31, 4], [35.4, 3], [38.6, 4], [39.8, 7], [40.6, 11.4], [41, 14.5], [40.8, 16.7]],
+  sway1: [[31, 4], [35.6, 3], [39, 4], [40.8, 7], [41.8, 11.4], [42.4, 14.5], [42.6, 16.7]],
+  sway2: [[31, 4], [35.8, 3], [39.4, 4], [41.6, 7], [43, 11.4], [43.8, 14.5], [44, 16.7]],
+  curlIn: [[31, 4], [35.4, 3], [38.6, 4], [39.8, 7], [41, 10.4], [41.4, 13], [41, 14.9], [40.1, 15.7], [39.3, 15.4]], // up, over the top, the tip hooked back in toward the body
+  curlOut: [[31, 4], [35.4, 3], [38.6, 4], [39.8, 7], [40.6, 11.4], [41.2, 14.1], [42, 15.8], [43, 16.4]],
+  alert: [[31, 4.5], [35.2, 3.5], [38.4, 4.5], [40, 7.9], [41, 13.2], [41.4, 16.7], [41.4, 18.9]],
 };
 function tailLayer(g, o, line) {
   const fur = o.fur;
@@ -1957,7 +2302,7 @@ function tailLayer(g, o, line) {
   // Outline: the shape's own edge. The rest is fur, coloured and shaded as a round tube.
   const base = o.tailColor || (o.calico ? "#323034" : fur);
   const band = o.ringColor || (o.tabby ? o.tabbyDark || shade(fur, 0.45) : shade(fur, 0.55));
-  const layer = grid();
+  const layer = grid(), plain = grid(), tubeK = grid(); // each pixel's colour before shading, and its tube shade
   for (let y = 0; y <= yG; y++)
     for (let x = 0; x < N; x++) {
       if (!dil[y][x]) continue;
@@ -1969,11 +2314,24 @@ function tailLayer(g, o, line) {
       else if (o.calico && y > yG - 18 && Math.floor((y + Math.round(Math.sin(x * 1.3) * 1.5)) / 2) % 3 === 0) c = "#c9935c";
       const r = t.r + 0.5, nx = t.dx / r, ny = t.dy / r, nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
       const d = -0.6 * ny + 0.8 * nz - 0.15 * nx;
-      const kk = d < 0.15 ? 0.8 : d < 0.45 ? 0.9 : d > 0.95 ? 1.08 : 1;
+      // Near the root the tail lies almost flat, so its underside is a whole row: shaded gently there.
+      const kk = d < 0.15 ? (t.f < 0.3 ? 0.9 : 0.8) : d < 0.45 ? (t.f < 0.3 ? 0.95 : 0.9) : d > 0.95 ? 1.08 : 1;
       layer[y][x] = kk === 1 ? c : shade(c, kk);
+      plain[y][x] = c; tubeK[y][x] = kk;
     }
-  // Behind the cat: only where the sprite is empty.
+  // Behind the cat: only where the sprite is empty. Where it comes out from behind the body
+  // it is a shade darker, so the two read apart.
+  const cat = g.map((r) => r.map((c) => !!c));
   for (let y = 0; y <= yG; y++) for (let x = 0; x < N; x++) if (layer[y][x] && !g[y][x]) g[y][x] = layer[y][x];
+  for (let y = 0; y <= yG; y++)
+    for (let x = 0; x < N; x++)
+      if (layer[y][x] && !cat[y][x] && layer[y][x] !== line) {
+        // A soft step, not a block: the pixel touching the cat a little darker, the next one barely.
+        const d1 = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => cat[y + dy]?.[x + dx]);
+        // (The darker of the two shades, never one on top of the other, so the underside doesn't go muddy.)
+        const k2 = d1 ? 0.88 : cat[y]?.[x - 2] ? 0.95 : 1;
+        if (k2 < tubeK[y][x]) g[y][x] = shade(plain[y][x], k2);
+      }
   // A one-pixel slot left between the tail and the cat is closed with outline.
   for (let y = 1; y < yG; y++)
     for (let x = 30; x < N - 1; x++)
@@ -2415,12 +2773,12 @@ function shade(hex, k) {
 // Ready-made looks, picked by name on an animal's page (its Sprite setting).
 const SPRITE_PRESETS = {
   calico_collar: { detail: true, small: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
-  grey_chest_spot: { detail: true, small: true, fur: "#7f7e7b", chestPatch: true },
-  longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888" },
+  grey_chest_spot: { detail: true, small: true, fur: "#7f7e7b", chestPatch: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#6e6d6a" },
+  longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888", tailFix: { 6: { line: "39:37;40:38" }, 7: { line: "39:37", under: "40:30" }, 8: { under: "40:29-30", fur: "41:29" }, 9: { line: "39:32-33,37;40:31", under: "38:30-33;39:30-31" } } },
   brown_tabby: { detail: true, small: true, fur: "#3b281e", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
   charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
-  smoky_banded_tail: { detail: true, slim: true, shoulderLean: false, pixels: [[30, 26, "#69615a"], [30, 28, "#3a3532"], [31, 28, "#69615a"], [31, 30, "#3a3532"]], leftLegPixels: [[17, 26, "#69615a"], [17, 28, "#3a3532"], [16, 28, "#69615a"], [16, 30, "#3a3532"]], softSpots: true, bellyPale: "#bbb3aa", tearMarks: true, mouth: "#8d7f78", legBars: [31, 34, 37], curlOut: true, tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#e8e3dc", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#ddd7cf", paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", eyeLow: "#b0a548", lidLine: "#3d3833", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-47;8:0-47;9:0-47;10:0-17,30-47;11:0-15,32-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#e8e3dc", "22:23-24"], ["#57504a", "24:13-17,30-34;25:18-21,26-29"], ["#857d76", "26:22-25"], ["#9a928a", "23:21,26"], ["#c9c2b9", "23:22-25"], ["#a29a92", "24:22,25"], ["#b8b0a8", "24:23-24"], ["#8c847d", "25:22,25;26:22,25;27:22,25"], ["#a8a098", "25:23-24;26:23-24;27:23-24"], ["#918982", "28:22,25"], ["#7f7770", "29:22,25"], ["#aea69e", "28:23-24;29:23-24"], ["#b6aea6", "30:23-24;31:23-24"], ["#45403b", "15:16,31;16:14-15,32-33"]] },
+  smoky_banded_tail: { detail: true, slim: true, shoulderLean: false, pixels: [[30, 26, "#69615a"], [30, 28, "#3a3532"], [31, 28, "#69615a"], [31, 30, "#3a3532"], [14, 4, "#a89b90"], [14, 5, "#a89b90"], [14, 6, "#a89b90"], [14, 7, "#a89b90"], [14, 8, "#a89b90"], [14, 9, "#a89b90"], [14, 10, "#a89b90"], [33, 4, "#a89b90"], [33, 5, "#a89b90"], [33, 6, "#a89b90"], [33, 7, "#a89b90"], [33, 8, "#a89b90"], [33, 9, "#a89b90"], [33, 10, "#a89b90"], [20, 11, "#a89b90"], [27, 11, "#a89b90"], [14, 13, "#a89b90"], [15, 13, "#a89b90"], [32, 13, "#a89b90"], [33, 13, "#a89b90"], [22, 22, "#a29a92"], [23, 22, "#b0a8a0"], [24, 22, "#b0a8a0"], [25, 22, "#a29a92"], [18, 22, "#534c46"], [19, 22, "#534c46"], [20, 22, "#534c46"], [27, 22, "#534c46"], [28, 22, "#534c46"], [29, 22, "#534c46"], [21, 22, "#7f7770"], [26, 22, "#7f7770"]], leftLegPixels: [[17, 26, "#69615a"], [17, 28, "#3a3532"], [16, 28, "#69615a"], [16, 30, "#3a3532"]], softSpots: true, bellyPale: "#bbb3aa", tearMarks: true, mouth: "#8d7f78", legBars: [31, 34, 37], tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#e8e3dc", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#ddd7cf", paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", eyeLow: "#b0a548", lidLine: "#3d3833", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-47;8:0-47;9:0-47;10:0-17,30-47;11:0-15,32-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#e8e3dc", "22:23-24"], ["#57504a", "24:13-17,30-34;25:18-21,26-29"], ["#857d76", "26:22-25"], ["#9a928a", "23:21,26"], ["#c9c2b9", "23:22-25"], ["#a29a92", "24:22,25"], ["#b8b0a8", "24:23-24"], ["#8c847d", "25:22,25;26:22,25;27:22,25"], ["#a8a098", "25:23-24;26:23-24;27:23-24"], ["#918982", "28:22,25"], ["#7f7770", "29:22,25"], ["#aea69e", "28:23-24;29:23-24"], ["#b6aea6", "30:23-24;31:23-24"], ["#45403b", "15:16,31;16:14-15,32-33"]] },
   bicolour_mask_paw_up: { detail: true, short: true, jawUp: 1, pixels: [[25, 10, "#1d1d20"], [26, 10, "#1d1d20"], [14, 16, "#1d1d20"], [24, 12, "#f1ece3"], [24, 13, "#f1ece3"], [30, 13, "#f1ece3"], [31, 13, "#f1ece3"], [30, 14, "#f1ece3"], [31, 14, "#f1ece3"], [22, 16, "#f1ece3"], [22, 17, "#f1ece3"], [27, 19, "#f1ece3"]], fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-31,33-47;13:30-31,33-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:23-26;16:22-28;17:22-28;18:21-28;19:21-27;20:21-26;21:22-25;22:23-24"], ["#1d1d20", "7:24-26;8:24-26;9:24,27;10:24,28-29;11:24,29;12:24;13:23;14:23-26;16:16-17,21"], ["#1d1d20", "14:18-19;15:18-20"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
 };
 // An appearance may name a preset; its own settings then change that look.
