@@ -252,7 +252,7 @@ Set it up by mounting the training-data folder into the container (see [`vision/
       TZ: Europe/Berlin     # your time zone; the schedule uses local time
 ```
 
-- **Schedule:** every Sunday from 13:00 local time (`NW_TRAIN_DAY`, `NW_TRAIN_HOUR`), when at least 30 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. `NW_TRAIN=0` turns it off. Training runs in a separate low-priority process, so detection stays responsive. A round takes from tens of minutes to a few hours on a CPU, depending on how many photos there are. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
+- **Schedule:** every Sunday from 13:00 local time (`NW_TRAIN_DAY`, `NW_TRAIN_HOUR`), when at least 100 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. `NW_TRAIN=0` turns it off. Training runs in a separate low-priority process, so detection stays responsive. A round takes from tens of minutes to a few hours on a CPU, depending on how many photos there are. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
 - **Now:** `POST /train` starts a round (409 if one is running). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
 - **Which model is in use:** `GET /health` shows `model` and `trained`. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
 

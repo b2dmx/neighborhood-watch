@@ -50,14 +50,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--dataset", type=Path, default=Path(env("NW_DATASET", "/dataset")))
     p.add_argument("--work", type=Path, default=Path(env("NW_WORK", "/work")))
     p.add_argument("--megadetector", type=Path, default=Path(env("NW_MODEL", "/models/megadetector")))
-    p.add_argument("--epochs", type=int, default=int(env("NW_TRAIN_EPOCHS", "40")))
-    p.add_argument("--patience", type=int, default=int(env("NW_TRAIN_PATIENCE", "15")))
+    p.add_argument("--epochs", type=int, default=int(env("NW_TRAIN_EPOCHS", "20")))
+    p.add_argument("--patience", type=int, default=int(env("NW_TRAIN_PATIENCE", "8")))
     p.add_argument("--imgsz", type=int, default=int(env("NW_TRAIN_IMGSZ", "960")))
     p.add_argument("--batch", type=int, default=int(env("NW_TRAIN_BATCH", "8")))
     p.add_argument("--teacher-imgsz", type=int, default=1280)
     p.add_argument("--threshold", type=float, default=float(env("NW_TRAIN_THRESHOLD", "0.2")),
                    help="the integration's detector threshold, used to count misses and false alarms")
-    p.add_argument("--min-new", type=int, default=int(env("NW_TRAIN_MIN_NEW", "30")))
+    p.add_argument("--min-new", type=int, default=int(env("NW_TRAIN_MIN_NEW", "100")))
     p.add_argument("--min-first", type=int, default=int(env("NW_TRAIN_MIN_FIRST", "40")))
     p.add_argument("--if-needed", action="store_true",
                    help="only train with enough new confirmed photos since the last round")

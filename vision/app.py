@@ -23,6 +23,7 @@ from io import BytesIO
 import json
 import os
 from pathlib import Path
+import pickle
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,6 @@ import time
 from aiohttp import web
 from PIL import Image, UnidentifiedImageError
 
-import detector as det
 
 MODEL_DIR = Path(os.environ.get("NW_MODEL", "/models/megadetector"))
 DECODE_PIXELS = 3_100_000  # decode no bigger than about this: enough detail for the tiles
@@ -51,31 +51,92 @@ TRAIN_HOUR = int(os.environ.get("NW_TRAIN_HOUR", "13"))
 TRAIN_DIR = WORK / "train"
 CURRENT = WORK / "models" / "current.txt"
 
-# Memory: the compiled model is ~250 MB, so it's unloaded after NW_IDLE_UNLOAD seconds
-# without a request (0 = keep it) and compiled again on the next one (well under a second).
+# Memory: OpenVINO, the GPU driver and the compiled model (~500 MB together) live in a
+# separate detector process (worker.py), started on the first request and stopped after
+# NW_IDLE_UNLOAD seconds without one (0 = keep it), so an idle service holds no GPU at all.
+# Starting it again takes a second or two (compiled GPU kernels are cached in WORK).
 IDLE_UNLOAD = float(os.environ.get("NW_IDLE_UNLOAD", "600"))
-core = det.make_core(WORK)
 
 
-def _choose_model() -> det.Detector:
-    """The trained model named in WORK/models/current.txt if it loads, else MegaDetector."""
-    wanted = det.production_dir(WORK, MODEL_DIR)
-    if wanted != MODEL_DIR:
+class DetectorProcess:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.proc: subprocess.Popen | None = None
+        self.info: dict = {}  # from the last process started: name, size, labels, device...
+        self.last_used = 0.0
+
+    @property
+    def loaded(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def _ask(self, op: str, payload=None):
+        pickle.dump((op, payload), self.proc.stdin, protocol=pickle.HIGHEST_PROTOCOL)
+        self.proc.stdin.flush()
+        reply = pickle.load(self.proc.stdout)
+        if isinstance(reply, dict) and "error" in reply:
+            raise RuntimeError(reply["error"])
+        return reply
+
+    def _start(self) -> None:
+        self.proc = subprocess.Popen(  # noqa: S603
+            [sys.executable, str(Path(__file__).with_name("worker.py"))],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            env=os.environ,
+        )
         try:
-            model = det.env_detector(wanted, core)
-            with model.lock:
-                model.load()
-            return model
-        except Exception as err:  # noqa: BLE001 - a broken export must never take the service down
-            print(f"Trained model {wanted} failed to load ({err}); using MegaDetector", flush=True)
-    model = det.env_detector(MODEL_DIR, core)
-    with model.lock:
-        model.load()  # fail fast at start if the model can't load
-    return model
+            self.info = self._ask("info")
+        except Exception:
+            self._stop()
+            raise
+
+    def _stop(self) -> None:
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        try:
+            proc.stdin.close()
+            proc.wait(10)
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+            proc.wait()
+
+    def detect(self, img: Image.Image) -> list[dict]:
+        payload = (img.width, img.height, img.convert("RGB").tobytes())
+        with self.lock:
+            self.last_used = time.monotonic()
+            for attempt in (1, 2):  # a process that died (or was stopped) is started again once
+                if not self.loaded:
+                    self._stop()
+                    self._start()
+                try:
+                    return self._ask("detect", payload)
+                except (EOFError, OSError, pickle.UnpicklingError):
+                    self._stop()
+                    if attempt == 2:
+                        raise
+                finally:
+                    self.last_used = time.monotonic()
+        return []
+
+    def refresh(self) -> None:
+        """Stop the process and read the served model's details again (e.g. after a switch)."""
+        with self.lock:
+            self._stop()
+            self._start()
+            self._stop()
+
+    def stop_if_idle(self, idle: float) -> bool:
+        with self.lock:
+            if self.loaded and time.monotonic() - self.last_used > idle:
+                self._stop()
+                return True
+        return False
 
 
-_det = _choose_model()
-print(f"Serving {_det.name} ({_det.size} px, labels {_det.labels}) on {_det.device}", flush=True)
+_det = DetectorProcess()
+_det.refresh()  # fail fast at start if no model can load
+print(f"Serving {_det.info['name']} ({_det.info['size']} px, labels {_det.info['labels']}) on {_det.info['device']}", flush=True)
 
 
 def _current_stamp() -> tuple:
@@ -87,7 +148,6 @@ def _current_stamp() -> tuple:
 
 def _watch_model() -> None:
     """Switch to a newly promoted model (current.txt changed) without a restart."""
-    global _det  # noqa: PLW0603
     seen = _current_stamp()
     while True:
         time.sleep(30)
@@ -96,28 +156,17 @@ def _watch_model() -> None:
             continue
         seen = stamp
         try:
-            new = _choose_model()
+            _det.refresh()
         except Exception as err:  # noqa: BLE001
             print(f"Model switch failed: {err}", flush=True)
             continue
-        if new.dir != _det.dir:
-            print(f"Now serving {new.name} ({new.size} px) on {new.device}", flush=True)
-            _det = new
+        print(f"Now serving {_det.info['name']} ({_det.info['size']} px) on {_det.info['device']}", flush=True)
 
 
-def _unload_when_idle() -> None:
+def _stop_when_idle() -> None:
     while IDLE_UNLOAD > 0:
         time.sleep(30)
-        if _det.unload_if_idle(IDLE_UNLOAD):
-            import gc  # noqa: PLC0415
-
-            gc.collect()
-            try:  # hand the freed memory back to the system (glibc)
-                import ctypes  # noqa: PLC0415
-
-                ctypes.CDLL("libc.so.6").malloc_trim(0)
-            except OSError:
-                pass
+        _det.stop_if_idle(IDLE_UNLOAD)
 
 
 # ---- training -------------------------------------------------------------------------
@@ -196,7 +245,7 @@ def _restart_on_new_code() -> None:
             os._exit(0)
 
 
-threading.Thread(target=_unload_when_idle, daemon=True).start()
+threading.Thread(target=_stop_when_idle, daemon=True).start()
 threading.Thread(target=_restart_on_new_code, daemon=True).start()
 threading.Thread(target=_watch_model, daemon=True).start()
 threading.Thread(target=_schedule_training, daemon=True).start()
@@ -228,18 +277,18 @@ def scale_boxes(found: list[dict], img: Image.Image, ow: int, oh: int) -> list[d
 
 
 async def health(_request: web.Request) -> web.Response:
-    model = _det
+    info = _det.info
     return web.json_response(
         {
             "ok": True,
-            "device": model.device,
-            "model": model.name,
-            "trained": model.dir != MODEL_DIR,
-            "size": model.size,
-            "labels": sorted(set(model.labels.values())),
-            "loaded": model.loaded,
+            "device": info.get("device"),
+            "model": info.get("name"),
+            "trained": info.get("dir") != str(MODEL_DIR),
+            "size": info.get("size"),
+            "labels": info.get("labels", []),
+            "loaded": _det.loaded,  # the detector process is running (it stops when idle)
             "training": training_running(),
-            "available": core.available_devices,  # what OpenVINO can use here (CPU, GPU, NPU)
+            "available": info.get("available", []),  # what OpenVINO can use here (CPU, GPU, NPU)
             "dri": sorted(p.name for p in Path("/dev/dri").glob("*")) if Path("/dev/dri").exists() else [],
         }
     )
@@ -261,7 +310,7 @@ async def train_status(_request: web.Request) -> web.Response:
             "enabled": TRAIN,
             "schedule": f"{_DAYS[TRAIN_DAY]} from {TRAIN_HOUR}:00",
             "dataset": DATASET.is_dir(),
-            "serving": _det.name,
+            "serving": _det.info.get("name"),
             "status": _read_json(TRAIN_DIR / "status.json", {}),
             "rounds": len(history),
             "last": history[-1] if history else None,
@@ -290,7 +339,7 @@ async def detect_endpoint(request: web.Request) -> web.Response:
             "width": ow,
             "height": oh,
             "ms": ms,
-            "device": _det.device,
+            "device": _det.info.get("device"),
             "detections": detections,
         }
     )
