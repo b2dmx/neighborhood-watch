@@ -2397,6 +2397,89 @@ function quad(o, f = {}) {
   if (o.nose) px(g, o.nose[0] + edx + (o.noseDx || 0), o.nose[1] + edy, o.noseColor || "#111");
   return g;
 }
+// A tube along a path whose radius changes from point to point.
+function tube(g, pts, radii, c) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[i + 1], r1 = radii[i], r2 = radii[i + 1];
+    const steps = Math.ceil(Math.hypot(x2 - x1, y2 - y1) * 4) || 1;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps, r = r1 + (r2 - r1) * t;
+      ellipse(g, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, r, r, c);
+    }
+  }
+}
+// Four-legged animals with real anatomy: a deep chest and a haunch joined by a tucked waist,
+// jointed legs that taper to small paws (the hind legs bend back at the hock), a neck, a head
+// and a tapering muzzle. Coordinates are on the 32-unit grid.
+//   chest/hip: [cx, cy, rx, ry]; waist: radius between them; legs: [far front, near front,
+//   far hind, near hind] x positions; neck: [base, top] points; head: [cx, cy, rx, ry];
+//   muzzle: { pts, r }; tails: [pts, ...] with tailR radii; eye/nose: fine-grid pixels.
+function beast(o, f = {}) {
+  const g = grid(), body = grid(), tailG = grid();
+  const fur = o.fur, legC = o.legColor || fur, far = shade(legC, 0.72), headC = o.headColor || fur;
+  const feet = o.feet ?? 28.6, w = o.legW ?? 0.9;
+  const [cx, cy, crx, cry] = o.chest, [hx, hy, hrx, hry] = o.hip;
+  const [ff, fn, bf, bn] = o.legs;
+  const sw = f.walk ? (f.walk === 1 ? 0.9 : -0.9) : 0;
+  const elbow = o.elbow ?? cy + cry * 0.7, knee = o.knee ?? hy + hry * 0.75;
+  const frontLeg = (x, s) => [[[x + 0.5, cy], [x, elbow], [x + 0.15 + s * 0.4, feet - 1.3], [x - 0.45 + s, feet - 0.4]], [w * 1.45, w * 1.05, w * 0.72, w * 0.8]];
+  const backLeg = (x, s) => [[[x + 0.3, hy - hry * 0.15], [x - 1, knee], [x + 1.3 + s * 0.4, feet - 2.4], [x + 0.7 + s, feet - 1], [x - 0.2 + s, feet - 0.4]], [w * 2.1, w * 1.25, w * 0.78, w * 0.7, w * 0.8]];
+  const hdx = o.headDx || 0, hdy = (o.headDy || 0) + (f.alert ? -0.8 : 0);
+  const mv = (pts) => pts.map(([x, y]) => [x + hdx, y + hdy]);
+  const tails = o.tails || [];
+  const tail = tails[f.alert ? tails.length - 1 : f.tail || 0] || tails[0];
+  const tailR = o.tailR || (tail ? tail.map((_, i) => (o.tailW || 1) * (1 - 0.45 * i / (tail.length - 1))) : []);
+  if (tail) tube(tailG, tail, tailR, 1);
+  if (tail && !o.tailFront) tube(g, tail, tailR, o.tailColor || fur);
+  for (const [x, s, leg] of [[ff, -sw, frontLeg], [bf, sw, backLeg]]) { const [p, r] = leg(x, s); tube(g, p, r.map((v) => v * 0.9), far); }
+  const waist = o.waist ?? Math.min(cry, hry) * 0.72, wdy = o.waistDy ?? -(Math.min(cry, hry) - waist) * 0.85;
+  const trunk = (gg, c) => {
+    ellipse(gg, cx, cy, crx, cry, c);
+    ellipse(gg, hx, hy, hrx, hry, c);
+    tube(gg, [[cx, cy + wdy], [hx, hy + wdy]], [waist, waist], c);
+    if (o.hump) ellipse(gg, ...o.hump, c);
+  };
+  trunk(g, fur); trunk(body, 1);
+  for (const [x, s, leg] of [[fn, sw, frontLeg], [bn, -sw, backLeg]]) {
+    const [p, r] = leg(x, s);
+    tube(g, p, r, legC);
+    if (legC !== fur) tube(g, p.slice(0, 2), r.slice(0, 2), fur); // the upper leg stays in the coat
+  }
+  if (tail && o.tailFront) tube(g, tail, tailR, o.tailColor || fur);
+  if (o.neck) tube(g, [o.neck[0], ...mv(o.neck.slice(1))], o.neckR || [2, 1.5], fur);
+  if (o.under) o.under(g, mv);
+  ellipse(g, o.head[0] + hdx, o.head[1] + hdy, o.head[2], o.head[3], headC);
+  if (o.muzzle) tube(g, mv(o.muzzle.pts), o.muzzle.r, o.muzzleColor || headC);
+  for (const e of o.ears || []) tri(g, ...mv(e), o.earColor || headC);
+  if (o.earBlob) ellipse(g, o.earBlob[0] + hdx, o.earBlob[1] + hdy, o.earBlob[2], o.earBlob[3], o.earColor || headC);
+  if (o.over) o.over(g, mv);
+  outline(g, LINE);
+  // Light from above, the belly below: measured down each column of the trunk.
+  const lit = o.lit || shade(fur, 1.13), dim = shade(fur, 0.86), belly = o.belly || shade(fur, 0.84);
+  for (let x = 0; x < N; x++) {
+    let top = -1, bot = -1;
+    for (let y = 0; y < N; y++) if (body[y][x]) { if (top < 0) top = y; bot = y; }
+    if (top < 0) continue;
+    const h = bot - top + 1;
+    for (let y = top; y <= bot; y++) {
+      if (g[y][x] !== fur) continue;
+      const dt = y - top, db = bot - y;
+      const bf = o.bellyFrac ?? 0.17;
+      if (db < h * bf) g[y][x] = belly;
+      else if (db < h * (bf + 0.16)) g[y][x] = dim;
+      else if (dt < 1.5) g[y][x] = lit;
+    }
+  }
+  if (o.dorsal) recolor(g, (x, y, c) => body[y][x] && !body[y - 2]?.[x] && c !== LINE, o.dorsal);
+  const inE = ([ex0, ey0, erx, ery], x, y) => ((x + 0.5) / S - ex0) ** 2 / erx ** 2 + ((y + 0.5) / S - ey0) ** 2 / ery ** 2 <= 1;
+  if (o.mark) o.mark(g, { mv, body, dy: Math.round(hdy * S), dx: Math.round(hdx * S), inChest: (x, y) => inE(o.chest, x, y), inHip: (x, y) => inE(o.hip, x, y), inTail: (x, y) => tailG[y][x] && !body[y][x] });
+  if (!o.noToes) recolor(g, (x, y, c) => y > feet * S - 3 && g[y + 1]?.[x] === LINE && !g[y + 2]?.[x], (x, y) => shade(g[y][x], 0.62));
+  const [ex, ey] = o.eye, edy = Math.round(hdy * S), edx = Math.round(hdx * S);
+  px(g, ex + edx, ey + edy, f.blink ? g[ey + edy - 1]?.[ex + edx] || LINE : o.eyeColor || "#111");
+  if (o.eyeShine && !f.blink) px(g, ex + edx + 1, ey + edy - 1, o.eyeShine);
+  if (o.nose) px(g, o.nose[0] + edx + (o.noseDx || 0), o.nose[1] + edy, o.noseColor || "#111");
+  return g;
+}
 // A steady pseudo-random number per pixel, for speckled fur.
 function hash(x, y) {
   let h = (x * 374761393 + y * 668265263) >>> 0;
@@ -2458,6 +2541,7 @@ const ACTS = {
   Opossum: [[{ act: 1 }, 0.2], [{ act: 2 }, 0.2], [{ act: 1 }, 0.2], [{ act: 2 }, 0.2]], // sniffing
   Skunk: [[{ act: 1 }, 1.4]], // tail raised
   Rat: [[{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12], [{}, 0.12], [{ act: 1 }, 0.12]], // nose twitching
+  Mouse: [[{ act: 1 }, 0.1], [{}, 0.1], [{ act: 1 }, 0.1], [{}, 0.1], [{ act: 1 }, 0.1]], // nose twitching
   Fox: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]], // ear flick
   Coyote: [[{ act: 1 }, 0.2], [{}, 0.25], [{ act: 1 }, 0.2]],
   Bear: [[{ act: 1 }, 0.6], [{ act: 2 }, 0.6]], // head swing
@@ -2481,6 +2565,7 @@ const WILD = {
     eye: [9, 21], nose: [2, 26],
     mark(g) {
       recolor(g, (x, y) => y >= 20 && y <= 22 && x >= 5 && x <= 17, "#2e2c2a"); // the mask
+      recolor(g, (x, y, c) => y === 19 && x >= 6 && x <= 15 && c === "#8d8a86", "#d7d2c8"); // pale brows over it
       recolor(g, (x, y) => y >= 24 && y <= 27 && x >= 3 && x <= 10, "#d7d2c8"); // muzzle
       recolor(g, (x, y, c) => x >= 36 && c === "#8d8a86" && !(((x + 0.5) / S - 17) ** 2 / 90 + ((y + 0.5) / S - 19.5) ** 2 / 49 <= 1), (x, y) => (Math.floor((x + y) / 2.5) % 2 === 1 || y >= 38 ? "#2e2c2a" : "#6b6864")); // ringed tail, dark tip
       px(g, 11, 21, "#e8e3d8");
@@ -2578,6 +2663,11 @@ function SQUIRREL(f) {
     tails: [[[23, 22], [27, 18], [27.5, 12], [25, 9]], [[23, 22], [27.5, 18.5], [28.5, 12.5], [26.5, 9.5]], [[23, 22], [26.4, 17.5], [26, 11.5], [23.5, 9]]], tailW: 2,
     eye: [14, 27], nose: [10, 29],
     belly: "#d9a46a",
+    mark(g) {
+      const dy = f.act === 1 ? 1 : 0;
+      for (const [x, y] of [[13, 27], [15, 27], [14, 26], [14, 28]]) if (g[y + dy]?.[x] === "#8a5a36") px(g, x, y + dy, "#e2bf8f"); // pale eye ring
+      recolor(g, (x, y, c) => c === "#8a5a36" && x >= 34 && y < 31 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, ey]) => g[y + ey]?.[x + dx] === LINE), (x, y) => (hash(x, y) % 3 ? "#b98d63" : "#a8a29a")); // frosted tail fringe
+    },
   }, f);
 }
 Object.assign(WILD, {
@@ -2595,9 +2685,13 @@ Object.assign(WILD, {
   Dog: (f) => quad({
     fur: "#9a6a3e", belly: "#c39a6c", by: 18.5, bry: 4.2, brx: 8.6, hx: 8, hy: 12.5, hrx: 4.3, hry: 3.8, legW: 1, neck: [[11, 15], [9, 13]],
     snout: [[4.5, 12], [1, 14.5], [4.5, 16.2]],
-    earBlob: [10.8, 13.4, 1.2, 2.5], earColor: "#5f3f22",
+    earBlob: [10.8, 13.4, 1.2, 2.5], earColor: "#5f3f22", dorsal: "#835833",
     tails: [[[25, 16], [28, 12.5], [29, 10]], [[25, 16], [28.8, 13.5], [30.5, 11.5]]], tailW: 0.9,
     eye: [10, 18], nose: [1, 21],
+    mark(g) {
+      recolor(g, (x, y, c) => c === "#9a6a3e" && x <= 7 && y >= 19 && y <= 23, "#c39a6c"); // a paler muzzle
+      for (const [x, y] of [[9, 17], [11, 17]]) if (g[y][x] === "#9a6a3e") px(g, x, y, "#b88a5a"); // brow over the eye
+    },
   }, f),
 });
 
@@ -2616,11 +2710,23 @@ WILD.Stoat = (f) => quad({
   },
 }, f);
 WILD.Rat = (f) => quad({
-  fur: "#6e6359", belly: "#a99f94", by: 23, brx: 6, bry: 3.8, legs: [12.5, 14.5, 19.5, 21.5], legW: 0.55,
-  hx: 9.5, hy: 21.5, hrx: 3, hry: 2.4, snout: [[7.5, 20.5], [5, 22.5], [7.8, 23.4]],
-  ears: [[[10, 19.8], [10.5, 17.6], [12.3, 19.6]]], earColor: "#d9a0a0",
-  tails: [[[22, 23.5], [26, 25.5], [30, 24.5]], [[22, 23.5], [26, 25], [29.6, 23]]], tailW: 0.4, tailColor: "#d9a0a0",
-  eye: [13, 31], nose: [8, 34], noseColor: "#e48a95", noseDx: f.act ? -1 : 0,
+  fur: "#6e6359", belly: "#a99f94", by: 23.7, brx: 6.2, bry: 3, legs: [12.5, 14.5, 19.5, 21.5], legW: 0.55,
+  hx: 9.5, hy: 22.6, hrx: 3, hry: 2.2, snout: [[7.5, 21.6], [5, 23.4], [7.8, 24.3]],
+  ears: [[[10, 20.9], [10.5, 18.9], [12.3, 20.7]]], earColor: "#d9a0a0",
+  tails: [[[22.6, 22.8], [26, 24.6], [30, 24.2]], [[22.6, 22.8], [26, 24.2], [29.6, 22.4]]], tailW: 0.4, tailColor: "#d9a0a0",
+  eye: [13, 32], nose: [8, 35], noseColor: "#e48a95", noseDx: f.act ? -1 : 0,
+  // The tail's root comes out of the rump: outline it where it meets the body.
+  mark(g) { recolor(g, (x, y, c) => c === "#d9a0a0" && x > 27 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] === "#6e6359"), LINE); },
+}, f);
+// A mouse: smaller than the rat, rounder, with a big round ear, a bigger eye and a long thin tail.
+WILD.Mouse = (f) => quad({
+  fur: "#8a7b6c", belly: "#d3c7b8", bx: 16, by: 24.4, brx: 4.4, bry: 3, legs: [13, 14.4, 17.8, 19.4], legW: 0.5,
+  hx: 11.2, hy: 23.4, hrx: 2.6, hry: 2.2, snout: [[9.8, 22.4], [7.4, 24.1], [9.9, 25]],
+  earBlob: [12.3, 20.9, 1.5, 1.5], earColor: "#d9a7a4",
+  tails: [[[20.2, 23.2], [23.6, 24.6], [28, 25.2], [30.5, 23.6]], [[20.2, 23.2], [23.6, 24.4], [27.8, 23.8], [29.4, 21.8]]], tailW: 0.35, tailColor: "#d9a7a4",
+  eye: [15, 33], nose: [11, 35], noseColor: "#e48a95", noseDx: f.act ? -1 : 0,
+  // The tail's root comes out of the rump: outline it where it meets the body.
+  mark(g) { recolor(g, (x, y, c) => c === "#d9a7a4" && x > 27 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] === "#8a7b6c"), LINE); },
 }, f);
 // The bear, drawn whole (side-on, facing left): a shoulder hump, the head carried low in front
 // of it with round ears and a long tan muzzle, heavy legs, a stub of a tail.
@@ -2689,6 +2795,8 @@ WILD.Deer = (f) => quad({
   eye: [9, 9], nose: [4, 11],
   mark(g) {
     patch(g, 13, 17, 2.5, 4, "#eadfcf", ["#a77a52"]); // white throat
+    for (const [x, y] of [[8, 9], [10, 9], [9, 8], [9, 10]]) if (g[y][x] === "#a77a52") px(g, x, y, "#e3d3bd"); // pale eye ring
+    recolor(g, (x, y, c) => c === "#a77a52" && x <= 5 && y >= 10 && y <= 11, "#3a2c24"); // dark muzzle tip
     recolor(g, (x, y, c) => y >= 42 && c !== LINE, "#2b2422"); // hooves
   },
 }, f);

@@ -204,6 +204,7 @@ COMMON_WILDLIFE: dict[str, tuple[bool, bool, str]] = {
     "Opossum": (True, True, "Long hairless rat-like tail, long pointed pale face, grizzled grey body."),
     "Skunk": (True, True, "Black with white stripes down the back and a bushy tail."),
     "Rat": (True, True, "Small rodent with a long thin tail, bigger than a mouse."),
+    "Mouse": (True, True, "Tiny rodent with big round ears and a long thin tail, much smaller than a rat."),
     "Fox": (True, False, ""),
     "Coyote": (True, False, "Dog-like, grey-brown, bushy tail held low."),
     "Bear": (True, False, ""),
