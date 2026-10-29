@@ -465,6 +465,10 @@ def _animal_schema(
             CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
         ): TEXT,
         vol.Required(CONF_SPECIES, default=kind): _species([*(species or []), kind]),
+        # The look the card draws it with: a ready-made coat or breed.
+        vol.Optional(CONF_SPRITE, description={"suggested_value": values.get(CONF_SPRITE)}): SelectSelector(
+            SelectSelectorConfig(options=list(SPRITE_PRESETS), mode=SelectSelectorMode.DROPDOWN, translation_key="sprite")
+        ),
         vol.Optional(CONF_DESCRIPTION, description={"suggested_value": values.get(CONF_DESCRIPTION)}): LONG_TEXT,
         vol.Optional(CONF_REFERENCE_UPLOAD): PHOTO,
     }
@@ -475,9 +479,6 @@ def _animal_schema(
             vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
             vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
-            vol.Optional(CONF_SPRITE, description={"suggested_value": values.get(CONF_SPRITE)}): SelectSelector(
-                SelectSelectorConfig(options=list(SPRITE_PRESETS), mode=SelectSelectorMode.DROPDOWN, translation_key="sprite")
-            ),
             vol.Optional(
                 CONF_APPEARANCE, description={"suggested_value": values.get(CONF_APPEARANCE)}
             ): ObjectSelector(),
@@ -543,14 +544,18 @@ def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str
     name = (user_input.get(CONF_NAME) or "").strip()
     if not name:
         return {CONF_NAME: "name_required"}
-    if name.lower() in taken:
+    # Two names that make the same file name would share a reference photo.
+    if name.lower() in taken or slugify(name) in {slugify(t) for t in taken}:
         return {CONF_NAME: "name_taken"}
-    if logic.is_unknown(name) or name.lower() in ("none", "nothing"):
+    builtin = {k.lower() for k in BUILTIN_KEYS} | set(BUILTIN_KEYS.values())
+    if logic.is_unknown(name) or name.lower() in ("none", "nothing", *builtin):
         return {CONF_NAME: "name_reserved"}
     if "|" in name:
         return {CONF_NAME: "name_pipe"}
+    if not slugify(name):
+        return {CONF_NAME: "name_letters"}
     if user_input.get(CONF_PRIORITY) and user_input.get(CONF_ALWAYS_STRICT):
-        return {CONF_ALWAYS_STRICT: "priority_not_strict"}
+        return {"base": "priority_not_strict"}  # its field sits in a folded section, so the form says it
     return {}
 
 
@@ -687,8 +692,9 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _flatten(user_input, ANIMAL_SECTIONS)
-            if not (user_input.get(CONF_NAME) or "").strip():
-                return self._finish()
+            filled = any(user_input.get(k) for k in (CONF_DESCRIPTION, CONF_REFERENCE_UPLOAD, CONF_SPRITE))
+            if not (user_input.get(CONF_NAME) or "").strip() and not filled:
+                return self._finish()  # an empty form finishes; a half-filled one asks for the name
             taken = {a["data"][CONF_NAME].lower() for a in self._animals}
             errors = _validate_animal(user_input, taken)
             if not errors:
@@ -891,6 +897,8 @@ class WatchOptionsFlow(OptionsFlow):
             data = _recipient_data(user_input)
             if not data[CONF_NAME]:
                 errors[CONF_NAME] = "name_required"
+            elif data[CONF_QUIET_ZONES] and not data[CONF_PERSON]:
+                errors[CONF_PERSON] = "person_needed"  # quiet zones go by where their Person is
             else:
                 people[editing or uuid4().hex] = data
                 return self._save({CONF_PEOPLE: people})

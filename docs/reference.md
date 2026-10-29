@@ -8,7 +8,7 @@
 - **Without an NVR, a subscription or a recognition service.** Any camera Home Assistant can show works: a cheap RTSP or ONVIF camera, a doorbell, any brand. A camera with no motion sensor can be checked on a timer. The AI is any AI Task model; Google's free Gemini tier covers a typical night.
 - **Keeping track of animals you know.** Your outdoor cats, a neighbour's dog, a stray you're trying to catch. It records when and where each was last seen, with the exact photo the AI judged.
 - **Never missing the one that matters.** Every named animal has a missing mode: while it's on, any possible sighting, from either AI model at any confidence, sends a critical alert. Mark an animal as priority, and it's also double-checked by two AI models and never falsely confirmed. A "confirmed" signal (both models sure) is safe to drive a feeder or a trap.
-- **Getting better over time.** Every alert has ✓ / ✗ buttons. Corrections fix tracking right away, and every labelled photo is saved to train a custom model.
+- **Getting better over time.** Every alert has ✓ Right, ? Not sure and Other buttons. Corrections fix tracking right away, and every labelled photo is saved to train a custom model.
 
 It is all set up in the UI. A dashboard card comes with it.
 
@@ -33,7 +33,7 @@ AI answers are tidied first (stray `**`, code fences, quotes and labels removed)
 ## Requirements
 
 - Home Assistant 2026.10 or newer.
-- At least one **AI Task** entity that accepts images, for example Google Generative AI. A second model is strongly recommended for the double-check.
+- At least one **AI Task** entity that accepts images, for example Google Generative AI. A second model is strongly recommended for the double-check: without one, priority animals are never confirmed and strict or recently absent animals are never counted.
 - Cameras Home Assistant can show (any `camera` entity). Motion or animal sensors are best; without them, a camera can be checked on a timer.
 
 ## Installation
@@ -79,8 +79,8 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Page | Settings (defaults) |
 |---|---|
 | Cameras / People | Pick one to change or remove, or add one |
-| Alerts | Send alerts (on); alert from confidence (medium); Right / Not sure buttons on alerts (on) |
-| Wildlife and catch-alls | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
+| Alerts | Send alerts (on); lowest confidence that alerts (medium); Right / Not sure / Other buttons on alerts (on); page that opens when you tap an alert (empty) |
+| Pests, wildlife and unknown animals | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
 | Advanced → AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
@@ -128,7 +128,7 @@ Wildlife needs no device per animal. The Neighborhood Watch device has:
 
 | Entity | What it is |
 |---|---|
-| Wildlife | The latest wildlife sighting; attribute `kinds` lists every kind seen, each with last seen, where, tonight and this-week counts, whether it's a pest, and its last sighting id (its photo) |
+| Wildlife | The latest wildlife sighting; attribute `kinds` lists every kind seen, each with last seen, where, tonight and this-week counts, whether it's a pest, and its last sighting id (its photo); attribute `unknown` lists unknown cats and dogs the same way, with the coat of their latest sighting (shown on the card under Also seen) |
 | Wildlife on camera / Pest on camera | On for the on-camera window after a sure sighting; attributes `animal` and `camera`. Use them for lights or sounds |
 | Pests / Other wildlife / Unknown animals / Unsure motion critical alerts | Switches |
 
@@ -167,7 +167,7 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 
 ## Alerts
 
-The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Wildlife and catch-alls**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
+The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Pests, wildlife and unknown animals**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
 - **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.
@@ -218,7 +218,7 @@ For your own automations, the Neighborhood Watch device has **Pest on camera** (
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
 - **Training data.** Every checked frame is saved, downscaled to 1280 px, beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`.
-- **Corrections.** A button on an alert, the `correct` action, or the card's ✓ / ✗ labels that frame. It also fixes tracking: the sighting, its photo and the last-seen time move to the right animal.
+- **Corrections.** A button on an alert, the `correct` action, or the card's ✓ / ? / It was… labels that frame. It also fixes tracking: the sighting, its photo and the last-seen time move to the right animal.
 - **Pruning.** When the folder reaches its size limit, the oldest unlabelled frames go first.
 
 ## Local detector (optional)
@@ -269,19 +269,20 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- **To review**: sightings waiting for a ✓ / ✗ (see [Corrections](#corrections-and-training-data));
+- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-training-data));
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
-- wildlife, last night's summary, and each camera's last detection with ✓ / ✗ buttons;
+- wildlife, last night's summary, and each camera's last detection with ✓ / ? / It was… buttons;
 - the critical-alert switches;
 - **Scan a folder**: start a [bulk scan](#bulk-scanning-photos-and-videos) and see the last one's totals.
 
-Its editor picks the sections and the devices to hide, and sets the rest:
+Its editor picks the sections, the devices to hide and the animals to show under Also seen, and sets the rest:
 
 | Option | What it does (default) |
 |---|---|
 | `title` | The card's title (Neighborhood Watch) |
 | `sections` | Which sections to show: `review`, `animals`, `wildlife`, `summary`, `recent`, `switches`, `scan` (all except `scan`, which needs the [local detector](#local-detector-optional); it also shows once a scan has run) |
 | `hide` | Devices to leave out |
+| `others` | Animals shown under **Also seen** instead of the main row (none). Unknown cats and dogs the AI has seen also show there |
 | `order` | Animal order: `recent` puts animals on camera now first, then the most recently seen, ties by name; `name` is alphabetical (`recent`) |
 | `columns` | Animal columns (3) |
 | `photo_height` | Photo height in px (140) |
@@ -297,7 +298,7 @@ columns: 3
 
 ### Pixel sprites
 
-Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page (in *Looks*), pick a **Sprite**: calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask. To change one, or draw your own, use **Sprite, custom**: a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
+Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page, pick a **Sprite** (right under the species): calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask; or a common breed or coat: orange, cream, grey or silver tabby, all white, Russian Blue, Bombay, British Shorthair, black-and-white or grey-and-white bicolour, Maine Coon, Siamese, Ragdoll, Birman, Himalayan, Sphynx, tortoiseshell, Bengal, Abyssinian, Scottish Fold or Persian. To change one, or draw your own, use **Sprite, custom** (in *Looks*): a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal the AI couldn't name (an Unknown Cat) shows under **Also seen**, drawn as the ready-made look nearest to the coat it described. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
 
 A single sprite can go anywhere, e.g. for an indoor pet:
 

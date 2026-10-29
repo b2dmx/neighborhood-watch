@@ -130,7 +130,7 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return {};
+    return { sections: SECTIONS.map((s) => s.value).filter((v) => v !== "scan") }; // shown ticked in the editor
   }
 
   static getConfigForm() {
@@ -139,6 +139,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         { name: "title", selector: { text: {} } },
         { name: "sections", selector: { select: { multiple: true, options: SECTIONS } } },
         { name: "hide", selector: { device: { multiple: true, filter: { integration: DOMAIN } } } },
+        { name: "others", selector: { device: { multiple: true, filter: { integration: DOMAIN } } } },
         {
           name: "order",
           selector: {
@@ -167,11 +168,19 @@ class NeighborhoodWatchCard extends HTMLElement {
           title: "Title",
           sections: "Sections",
           hide: "Hide these animals or cameras",
+          others: "Show under Also seen",
           order: "Animal order",
           columns: "Animal columns",
           photo_height: "Photo height",
           review_limit: "Sightings to review at once",
           photo_hours: "Photo shows for (0 = always)",
+        })[s.name],
+      computeHelper: (s) =>
+        ({
+          sections: "Empty: all of them except Scan a folder.",
+          hide: "Animals or cameras to leave out.",
+          others: "These animals move from the main row to the Also seen row below it, with any unknown cats.",
+          order: "Default: most recently seen first.",
         })[s.name],
     };
   }
@@ -281,7 +290,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     const d = this._devices();
     const parts = [];
     if (show.has("review") && d.hub?.keys.to_review) parts.push(this._review(d));
-    if (show.has("animals") && d.animals.length) parts.push(this._animals(d.animals));
+    const unknownSeen = Object.keys(this._state(d.hub?.keys.wildlife)?.attributes?.unknown || {}).length;
+    if (show.has("animals") && (d.animals.length || unknownSeen)) parts.push(this._animals(d.animals, d.hub));
     else if (show.has("animals") && d.hub)
       parts.push(`<div class="section"><h2>Animals</h2><div class="muted">Add animals with Add animal on the Neighborhood Watch integration page.</div></div>`);
     // The shorter sections sit side by side on wide screens instead of each taking a row.
@@ -329,7 +339,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       <ha-card>
         <div class="whole">
           <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
-          <div class="inner">${parts.join("") || `<div class="empty">Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.</div>`}</div>
+          <div class="inner">${parts.join("") || (this._sectionsSet && !(this._config.sections || []).length ? `<div class="empty">No sections are picked in this card's settings.</div>` : "") || `<div class="empty">Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.</div>`}</div>
         </div>
       </ha-card>${this._lightbox()}`;
     this._stopSprites?.();
@@ -657,8 +667,42 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId }, bubbles: true, composed: true }));
   }
 
-  _animals(animals) {
-    const tiles = animals.map((a) => {
+  _animals(animals, hub) {
+    // The main row holds the animals you track closely; the rest (picked in the card's settings)
+    // and unknown animals the AI couldn't name sit under "Also seen".
+    const others = new Set(this._config.others || []);
+    const main = animals.filter((a) => !others.has(a.id)).map((a) => this._tile(a));
+    const unknown = Object.entries(this._state(hub?.keys.wildlife)?.attributes?.unknown || {}).map(([n, k]) => this._unknownTile(n, k, hub));
+    const also = [...animals.filter((a) => others.has(a.id)).map((a) => this._tile(a)), ...unknown];
+    return `<div class="section">${main.length ? `<div class="grid">${main.join("")}</div>` : ""}${
+      also.length ? `<div class="subhead">Also seen</div><div class="grid">${also.join("")}</div>` : ""
+    }</div>`;
+  }
+
+  // An unknown animal ("Unknown Cat"): drawn as the nearest ready-made look to the coat the
+  // AI described at its latest sighting.
+  _unknownTile(name, k, hub) {
+    const live = k.last_seen && Date.now() - new Date(k.last_seen).getTime() < 10 * 60e3;
+    const isCat = /cat/i.test(name);
+    const pic = isCat
+      ? `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify({ cat: NWSprites.nearestLook(k), ...(live ? { mode: "alert" } : {}) }))}" role="img" aria-label="${esc(name)}"></canvas>`
+      : catFace({ pattern: k.pattern, base: k.base, looks: k.description || "" });
+    const badges = [];
+    if (k.tonight) badges.push(`<span class="badge">${esc(k.tonight)} tonight</span>`);
+    if (k.possible) badges.push(`<span class="badge dim">possible</span>`);
+    const status = live
+      ? `<span class="live">● On camera · ${esc(k.where || "")}</span>`
+      : `${esc(k.where || "")} · <span data-ago="${esc(k.last_seen || "")}">${ago(k.last_seen)}</span>`;
+    return `<div class="tile ${live ? "is-live" : ""}" title="${esc(k.description || "")}">
+        <div class="pic" data-more="${esc(hub.keys.wildlife)}"><div class="nophoto">${pic}</div>
+          <div class="over"><div class="name">${esc(name)}</div><div class="status">${status}</div></div>
+          <div class="badges">${badges.join("")}</div>
+        </div>
+      </div>`;
+  }
+
+  _tile(a) {
+    {
       const k = a.keys;
       const photo = this._state(k.last_photo);
       const onCam = this._state(k.on_camera);
@@ -708,8 +752,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           </div>
           <div class="toggles">${this._toggles(k)}</div>
         </div>`;
-    });
-    return `<div class="section"><div class="grid">${tiles.join("")}</div></div>`;
+    }
   }
 
   _wildlife(hub) {
@@ -897,6 +940,7 @@ const STYLE = `
   .section.folded > h2::after { transform: rotate(-90deg); }
   .section.folded > :not(h2) { display: none; }
   ha-card { padding: 16px; }
+  .subhead { font-size: .85em; font-weight: 600; margin: 14px 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   .section + .section, .section + .side, .side + .section { margin-top: 18px; }
   .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; align-items: start; }
@@ -1395,9 +1439,24 @@ function catGrid(o) {
   if (o.fluffy) ellipse(g, 16, 13.4, 8.4, 5, fur);
   ellipse(g, 16, 10, 7, 6, fur);
   const up = o.alert ? 0.8 : 0; // ears pricked
-  tri(g, [9, 9], [9.5, 1.5 - up], [14.5, 5.5], o.ears || fur);
-  if (o.earFlick) tri(g, [23, 9], [24.2, 2.4], [18, 6], o.rightEar || o.ears || fur); // turned out
-  else tri(g, [23, 9], [22.5, 1.5 - up], [17.5, 5.5], o.rightEar || o.ears || fur);
+  // Ear shapes: earSize scales each ear about the middle of its base (big ears above 1, small
+  // below); foldEars folds them forward into low caps; earTufts puts a tuft on each tip.
+  const ear = (a, b, c, col) => {
+    const m = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2], k = o.earSize || 1;
+    if (o.foldEars) b = [m[0] + (b[0] - m[0]) * 0.4, m[1] + (b[1] - m[1]) * 0.45];
+    const sc = (q) => [m[0] + (q[0] - m[0]) * k, m[1] + (q[1] - m[1]) * k];
+    [a, b, c] = [sc(a), sc(b), sc(c)];
+    tri(g, a, b, c, col);
+    if (o.earTufts) tri(g, [b[0] - 0.4, b[1] + 1], [b[0] + (b[0] < 16 ? -0.15 : 0.15), b[1] - 1.5], [b[0] + 0.4, b[1] + 1], o.tabbyDark || shade(fur, 0.6));
+  };
+  const before = g.map((r) => r.slice());
+  ear([9, 9], [9.5, 1.5 - up], [14.5, 5.5], o.ears || fur);
+  if (o.earFlick) ear([23, 9], [24.2, 2.4], [18, 6], o.rightEar || o.ears || fur); // turned out
+  else if (o.earSize || o.foldEars || o.earTufts) {
+    // Reshaped ears: the right one is the left one mirrored, so rounding can't make them differ.
+    const rc = o.rightEar || o.ears || fur;
+    for (let y = 0; y < N; y++) for (let x = 0; x < 24; x++) if (g[y][x] !== before[y][x]) g[y][47 - x] = g[y][x] === (o.ears || fur) ? rc : g[y][x];
+  } else ear([23, 9], [22.5, 1.5 - up], [17.5, 5.5], o.rightEar || o.ears || fur);
   // Where the head meets the body.
   if (o.neck === "none") for (let y = 20; y <= 25; y++) for (let x = 14; x <= 33; x++) g[y][x] = fur; // straight sides
   if (o.neck === "short") for (let y = 21; y <= 24; y++) for (let x = 0; x < N; x++) if (Math.abs(x + 0.5 - 24) <= (y === 21 || y === 24 ? 9 : 8)) g[y][x] = fur; // a slight waist
@@ -1417,6 +1476,11 @@ function catGrid(o) {
       for (let x = 0; x < N; x++) if (isFur(g[y][x]) && fn(x, y)) g[y][x] = typeof c === "function" ? c(x, y) : c;
   };
   const cx = 23.5;
+  // A long-haired chest ruff reaches out where the tail would be: tail colouring keeps off it.
+  const inRuff = (x, y) =>
+    (!!o.fluffy && ((x + 0.5 - 16 * S) / (8.4 * S)) ** 2 + ((y + 0.5 - 13.4 * S) / (5 * S)) ** 2 <= 1) ||
+    ((x + 0.5 - 16 * S) / (7 * S)) ** 2 + ((y + 0.5 - 10 * S) / (6 * S)) ** 2 <= 1 || // the head's own edge, too
+    ((x + 0.5 - 16 * S) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 <= 1; // and the body's
   if (o.calico) {
     const black = "#323034", grey = black, tan = "#c9935c", orange = tan; // just white, black and orange (plus shading)
     // The face: a tan patch over one eye and down that cheek; a soft grey cap over the top and
@@ -1430,7 +1494,7 @@ function catGrid(o) {
     on((x, y) => x <= 16 && ((x - 13) ** 2) / 12 + ((y - 30) ** 2) / 12 <= 1, black); // back patch, just past the side
     on((x, y) => x >= 31 && ((x - 34) ** 2) / 12 + ((y - 36) ** 2) / 12 <= 1, tan); // flank patch, just past the other side
     // The tail: black with wavy streaks of orange running through it, a black tip.
-    on((x, y) => x >= 36 || (x >= 34 && y <= 31), (x, y) => (y > 26 && Math.floor((y + Math.round(Math.sin(x * 1.3) * 1.5)) / 2) % 3 === 0 ? orange : black));
+    on((x, y) => !inRuff(x, y) && (x >= 36 || (x >= 34 && y <= 31)), (x, y) => (y > 26 && Math.floor((y + Math.round(Math.sin(x * 1.3) * 1.5)) / 2) % 3 === 0 ? orange : black));
   }
   if (o.tabby) {
     // A mackerel tabby: the forehead "M", a line from each eye, stripes curving down the
@@ -1447,7 +1511,9 @@ function catGrid(o) {
     }
     on((x, y) => (y === 14 && (x === 16 || x === 17)) || (y === 14 && (x === 30 || x === 31)), st); // from the eyes
     on((x, y) => y === 16 && (x <= 15 || x >= 32), st); // cheeks
-    on((x, y) => y >= 16 && y <= 21 && Math.abs(x - cx) <= 4, light); // paler muzzle and throat
+    // A paler muzzle and throat, rounded, its edge a half step so it blends in.
+    const mz = (x, y) => ((x + 0.5 - 24) / 4.6) ** 2 + ((y + 0.5 - 19) / 3.3) ** 2;
+    on((x, y) => y >= 16 && y <= 22 && mz(x, y) <= 1.4, (x, y) => (mz(x, y) <= 1 ? light : mixHex(fur, light, 0.5)));
     // Flank stripes: thin, broken, arcing down the sides only; the chest stays clear.
     if (o.classicTabby) {
       // Classic (marbled) tabby instead: a bullseye swirl on each side (a dark centre, then
@@ -1465,11 +1531,44 @@ function catGrid(o) {
       on((x, y) => ring(x, y) === "pale", pale);
       on((x, y) => ring(x, y) === "dark", band);
       on((x, y) => y >= 23 && y <= 24 && Math.min(x, 47 - x) >= 15 && Math.min(x, 47 - x) <= 19, band); // a band over each shoulder
-    } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
+    } else if (o.rosettes); // spots instead of stripes (below)
+    else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
     else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
-    on((x, y) => (y === 36 || (y === 39 && !o.lightFeet)) && ((x >= 17 && x <= 21 && !o.lick && !o.pawUp) || (x >= 26 && x <= 30)), st); // barred legs (only a leg that is down, never across the belly)
+    if (!o.rosettes) on((x, y) => (y === 36 || (y === 39 && !o.lightFeet)) && ((x >= 17 && x <= 21 && !o.lick && !o.pawUp) || (x >= 26 && x <= 30)), st); // barred legs (only a leg that is down, never across the belly)
     if (taper && !o.tailTaper) on((x, y) => x >= 33 && isFur(g[y][x]) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1 && (() => { const t = tube(x, y); return t.d <= t.r + 0.5 && (t.f > 0.88 || t.s % 4 < 2); })(), st); // rings round the tail, a dark tip
-    else on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
+    else on((x, y) => !inRuff(x, y) && !(y < 16 && x <= 35) && (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
+  }
+  // rosettes: Bengal-style spots over the sides and legs, each a dark ring round a warmer centre.
+  if (o.rosettes) {
+    const dark = o.tabbyDark || shade(fur, 0.45), mid = shade(fur, 0.8);
+    const cell = (x, y) => { const row = Math.floor((y - 24) / 5); return [(Math.min(x, 47 - x) + (row % 2) * 3) % 6, (y - 24) % 5]; };
+    on((x, y) => y >= 24 && y <= 41 && Math.min(x, 47 - x) <= 19 && (() => { const [a, b] = cell(x, y); return a <= 2 && b <= 2; })(), (x, y) => { const [a, b] = cell(x, y); return a === 1 && b === 1 ? mid : dark; });
+  }
+  // points: a colourpoint (Siamese and kin): a pale body, the colour deepening over the face
+  // and down the legs to the feet (ears and tail take it through ears and tailColor).
+  if (o.points) {
+    const d = (x, y) => Math.hypot((x + 0.5 - 24) / 1.15, y + 0.5 - 16.5);
+    on((x, y) => y >= 7 && y <= 23 && d(x, y) < 7.5, (x, y) => mixHex(fur, o.points, Math.max(0, Math.min(0.92, 1.25 - d(x, y) / 6))));
+    const mitt = (x, y) => (o.whitePaws || o.tuxedo) && y >= 41 && ((x >= 16 && x <= 22) || (x >= 25 && x <= 31)); // white mitts stay white
+    on((x, y) => y >= 33 && !mitt(x, y), (x, y) => mixHex(fur, o.points, Math.min(0.9, (y - 32) / 8)));
+  }
+  // tortie: tortoiseshell, the fur mottled with this second colour in soft, uneven patches.
+  if (o.tortie) {
+    const v = (x, y) => Math.sin(x * 0.55 + y * 0.21) + Math.sin(y * 0.47 - x * 0.31 + 1.7) + Math.sin((x + y) * 0.29 + 0.6);
+    on((x, y) => v(x, y) > 0.9 || hash(x, y) % 11 === 0, (x, y) => (v(x, y) > 1.6 ? o.tortie : mixHex(o.tortie, fur, 0.4)));
+  }
+  // ticked: an Abyssinian-style coat, every hair banded, so a fine even flecking and no
+  // stripes, with a faint "M" on the forehead.
+  if (o.ticked) {
+    const fleck = shade(fur, 0.8);
+    on((x, y) => y >= 4 && hash(x, y) % 3 === 0 && !(y >= 16 && y <= 22 && Math.abs(x + 0.5 - 24) <= 4), fleck);
+    on((x, y) => [[20, 9], [21, 10], [22, 11], [25, 11], [26, 10], [27, 9], [23, 10], [24, 10]].some(([a, b]) => a === x && b === y), shade(fur, 0.7));
+  }
+  // hairless: a Sphynx's bare skin, creased over the brow and the shoulders.
+  if (o.hairless) {
+    const crease = shade(fur, 0.86);
+    on((x, y) => (y === 5 && x >= 21 && x <= 26) || (y === 7 && ((x >= 19 && x <= 22) || (x >= 25 && x <= 28))), crease);
+    on((x, y) => (y === 26 || y === 28) && Math.min(x, 47 - x) >= 15 && Math.min(x, 47 - x) <= 18, crease);
   }
   // legBars: faint tabby bars across the front legs, on these rows.
   if (o.legBars) on((x, y) => o.legBars.includes(y) && ((x >= 17 && x <= 20 && !o.lick && !o.pawUp) || (x >= 27 && x <= 30)), o.legBarColor || shade(fur, 0.86)); // only on a leg that is down, never across the belly
@@ -1577,7 +1676,7 @@ function catGrid(o) {
     on((x, y) => x <= 15 && y >= 24 && y <= 37 && ((x - 12) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides); // the dark back, showing past each side
     on((x, y) => x >= 32 && y >= 24 && y <= 37 && ((x - 35) ** 2) / 14 + ((y - 30) ** 2) / 40 <= 1, o.sides);
   }
-  if (o.tailColor) on((x, y) => x >= 33 && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1, o.tailColor); // the whole tail
+  if (o.tailColor) on((x, y) => x >= 33 && !inRuff(x, y) && ((x + 0.5 - 33.3) / 2.8) ** 2 + ((y + 0.5 - 42.75) / 2.2) ** 2 > 1 && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1, o.tailColor); // the whole tail
   // With a front leg lifted, the belly behind it shows: below the held-up paw, or the whole
   // leg's length while licking.
   const bareTop = o.lick === 1 || o.lick === 2 || o.lick === "mid" ? 33 : o.lick === "up" ? 41 : o.pawUp ? 40 + (o.pawShift || 0) : null;
@@ -1734,7 +1833,7 @@ function catGrid(o) {
       for (let x = 0; x < N; x++) {
         const c = g[y][x], k = fac[y][x];
         if (!k || !c || c === line || c === "#d98f9c") continue;
-        if (x > 23 && y >= 24 && !inB(x, y)) continue; // the tail keeps its own colours
+        if (x > 23 && y >= 24 && !inB(x, y) && !(o.fluffy && inRuff(47 - x, y))) continue; // the tail keeps its own colours (a long-haired ruff is body, though)
         g[y][x] = shade(c, k === "lit" ? (midTone(c) ? 1.04 : 1.08) : k); // gentler on mid greys
       }
     // The tail, shaded as a round tube along its own path (light from above, toward us).
@@ -1816,14 +1915,14 @@ function catGrid(o) {
 
   // Inner ears.
   const pink = o.innerEar || "#d98f9c";
-  for (const [x, y] of [[15, 8], [15, 9], [15, 10], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x + (o.earFlick ? 1 : 0), y + (o.earFlick ? 1 : 0), pink); } // the flicked ear's inside moves with it
+  if (!o.foldEars) for (const [x, y] of [[15, 8], [15, 9], [15, 10], [16, 9], [16, 10]]) { px(g, x, y, pink); px(g, 47 - x + (o.earFlick ? 1 : 0), y + (o.earFlick ? 1 : 0), pink); } // the flicked ear's inside moves with it
   // Eyes: 3 wide, 3 tall, a slit pupil, a glint.
   const eye = o.eyes || "#d9b23a";
   for (const ex of [18, 27]) {
     if (o.blink || o.yawn === 2 || o.lick === 1 || o.lick === 2) { for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 14, o.lid || "#141416"); continue; }
     for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) px(g, ex + dx, 13 + dy, dy === 2 && o.eyeLow ? o.eyeLow : eye); // eyeLow: the lower part a warmer tone
     if (o.lidLine && !o.halfBlink && o.yawn !== 1) for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 12, o.lidLine); // lidLine: a dark upper lid, so the eye reads almond
-    if (o.alert) { px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); px(g, ex, 14, "#111"); } // round pupils
+    if (o.alert || o.flatFace) { px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); px(g, ex < 23 ? ex : ex + 2, 14, "#111"); } // round pupils, mirrored
     else { px(g, ex + 1, 13, "#111"); px(g, ex + 1, 14, "#111"); px(g, ex + 1, 15, "#111"); }
     px(g, ex + (ex < 23 ? 2 : 0), 13, "#fff");
     if (o.halfBlink || o.yawn === 1) for (let dx = 0; dx < 3; dx++) px(g, ex + dx, 13, o.lid || "#141416"); // lids half down
@@ -1840,11 +1939,12 @@ function catGrid(o) {
   // Nose: a small pink triangle; mouth: a short line splitting into a "w".
   const m = o.mouth || "#3a2a2a";
   const nose = o.nose || "#e48a95";
-  for (const x of [22, 23, 24, 25]) px(g, x, 17, nose);
-  px(g, 23, 18, nose); px(g, 24, 18, nose);
-  px(g, 23, 19, m); px(g, 24, 19, m);
-  px(g, 22, 20, m); px(g, 21, 20, m); px(g, 20, 19, m);
-  px(g, 25, 20, m); px(g, 26, 20, m); px(g, 27, 19, m);
+  const fy = o.flatFace ? -1 : 0; // flatFace: a short, pushed-in face (Persian), nose and mouth a row higher
+  for (const x of [22, 23, 24, 25]) px(g, x, 17 + fy, nose);
+  px(g, 23, 18 + fy, nose); px(g, 24, 18 + fy, nose);
+  px(g, 23, 19 + fy, m); px(g, 24, 19 + fy, m);
+  px(g, 22, 20 + fy, m); px(g, 21, 20 + fy, m); px(g, 20, 19 + fy, m);
+  px(g, 25, 20 + fy, m); px(g, 26, 20 + fy, m); px(g, 27, 19 + fy, m);
   if (o.yawn) {
     // The mouth opens: dark inside, a pink tongue at the bottom.
     const deep = o.yawn === 2 ? 22 : 21;
@@ -1854,6 +1954,7 @@ function catGrid(o) {
   // Whiskers: fine lines across the cheeks and out past the face.
   const wk = o.whiskers || "#c9c5bd";
   for (const [x, y0] of [[19, 18], [18, 18], [17, 17], [16, 17], [15, 17], [14, 16], [13, 16], [12, 16], [19, 19], [18, 19], [17, 19], [16, 20], [15, 20], [14, 20], [13, 21], [12, 21]]) {
+    if (o.hairless && x <= 14) continue; // a Sphynx's whiskers are short and sparse
     const y = o.whiskerTwitch && x <= 14 ? y0 - 1 : y0; // a twitch: the outer ends lift
     px(g, x, y, wk); px(g, 47 - x, y, wk);
   }
@@ -2999,7 +3100,29 @@ const SPRITE_PRESETS = {
   charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true, softChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, slim: true, shoulderLean: false, pixels: [[30, 26, "#69615a"], [30, 28, "#3a3532"], [31, 28, "#69615a"], [31, 30, "#3a3532"], [14, 4, "#a89b90"], [14, 5, "#a89b90"], [14, 6, "#a89b90"], [14, 7, "#a89b90"], [14, 8, "#a89b90"], [14, 9, "#a89b90"], [14, 10, "#a89b90"], [33, 4, "#a89b90"], [33, 5, "#a89b90"], [33, 6, "#a89b90"], [33, 7, "#a89b90"], [33, 8, "#a89b90"], [33, 9, "#a89b90"], [33, 10, "#a89b90"], [20, 11, "#a89b90"], [27, 11, "#a89b90"], [14, 13, "#a89b90"], [15, 13, "#a89b90"], [32, 13, "#a89b90"], [33, 13, "#a89b90"], [22, 22, "#a29a92"], [23, 22, "#b0a8a0"], [24, 22, "#b0a8a0"], [25, 22, "#a29a92"], [18, 22, "#534c46"], [19, 22, "#534c46"], [20, 22, "#534c46"], [27, 22, "#534c46"], [28, 22, "#534c46"], [29, 22, "#534c46"], [21, 22, "#7f7770"], [26, 22, "#7f7770"]], leftLegPixels: [[17, 26, "#69615a"], [17, 28, "#3a3532"], [16, 28, "#69615a"], [16, 30, "#3a3532"]], softSpots: true, bellyPale: "#bbb3aa", tearMarks: true, mouth: "#8d7f78", legBars: [31, 34, 37], tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#e8e3dc", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#ddd7cf", paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", eyeLow: "#b0a548", lidLine: "#3d3833", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-47;8:0-47;9:0-47;10:0-17,30-47;11:0-15,32-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#e8e3dc", "22:23-24"], ["#57504a", "24:13-17,30-34;25:18-21,26-29"], ["#857d76", "26:22-25"], ["#9a928a", "23:21,26"], ["#c9c2b9", "23:22-25"], ["#a29a92", "24:22,25"], ["#b8b0a8", "24:23-24"], ["#8c847d", "25:22,25;26:22,25;27:22,25"], ["#a8a098", "25:23-24;26:23-24;27:23-24"], ["#918982", "28:22,25"], ["#7f7770", "29:22,25"], ["#aea69e", "28:23-24;29:23-24"], ["#b6aea6", "30:23-24;31:23-24"], ["#45403b", "15:16,31;16:14-15,32-33"]] },
-  bicolour_mask_paw_up: { detail: true, short: true, jawUp: 1, pixels: [[25, 10, "#1d1d20"], [26, 10, "#1d1d20"], [14, 16, "#1d1d20"], [24, 12, "#f1ece3"], [24, 13, "#f1ece3"], [30, 13, "#f1ece3"], [31, 13, "#f1ece3"], [30, 14, "#f1ece3"], [31, 14, "#f1ece3"], [22, 16, "#f1ece3"], [22, 17, "#f1ece3"], [27, 19, "#f1ece3"]], fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-31,33-47;13:30-31,33-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:23-26;16:22-28;17:22-28;18:21-28;19:21-27;20:21-26;21:22-25;22:23-24"], ["#1d1d20", "7:24-26;8:24-26;9:24,27;10:24,28-29;11:24,29;12:24;13:23;14:23-26;16:16-17,21"], ["#1d1d20", "14:18-19;15:18-20"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
+  bicolour_mask_paw_up: { detail: true, short: true, jawUp: 1, pixels: [[25, 10, "#1d1d20"], [26, 10, "#1d1d20"], [14, 16, "#1d1d20"], [33, 15, "#1d1d20"], [33, 16, "#1d1d20"], [33, 18, "#1d1d20"], [33, 19, "#1d1d20"], [24, 12, "#f1ece3"], [24, 13, "#f1ece3"], [30, 13, "#f1ece3"], [31, 13, "#f1ece3"], [30, 14, "#f1ece3"], [31, 14, "#f1ece3"], [22, 16, "#f1ece3"], [22, 17, "#f1ece3"], [27, 19, "#f1ece3"]], fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-31,33-47;13:30-31,33-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:23-26;16:22-28;17:22-28;18:21-28;19:21-27;20:21-26;21:22-25;22:23-24"], ["#1d1d20", "7:24-26;8:24-26;9:24,27;10:24,28-29;11:24,29;12:24;13:23;14:23-26;16:16-17,21"], ["#1d1d20", "14:18-19;15:18-20"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
+  // Common breeds and coats.
+  orange_tabby: { detail: true, small: true, fur: "#d0813f", tabby: true, tabbyDark: "#8f4c1f", pale: "#ecc9a0", eyes: "#c9a23a", innerEar: "#e8a19a", nose: "#c96b67", spottedBelly: true, plainBelly: true },
+  cream_tabby: { detail: true, small: true, fur: "#e6c9a2", tabby: true, tabbyDark: "#b98d5e", pale: "#f3e3cc", eyes: "#c9a23a", spottedBelly: true, plainBelly: true },
+  grey_tabby: { detail: true, small: true, fur: "#8b8986", tabby: true, tabbyDark: "#45423f", pale: "#c9c5bd", eyes: "#a9b34a", spottedBelly: true, plainBelly: true },
+  silver_tabby: { detail: true, small: true, fur: "#c3c5c8", tabby: true, tabbyBold: true, tabbyDark: "#2f3134", pale: "#e8e9ea", eyes: "#8fb24a", spottedBelly: true, plainBelly: true },
+  white: { detail: true, small: true, fur: "#f1ece3", eyes: "#6fa6d6" },
+  russian_blue: { detail: true, small: true, slim: true, fur: "#7f8894", eyes: "#79b04a", nose: "#6d737c", innerEar: "#b08a94" },
+  bombay: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888", eyes: "#d38a2a" },
+  british_shorthair: { detail: true, big: true, fur: "#8c95a1", eyes: "#d9902e", nose: "#7a7f88", innerEar: "#b48f96", earSize: 0.85 },
+  black_white_bicolour: { detail: true, small: true, fur: "#1d1d20", tuxedo: true, whitePaws: true, outline: "#000", mouth: "#888" },
+  grey_white_bicolour: { detail: true, small: true, fur: "#7f7e7b", tuxedo: true, whitePaws: true },
+  maine_coon: { detail: true, fluffy: true, fur: "#7a5a3c", tabby: true, tabbyDark: "#2f2116", pale: "#cdb79a", earTufts: true, earSize: 1.1, eyes: "#c9a23a", spottedBelly: true, plainBelly: true },
+  siamese: { detail: true, small: true, slim: true, fur: "#efe3cf", points: "#4a3427", ears: "#4a3427", tailColor: "#4a3427", eyes: "#5f9fe0", earSize: 1.15, nose: "#5a4034", innerEar: "#7a5a4a" },
+  ragdoll: { detail: true, fluffy: true, fur: "#f1e8da", points: "#7b6a5e", ears: "#7b6a5e", tailColor: "#7b6a5e", eyes: "#5f9fe0", whitePaws: true },
+  birman: { detail: true, fur: "#efe2c8", points: "#5d4636", ears: "#5d4636", tailColor: "#5d4636", eyes: "#5f9fe0", whitePaws: true, nose: "#6a5044" },
+  himalayan: { detail: true, fluffy: true, fur: "#f2e8d6", points: "#6b4c3a", ears: "#6b4c3a", tailColor: "#6b4c3a", eyes: "#5f9fe0", flatFace: true, earSize: 0.8, nose: "#6a5044" },
+  sphynx: { detail: true, small: true, slim: true, fur: "#d8b7a6", hairless: true, earSize: 1.3, eyes: "#9cbf4a", nose: "#c98a8a", innerEar: "#c98f8f", whiskers: "#bfa598" },
+  tortoiseshell: { detail: true, small: true, fur: "#262224", tortie: "#b8682e", eyes: "#c9a23a", outline: "#000" },
+  bengal: { detail: true, small: true, fur: "#c48b45", tabby: true, rosettes: true, tabbyDark: "#3a2416", pale: "#ecd3a8", eyes: "#9bb43a", spottedBelly: true, plainBelly: true },
+  abyssinian: { detail: true, small: true, slim: true, fur: "#b06d3d", ticked: true, earSize: 1.2, eyes: "#b9a23a", pale: "#e2b98d", spottedBelly: true, plainBelly: true },
+  scottish_fold: { detail: true, small: true, fur: "#8c95a1", foldEars: true, eyes: "#d9902e", nose: "#7a7f88" },
+  persian: { detail: true, fluffy: true, fur: "#f1ece3", flatFace: true, earSize: 0.7, eyes: "#d9902e" },
 };
 // An appearance may name a preset; its own settings then change that look.
 function spriteLook(look) {
@@ -3158,5 +3281,40 @@ window.customCards.push({
   preview: true,
   documentationURL: "https://github.com/b2dmx/neighborhood-watch",
 });
-  return { mountSprites, isInfrared, spriteKind, sleepShare, hasCollar: (look) => !!spriteLook(look).collar };
+  // The ready-made look nearest to a coat the AI described for an animal it couldn't name: words
+  // in the description first (colours, tabby, calico, tortie, colourpoint, long hair...), then
+  // its pattern and main tone (infrared tones, so least telling).
+  function nearestLook({ pattern = "na", base = "na", description = "" } = {}) {
+    const t = String(description).toLowerCase();
+    const has = (...w) => w.some((x) => new RegExp(`(^|[^a-z])${x.replace(/[-\s]/g, "[- ]?")}($|[^a-z])`).test(t)); // whole words: "red" isn't in "haired"
+    const long = has("long-haired", "longhaired", "long hair", "fluffy", "fluffed", "shaggy", "long-hair");
+    const pick = (() => {
+      if (has("hairless", "sphynx")) return "sphynx";
+      if (has("calico")) return { preset: "calico_collar", collar: null, bell: false };
+      if (has("tortie", "tortoiseshell")) return "tortoiseshell";
+      if (has("siamese", "colourpoint", "colorpoint", "pointed", "dark points", "seal point")) return has("mitted", "mitts", "white paws", "white feet", "white socks") ? "birman" : long ? "ragdoll" : "siamese";
+      if (has("bengal", "rosette", "leopard")) return "bengal";
+      if (has("maine coon", "ear tuft")) return "maine_coon";
+      if (has("tuxedo") || (has("black") && has("white"))) return "black_white_bicolour";
+      if ((has("grey", "gray") && has("white"))) return "grey_white_bicolour";
+      if (has("orange", "ginger", "marmalade", "red tabby", "reddish")) return "orange_tabby";
+      if (has("cream", "buff")) return "cream_tabby";
+      if (has("silver")) return "silver_tabby";
+      if (has("tabby", "striped", "stripes", "mackerel")) return has("brown", "dark") ? "brown_tabby" : "grey_tabby";
+      if (has("ticked", "abyssinian")) return "abyssinian";
+      if (has("black")) return "black";
+      if (has("white")) return "white";
+      if (has("blue", "grey", "gray")) return "russian_blue";
+      // Nothing telling in the words: the pattern and tone it reported.
+      if (pattern === "striped") return base === "white" ? "cream_tabby" : "grey_tabby";
+      if (pattern === "blotchy") return base === "black" ? "tortoiseshell" : base === "grey" ? "grey_white_bicolour" : { preset: "calico_collar", collar: null, bell: false };
+      if (base === "black") return "black";
+      if (base === "white") return "white";
+      if (base === "grey") return "russian_blue";
+      return "grey_tabby";
+    })();
+    const look = typeof pick === "string" ? { preset: pick } : pick;
+    return long && !SPRITE_PRESETS[look.preset]?.fluffy ? { ...look, fluffy: true } : look;
+  }
+  return { mountSprites, isInfrared, spriteKind, sleepShare, nearestLook, hasCollar: (look) => !!spriteLook(look).collar };
 })();

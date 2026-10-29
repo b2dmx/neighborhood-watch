@@ -22,7 +22,7 @@ A Home Assistant integration. When a camera sees motion, an AI model looks at th
 - **Tracks your own animals:** last seen, where, and the exact photo.
 - **Missing mode:** any possible sighting of a lost pet sends a critical alert.
 - **Scares pests off** with lights or a sound.
-- **Gets better:** ✓ / ✗ on every alert fixes tracking and builds training data.
+- **Gets better:** ✓ Right, ? Not sure or Other on every alert fixes tracking and builds training data.
 
 ## Installation
 
@@ -39,12 +39,12 @@ Manual: copy `custom_components/neighborhood_watch` into `config/custom_componen
 
 Setup walks you through it, all in the UI:
 
-1. **AI models:** a first look, and optionally a second opinion.
+1. **AI models:** a first look, and a second opinion (needed for priority and strict animals).
 2. **When to watch:** set hours, darkness, or both.
 3. **Cameras:** sensors are filled in from each camera's device.
 4. **Pests:** e.g. raccoon, opossum, skunk.
 5. **Who gets alerts:** phones with the Home Assistant app.
-6. **Your animals:** name, looks, and an optional reference photo. Skip if you only care about pests.
+6. **Your animals:** name, looks, and an optional reference photo. Leave the name empty and submit when you're done, or straight away if you only care about pests.
 
 Add the **Neighborhood Watch** card to a dashboard. It installs itself.
 
@@ -64,6 +64,6 @@ Add the **Neighborhood Watch** card to a dashboard. It installs itself.
 
 <p align="center">
   <a href="LICENSE">MIT</a> · <a href="https://ko-fi.com/goobis2dmx">Support on Ko-fi</a><br><br>
-  Neighborhood Watch v0.19.0 by Goobis<br>
+  Neighborhood Watch v0.20.0 by Goobis<br>
   AI was used to help develop this application
 </p>

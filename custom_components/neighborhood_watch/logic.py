@@ -181,6 +181,7 @@ class Verdict:
     second_opinion_said: str  # tidied
     named: tuple[str, ...] = ()  # lower-case names either model said
     unchecked: bool = False  # a priority animal nobody could double-check: alerts, but not counted
+    base: str = "na"  # the coat's main tone the deciding model saw (for drawing an unknown animal)
 
 
 def _level(value: str) -> str:
@@ -301,6 +302,7 @@ def decide(
         first_look_said=first_said,
         second_opinion_said=second,
         named=tuple(dict.fromkeys(n for n in (first_name, name) if n and n != "none")),
+        base=final.base if final.base in BASES else "na",
     )
 
 

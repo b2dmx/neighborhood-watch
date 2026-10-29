@@ -999,3 +999,16 @@ async def test_undo_last_answer_puts_it_back(hass, watch):
     review = state(hass, "sensor.neighborhood_watch_to_review")
     assert sid in [i["id"] for i in review.attributes["items"]]  # back in To review
     assert review.attributes["last_answer"] is None
+
+
+async def test_unknown_cats_keep_their_coat(hass, watch):
+    """An animal the AI can't name is tracked with the coat it described, for the card to draw."""
+    watch["ai"].say(FIRST, "Unknown Cat|medium|striped|grey|orange tabby with a white chest")
+    watch["ai"].say(SECOND, "Unknown Cat|medium|striped|grey|orange tabby with a white chest")
+    await trigger(hass, "garage")
+    attrs = state(hass, "sensor.neighborhood_watch_wildlife").attributes
+    assert "Unknown Cat" not in attrs["kinds"]
+    seen = attrs["unknown"]["Unknown Cat"]
+    assert (seen["pattern"], seen["base"]) == ("striped", "grey")
+    assert seen["description"].startswith("orange tabby")
+    assert seen["where"] and seen["last_seen"]

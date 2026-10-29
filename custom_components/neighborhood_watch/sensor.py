@@ -77,14 +77,16 @@ class Wildlife(WatchEntity, SensorEntity):
     """Every wildlife kind seen, tracked here instead of a device per animal."""
 
     _attr_icon = "mdi:paw-outline"
-    _unrecorded_attributes = frozenset({"kinds"})
+    _unrecorded_attributes = frozenset({"kinds", "unknown"})
 
     def __init__(self, watch: WatchEngine) -> None:
         super().__init__(watch, "wildlife")
         self._kinds: dict[str, dict[str, Any]] = {}
+        self._unknown: dict[str, dict[str, Any]] = {}
 
     def _refresh(self) -> None:
         self._kinds = self.watch.wildlife_seen()
+        self._unknown = self.watch.unknown_seen()  # unknown cats and dogs, shown with the animals
 
     @property
     def native_value(self) -> str | None:
@@ -95,7 +97,7 @@ class Wildlife(WatchEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"kinds": self._kinds}
+        return {"kinds": self._kinds, "unknown": self._unknown}
 
 
 class LastSighting(WatchEntity, SensorEntity):

@@ -107,7 +107,7 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     assert "No cameras were picked" not in result["description_placeholders"]["notes"]
     assert "No phones with the Home Assistant app" in result["description_placeholders"]["notes"]
     assert {str(k) for k in result["data_schema"].schema} == {
-        "name", "species", "description", "reference_upload", "looks", "rules", "last_seen"
+        "name", "species", "sprite", "description", "reference_upload", "looks", "rules", "last_seen"
     }
     luna = {
         "name": "Luna",
@@ -118,7 +118,7 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
         "last_seen": {},
     }
     result = await hass.config_entries.flow.async_configure(result["flow_id"], luna)
-    assert result["errors"] == {"always_strict": "priority_not_strict"}
+    assert result["errors"] == {"base": "priority_not_strict"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {**luna, "rules": {"priority": True, "always_strict": False}}
     )

@@ -568,6 +568,29 @@ class WatchEngine:
                 k["week"] += 1
         return dict(sorted(kinds.items(), key=lambda kv: kv[1]["last_seen"], reverse=True))
 
+    def unknown_seen(self, now: datetime | None = None) -> dict[str, dict[str, Any]]:
+        """Every unknown animal kind seen ('Unknown Cat'), with the coat of its latest sighting
+        that described one."""
+        now = now or dt_util.utcnow()
+        night = self.night_start()
+        week = now - timedelta(days=7)
+        kinds: dict[str, dict[str, Any]] = {}
+        for s in self.sightings():
+            name = s.get("animal") or ""
+            if s.get("wrong") or s.get("scan") or not logic.is_unknown(name):
+                continue
+            at = _dt(s.get("time")) or now
+            k = kinds.setdefault(name, {"tonight": 0, "week": 0, "pattern": "na", "base": "na", "description": ""})
+            k.update(last_seen=_iso(at), where=s.get("where"), sighting_id=s.get("id"))
+            k["possible"] = s.get("confidence") == logic.LOW and not s.get("user")
+            if s.get("description") or s.get("pattern", "na") != "na" or s.get("base", "na") != "na":
+                k.update(pattern=s.get("pattern") or "na", base=s.get("base") or "na", description=s.get("description") or "")
+            if night is None or at > night:
+                k["tonight"] += 1
+            if at > week:
+                k["week"] += 1
+        return dict(sorted(kinds.items(), key=lambda kv: kv[1]["last_seen"], reverse=True))
+
     def critical_on(self, key: str) -> bool:
         """A Critical alerts switch (camera, animal, wildlife or catch-all). All start off."""
         return bool(self.data.setdefault("critical", {}).get(key))
@@ -1345,6 +1368,12 @@ class WatchEngine:
                 "log": logic.is_cat_for_log(v, rules)
                 or (wild and v.animal.lower() not in logic.HARMLESS),
                 "possible": wild and v.confidence == logic.LOW,
+                # An unknown animal keeps what its coat looked like, so the card can draw it.
+                **(
+                    {"pattern": v.pattern, "base": v.base, "description": v.description}
+                    if logic.is_unknown(v.animal)
+                    else {}
+                ),
             }
         )
         self._prune(now)

@@ -149,6 +149,27 @@ SPRITE_PRESETS = (
     "black",
     "smoky_banded_tail",
     "bicolour_mask_paw_up",
+    "orange_tabby",
+    "cream_tabby",
+    "grey_tabby",
+    "silver_tabby",
+    "white",
+    "russian_blue",
+    "bombay",
+    "british_shorthair",
+    "black_white_bicolour",
+    "grey_white_bicolour",
+    "maine_coon",
+    "siamese",
+    "ragdoll",
+    "birman",
+    "himalayan",
+    "sphynx",
+    "tortoiseshell",
+    "bengal",
+    "abyssinian",
+    "scottish_fold",
+    "persian",
 )
 CONF_PRIORITY = "priority"
 CONF_ALWAYS_STRICT = "always_strict"
@@ -197,8 +218,8 @@ WWW_SUBDIR = "neighborhood_watch"
 QUOTA_TZ = "America/Los_Angeles"  # Gemini free-tier quotas reset at midnight Pacific
 
 
-# Common wildlife offered during setup: (alerts, pest, hint for the AI). Each starts by
-# alerting at every camera (or never); where and how loudly is set on its page afterwards.
+# Common wildlife offered during setup: (unused, pest, hint for the AI). Where each group
+# alerts is set under Configure (pests, other wildlife, unknown animals), not per kind.
 COMMON_WILDLIFE: dict[str, tuple[bool, bool, str]] = {
     "Raccoon": (True, True, "Ringed tail, black mask across the eyes, stocky hunched body."),
     "Opossum": (True, True, "Long hairless rat-like tail, long pointed pale face, grizzled grey body."),
