@@ -197,8 +197,10 @@ class LastSeen(WatchEntity, SensorEntity):
             "looks": f"{a.description} {a.tips}"[:600],
             # The sighting the photo came from: the card shows its crop (small and quick).
             "photo_id": self.watch.photo_sighting(a),
-            # How the card draws it (its pixel sprite), when set.
-            "appearance": ({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None,
+            # How the card draws it (its pixel sprite), when set; the sprites are all cats.
+            "appearance": (({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None)
+            if a.species.lower() == "cat"
+            else None,
         }
 
 

@@ -185,6 +185,29 @@ async def test_onboarding_can_skip_cameras_and_animals(hass: HomeAssistant, read
     assert not result["result"].subentries
 
 
+
+async def test_onboarding_can_skip_a_camera_picked_by_mistake(hass: HomeAssistant, ready):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True,
+         "more": {"summary_time": "08:05:00", "on_camera_minutes": 10}},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"cameras": ["camera.backyard_cam_high_resolution_channel"]}
+    )
+    assert result["step_id"] == "camera"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"name": "Backyard Cam", "skip": True})
+    assert result["step_id"] == "wildlife"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"species": "cat", "looks": {}, "rules": {}, "last_seen": {}}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].options["cameras"] == {}
+
+
 def _entry(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -285,6 +308,11 @@ async def test_add_and_edit_animal(hass: HomeAssistant, ready):
     )
     assert result["errors"] == {"name": "name_reserved"}
     result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Ziggy", "species": "dog", "sprite": "black", "looks": {"pattern": "na", "base": "na"},
+                            "rules": {"priority": False, "always_strict": False}, "last_seen": {}},
+    )
+    assert result["errors"] == {"sprite": "sprite_cats_only"}
+    result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Milo", "species": "cat", "description": "Black, long-haired.",
                             "looks": {"pattern": "uniform", "base": "black"},
                             "rules": {"priority": False, "always_strict": False}, "last_seen": {}},
@@ -356,7 +384,7 @@ async def test_add_and_edit_person(hass: HomeAssistant, ready):
     assert entry.options["people"][pid]["missing_alerts"] is False
 
 
-async def test_options_alerts_and_training(hass: HomeAssistant, ready):
+async def test_options_alerts_and_training(hass: HomeAssistant, ready, tmp_path):
     entry = _entry(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "alerts"})
@@ -378,10 +406,22 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready):
     assert entry.options["motion_alert_at"] == []
     assert entry.options["pests"] == ["Raccoon"] and entry.options["pest_alert_at"] == ["garage"]
     result = await _options(hass, entry, "training")
+    # The folder is checked: a full path, and one that can be written to (made if need be).
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"dataset": True, "dataset_dir": "/media/nas/nw", "dataset_gb": 50}
+        result["flow_id"], {"dataset": True, "dataset_dir": "media/nas/nw", "dataset_gb": 50}
     )
-    assert entry.options["dataset_dir"] == "/media/nas/nw" and entry.options["alerts"] is False
+    assert result["errors"] == {"dataset_dir": "folder_not_absolute"}
+    with patch("custom_components.neighborhood_watch.config_flow._writable", return_value=False):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"dataset": True, "dataset_dir": str(tmp_path / "nw"), "dataset_gb": 50}
+        )
+    assert result["errors"] == {"dataset_dir": "folder_unwritable"}
+    folder = str(tmp_path / "nas" / "nw")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"dataset": True, "dataset_dir": folder, "dataset_gb": 50}
+    )
+    assert entry.options["dataset_dir"] == folder and entry.options["alerts"] is False
+    assert (tmp_path / "nas" / "nw").is_dir()
 
 
 
@@ -539,3 +579,4 @@ async def test_options_schedule_and_catch_alls_fold_into_sections(hass: HomeAssi
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})  # all left folded
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["unknown_alert_at"] == ["*"] and entry.options["motion_alert_at"] == []
+

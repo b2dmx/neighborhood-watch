@@ -7,6 +7,8 @@ people are managed under Configure → Cameras / People.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
@@ -540,6 +542,19 @@ async def _store_upload(hass: HomeAssistant, file_id: str, slug: str) -> dict[st
     return {}
 
 
+def _writable(folder: str) -> bool:
+    """The training folder exists (made if need be) and a file can be written there."""
+    try:
+        path = Path(folder)
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".neighborhood_watch_check"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        return False
+    return True
+
+
 def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str, str]:
     name = (user_input.get(CONF_NAME) or "").strip()
     if not name:
@@ -554,6 +569,9 @@ def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str
         return {CONF_NAME: "name_pipe"}
     if not slugify(name):
         return {CONF_NAME: "name_letters"}
+    species = (user_input.get(CONF_SPECIES) or "cat").strip().lower()
+    if (user_input.get(CONF_SPRITE) or user_input.get(CONF_APPEARANCE)) and species != "cat":
+        return {CONF_SPRITE: "sprite_cats_only"}  # the sprites are all cats
     if user_input.get(CONF_PRIORITY) and user_input.get(CONF_ALWAYS_STRICT):
         return {"base": "priority_not_strict"}  # its field sits in a folded section, so the form says it
     return {}
@@ -624,9 +642,12 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input = _flatten(user_input, CAMERA_SECTIONS)
             camera = self._camera_values[CONF_CAMERA]
-            slug = slugify(user_input[CONF_NAME])
+            slug = slugify(user_input.get(CONF_NAME) or "")
             taken = {c[CONF_SLUG] for c in self._cameras.values()}
-            if not slug:
+            if user_input.get("skip"):
+                self._camera_values = {}  # picked by mistake: not set up
+                user_input = None
+            elif not slug:
                 errors[CONF_NAME] = "name_required"
             elif slug in taken:
                 errors[CONF_NAME] = "name_taken"
@@ -642,7 +663,9 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         others = self._onboarding_cameras()
         return self.async_show_form(
             step_id="camera",
-            data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False),
+            data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False).extend(
+                {vol.Required("skip", default=False): BOOL}
+            ),
             description_placeholders={
                 "camera": _camera_label(self.hass, self._camera_values[CONF_CAMERA]),
                 **_sensors_note(self._camera_values),
@@ -1004,11 +1027,20 @@ class WatchOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="catch_alls", data_schema=vol.Schema(fields))
 
     async def async_step_training(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
             user_input.setdefault(CONF_DATASET_DIR, "")
-            return self._save(user_input)
-        values = self._values
+            folder = user_input[CONF_DATASET_DIR].strip()
+            if folder and user_input.get(CONF_DATASET):
+                if not Path(folder).is_absolute():
+                    errors[CONF_DATASET_DIR] = "folder_not_absolute"
+                elif not await self.hass.async_add_executor_job(_writable, folder):
+                    errors[CONF_DATASET_DIR] = "folder_unwritable"
+            if not errors:
+                return self._save(user_input)
+        values = {**self._values, **(user_input or {})}
         return self.async_show_form(
+            errors=errors,
             step_id="training",
             data_schema=vol.Schema(
                 {

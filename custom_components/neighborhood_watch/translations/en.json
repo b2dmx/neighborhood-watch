@@ -71,11 +71,13 @@
           "name": "Name",
           "triggers": "Start a check when any of these turn on",
           "skip_when": "Skip the check while any of these are on",
-          "ai_notes": "What the AI should know about this view"
+          "ai_notes": "What the AI should know about this view",
+          "skip": "Skip this camera"
         },
         "data_description": {
           "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
-          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet."
+          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet.",
+          "skip": "Picked by mistake? Turn this on and submit to leave it out."
         },
         "sections": {
           "timing": {
@@ -200,7 +202,8 @@
       "name_pipe": "Names cannot contain |.",
       "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
       "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo.",
-      "name_letters": "Use at least one letter or number in the name."
+      "name_letters": "Use at least one letter or number in the name.",
+      "sprite_cats_only": "Sprites are cats only. Clear Sprite (and Sprite, custom) for other animals."
     },
     "abort": {
       "no_ai_task": "Set up an AI Task integration first (for example Google Generative AI).",
@@ -560,7 +563,9 @@
       "missing_animals": "The instructions must contain {animals}.",
       "name_required": "Enter a name.",
       "name_taken": "That name is already used.",
-      "person_needed": "Pick their Person to use quiet zones."
+      "person_needed": "Pick their Person to use quiet zones.",
+      "folder_not_absolute": "Enter the full path, starting with /, e.g. /media/your_share/neighborhood_watch.",
+      "folder_unwritable": "That folder can't be created or written to. Check the path and that the share is connected."
     }
   },
   "config_subentries": {
@@ -706,7 +711,8 @@
         "name_pipe": "Names cannot contain |.",
         "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
         "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo.",
-        "name_letters": "Use at least one letter or number in the name."
+        "name_letters": "Use at least one letter or number in the name.",
+        "sprite_cats_only": "Sprites are cats only. Clear Sprite (and Sprite, custom) for other animals."
       },
       "abort": {
         "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
@@ -1061,6 +1067,12 @@
           "description": "Folders to move from. Empty: the default folder in the media folder."
         }
       }
+    }
+  },
+  "issues": {
+    "no_second_opinion": {
+      "title": "Neighborhood Watch needs a Second opinion model",
+      "description": "No Second opinion model is set. Without one, priority animals are never confirmed, and an animal marked Always strict or not seen for a while is never counted again. Add a different model under Settings → Devices & services → Neighborhood Watch → Configure → AI models."
     }
   }
 }

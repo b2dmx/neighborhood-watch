@@ -1012,3 +1012,14 @@ async def test_unknown_cats_keep_their_coat(hass, watch):
     assert (seen["pattern"], seen["base"]) == ("striped", "grey")
     assert seen["description"].startswith("orange tabby")
     assert seen["where"] and seen["last_seen"]
+
+
+async def test_missing_second_opinion_is_a_repairs_warning(hass, watch):
+    """Without a second opinion, priority and strict animals can't be confirmed: Repairs says so."""
+    from homeassistant.helpers import issue_registry as ir
+
+    entry = watch["entry"]
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "no_second_opinion") is None
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "second_opinion": []})
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "no_second_opinion") is not None

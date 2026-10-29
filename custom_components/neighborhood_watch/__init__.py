@@ -15,11 +15,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import config_validation as cv, device_registry as dr, issue_registry as ir
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_CAMERA, CONF_CAMERAS, DOMAIN, NAME
+from .const import CONF_CAMERA, CONF_CAMERAS, CONF_SECOND_OPINION, DOMAIN, NAME
 from .engine import AnimalConfig, CameraConfig, WatchEngine
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.IMAGE, Platform.SENSOR, Platform.SWITCH]
@@ -310,6 +310,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> boo
     watch.hub_device_id = hub.id
     await watch.async_start()
     entry.runtime_data = watch
+    # Without a second opinion, priority animals are never confirmed and strict or recently
+    # absent animals never counted: say so on the Repairs page.
+    if watch.animals and not entry.options.get(CONF_SECOND_OPINION):
+        ir.async_create_issue(
+            hass, DOMAIN, "no_second_opinion", is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key="no_second_opinion",
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, "no_second_opinion")
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
