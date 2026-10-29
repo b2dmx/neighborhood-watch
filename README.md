@@ -64,6 +64,6 @@ Add the **Neighborhood Watch** card to a dashboard. It installs itself.
 
 <p align="center">
   <a href="LICENSE">MIT</a> · <a href="https://ko-fi.com/goobis2dmx">Support on Ko-fi</a><br><br>
-  Neighborhood Watch v0.18.2 by Goobis<br>
+  Neighborhood Watch v0.19.0 by Goobis<br>
   AI was used to help develop this application
 </p>

@@ -683,7 +683,10 @@ class NeighborhoodWatchCard extends HTMLElement {
       const cropId = seen?.attributes?.photo_id;
       const look = seen?.attributes?.appearance;
       const ir = look && NWSprites.hasCollar(look) && this._ir?.[photo?.attributes?.entity_picture];
-      const sprite = look && { cat: { ...look, ...(ir ? { ir: true } : {}) }, ...(live ? { mode: "alert" } : {}) };
+      // Away lately: asleep for part of the time, more the longer it has been gone.
+      const awayDays = !live && absent?.state === "on" && seen ? (Date.now() - new Date(seen.state).getTime()) / 864e5 : NaN;
+      const mode = live ? { mode: "alert" } : awayDays >= 0 ? { mode: "sleep", share: NWSprites.sleepShare(awayDays) } : {};
+      const sprite = look && { cat: { ...look, ...(ir ? { ir: true } : {}) }, ...mode };
       const img = !hasPhoto
         ? `<div class="nophoto">${
             sprite
@@ -1167,6 +1170,87 @@ function idleFrames(o, wrapped = false) {
     [rest, jitter(1)],
   ].filter(Boolean);
 }
+// Asleep (an animal that has been away a while): eyes shut, the tail down on the ground
+// curled round the paws (tail 7), slow breathing, Zs drifting up from beside the head. Now
+// and then it wakes: yawns, unwraps the tail, runs through the idle moves, wraps the tail
+// again and dozes off. `share` is the part of the time spent asleep (0.5 to 0.95).
+const Z_COLOR = "#9aa6bf";
+const Z_GLYPHS = {
+  s: ["###", "..#", ".#.", "###"],
+  m: ["####", "...#", "..#.", ".#..", "####"],
+  l: ["#####", "...#.", "..#..", ".#...", "#####"],
+};
+function withZs(g, zs) {
+  const out = g.map((r) => r.slice());
+  for (const [size, x0, y0] of zs)
+    Z_GLYPHS[size].forEach((row, dy) => [...row].forEach((ch, dx) => ch === "#" && px(out, x0 + dx, y0 + dy, Z_COLOR)));
+  return out;
+}
+const sleeper = (o) => ({ ...o, tail: 7, pawUp: false });
+// Slumped: k rows taken out of the body below the neck (the rows most like the one under
+// them, never two together), everything above moved down, so the head and neck sink
+// without losing their shape.
+function slump(g, k = 2) {
+  const width = (y) => { const xs = g[y].map((c, x) => (c ? x : -1)).filter((x) => x >= 0 && x < 37); return xs.length ? xs[xs.length - 1] - xs[0] : 99; };
+  let neck = 22;
+  for (let y = 18; y <= 30; y++) if (width(y) < width(neck)) neck = y;
+  const differs = (y) => g[y].reduce((n, c, x) => n + (c !== g[y + 1][x] ? 1 : 0), 0);
+  const rows = [];
+  for (const y of Array.from({ length: 37 - (neck + 3) }, (_, i) => neck + 3 + i).sort((a, b) => differs(a) - differs(b) || a - b))
+    if (rows.length < k && !rows.some((r) => Math.abs(r - y) < 2)) rows.push(y);
+  const out = g.filter((_, y) => !rows.includes(y)).map((r) => r.slice());
+  while (out.length < N) out.unshift(Array(N).fill(null));
+  return out;
+}
+// Relaxed ears: above the crown (where the two ears are still apart) each ear leans out a pixel.
+function relaxEars(g) {
+  const out = g.map((r) => r.slice());
+  for (let y = 0; y < 20; y++) {
+    const row = g[y].slice(0, 37);
+    const xs = row.map((c, x) => (c ? x : -1)).filter((x) => x >= 0);
+    if (!xs.length) continue;
+    let gap = -1;
+    for (let x = xs[0]; x <= xs[xs.length - 1]; x++) if (!row[x] && x > 18 && x < 30) { gap = x; break; }
+    if (gap < 0) break; // reached the crown: the head is one piece from here down
+    for (let x = 0; x < 37; x++) out[y][x] = null;
+    for (let x = 0; x < 37; x++) if (row[x]) px(out, x < gap ? x - 1 : x + 1, y, row[x]);
+  }
+  return out;
+}
+function sleepLoop(o) {
+  const shut = relaxEars(slump(catGrid({ ...sleeper(o), blink: true }))), deep = breathe(shut, 36);
+  // One Z rises and grows, the next follows it up; each clear of the head and of the others.
+  const S = ["s", 38, 12], M = ["m", 40, 6], L = ["l", 43, 0];
+  const steps = [[S, M], [M, L], [L], [], [], [S]]; // starts with Zs showing (the still frame when motion is off)
+  return steps.map((zs, i) => [withZs(i % 2 ? deep : shut, zs), 1.1]);
+}
+function sleepCatFrames(o, share = 0.75) {
+  const s = sleeper(o), c = (f) => catGrid({ ...s, ...f });
+  const unwrap = o.tailWrap ? [] : wrapOut({ ...o, pawUp: false }), rewrap = o.tailWrap ? [] : wrapIn({ ...o, pawUp: false });
+  const wake = [
+    [c({ halfBlink: true }), 0.5],
+    [c({ yawn: 1 }), 0.25], [c({ yawn: 2 }), 1], [c({ yawn: 1 }), 0.25],
+    [c({}), 0.8],
+    ...unwrap,
+    ...idleCatFrames({ ...o, pawUp: false }),
+    ...rewrap,
+    [c({}), 0.6],
+    [c({ halfBlink: true }), 0.8],
+  ];
+  const awake = wake.reduce((t, [, d]) => t + d, 0);
+  const loop = sleepLoop(o), loopLen = loop.reduce((t, [, d]) => t + d, 0);
+  const share_ = Math.min(0.95, Math.max(0.5, share));
+  const n = Math.max(2, Math.round((awake * share_) / (1 - share_) / loopLen));
+  return [...Array.from({ length: n }, () => loop).flat(), ...wake];
+}
+// How much of the time an animal that is away lately sleeps: half once it counts as away,
+// three quarters after a month, nearly always after two months.
+function sleepShare(days) {
+  return days > 60 ? 0.95 : days > 30 ? 0.75 : 0.5;
+}
+function sleepCat(o, share) {
+  return animated(sleepCatFrames(o, share));
+}
 // On alert: ears up, tail straight up, wide eyes; still apart from a blink.
 function alertCat(o) {
   return animated(alertCatFrames(o));
@@ -1372,7 +1456,7 @@ function catGrid(o) {
       const pale = shade(fur, 1.45), band = shade(fur, 0.45);
       const ring = (x, y) => {
         const m = Math.min(x, 47 - x);
-        if (y < 23 || y > 41 || m > 18) return null;
+        if (y < 23 || y > (o.lightFeet ? 37 : 41) || m > 18) return null; // lightFeet: no dark bands on the feet
         const r = Math.hypot(m - 12.5, (y - 31.5) * 0.8);
         if (r < 1.5 || (r > 3 && r < 4.6) || (r > 6.2 && r < 7.6)) return "dark";
         if ((r >= 1.5 && r < 2.1) || (r >= 4.6 && r < 5.2)) return "pale";
@@ -1383,7 +1467,7 @@ function catGrid(o) {
       on((x, y) => y >= 23 && y <= 24 && Math.min(x, 47 - x) >= 15 && Math.min(x, 47 - x) <= 19, band); // a band over each shoulder
     } else if (o.tabbyBold) on((x, y) => y >= 23 && y <= 41 && (x <= 18 || x >= 29) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 < 2, st); // broader, unbroken flank stripes
     else on((x, y) => y >= 25 && y <= 40 && (x <= 17 || x >= 30) && Math.floor(y - 0.6 * Math.abs(x - cx)) % 4 === 0 && hash(Math.min(x, 47 - x), y) % 4 !== 0, st);
-    on((x, y) => (y === 36 || y === 39) && ((x >= 17 && x <= 21 && !o.lick && !o.pawUp) || (x >= 26 && x <= 30)), st); // barred legs (only a leg that is down, never across the belly)
+    on((x, y) => (y === 36 || (y === 39 && !o.lightFeet)) && ((x >= 17 && x <= 21 && !o.lick && !o.pawUp) || (x >= 26 && x <= 30)), st); // barred legs (only a leg that is down, never across the belly)
     if (taper && !o.tailTaper) on((x, y) => x >= 33 && isFur(g[y][x]) && ((x + 0.5 - 24) / (bodyRx * S)) ** 2 + ((y + 0.5 - bodyCy * S) / (bodyRy * S)) ** 2 > 1 && (() => { const t = tube(x, y); return t.d <= t.r + 0.5 && (t.f > 0.88 || t.s % 4 < 2); })(), st); // rings round the tail, a dark tip
     else on((x, y) => (x >= 36 || (x >= 34 && y <= 31)) && (y % 4 < 2 || y <= 26), st); // tail rings, dark tip
   }
@@ -1518,9 +1602,31 @@ function catGrid(o) {
       const mid = mix(pale, fur, 0.5), edge = mix(pale, fur, 0.15);
       const nearSpot = (x, y) => [[0, 1], [0, -1]].some(([dx, dy]) => spotted(x + dx, y + dy));
       on(inBelly, (x, y) => (spotted(x, y) ? mid : nearSpot(x, y) ? edge : pale));
-    } else on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : pale)); // pale (spotted) belly, kept off the legs
+    } else {
+      // bellyFade: the belly's edge eased into the fur round it, not a hard line.
+      const edge = (x, y) => o.bellyFade && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !inBelly(x + dx, y + dy) && g[y + dy]?.[x + dx]);
+      // It also fades into the fur down the strip between the legs.
+      const fade = (y) => (o.bellyFade && y >= 34 ? Math.min(0.6, (y - 33) * 0.08) : 0);
+      on(inBelly, (x, y) => (!o.plainBelly && spotted(x, y) ? spot : edge(x, y) ? mixHex(pale, fur, Math.max(0.45, fade(y))) : mixHex(pale, fur, fade(y)))); // pale (spotted) belly, kept off the legs
+    }
+    // lightFeet: the front paws and back feet tan like the foot of the belly, keeping their shading.
+    if (o.lightFeet) on((x, y) => y >= 40 && y <= 43 && x >= 10 && x <= 37 && !inBelly(x, y) && g[y][x], (x, y) => mixHex(g[y][x], pale, 0.5));
+    // neckFade: a pale throat running from the chin down into the belly, fading as it goes
+    // and darker at its sides.
+    if (o.neckFade)
+      on((x, y) => y >= 22 && y < t && (Math.abs(x + 0.5 - 24) <= 2 || (y === 22 && Math.abs(x + 0.5 - 24) <= 3)), (x, y) => {
+        const side = Math.abs(x + 0.5 - 24) > 1, k = 0.15 + (y - 22) * 0.05;
+        return mixHex(pale, fur, Math.min(0.8, side ? k + 0.4 : k));
+      });
   }
-  if (o.whiteChest) on((x, y) => bare(x, y) || between(x, y) && y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24), WHITE); // white chest, down the belly between the legs
+  if (o.whiteChest) {
+    const chest = (x, y) => bare(x, y) || between(x, y) && y >= 24 && (y <= 32 ? ((x - cx) ** 2) / 20 + ((y - 29) ** 2) / 30 <= 1 : x >= 23 && x <= 24);
+    // softChest: the white eased into the fur at its edge, and greying down between the legs
+    // (as a paler belly does), so it isn't stark against the inside of the front legs.
+    const edge = (x, y) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => !chest(x + dx, y + dy) && g[y + dy]?.[x + dx]);
+    const soft = (x, y) => (y >= 31 ? mixHex(WHITE, fur, y >= 38 ? 0.42 : y >= 34 ? 0.32 : 0.2) : edge(x, y) ? mixHex(WHITE, fur, 0.3) : WHITE);
+    on(chest, o.softChest ? soft : WHITE); // white chest, down the belly between the legs
+  }
   for (const [colour, runs] of o.marks || []) {
     const set = new Set();
     for (const row of String(runs).split(";")) {
@@ -1887,6 +1993,7 @@ function catGrid(o) {
         const s2 = along(x, y);
         if (o.calico && Math.floor(s2 / 2) % 3 === 1) tg[y][x] = "#c9935c";
         else if (o.bandedTail && o.ringPeriod && (s2 > wTotal * 0.9 || (s2 > 9 && s2 % o.ringPeriod < 1))) tg[y][x] = band;
+        else if (o.tabby && !o.bandedTail && (s2 > wTotal * 0.86 || s2 % 4 < 2)) tg[y][x] = o.tabbyDark || shade(fur, 0.45); // tabby rings and a dark tip, as on the raised tail
       }
     outline(tg, line);
     zLayer = { tg: tg.map((r) => r.slice()), along, wp };
@@ -2868,6 +2975,11 @@ function midTone(hex) {
   return l > 0.2 && l < 0.8;
 }
 // A colour made lighter (k > 1) or darker (k < 1).
+// a blended k of the way towards b (both #rrggbb).
+function mixHex(a, b, k) {
+  const p = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)), [A, B] = [p(a), p(b)];
+  return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, "0")).join("");
+}
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16);
   const ch = (v) => Math.max(0, Math.min(255, Math.round(v * k))).toString(16).padStart(2, "0");
@@ -2883,8 +2995,8 @@ const SPRITE_PRESETS = {
   calico_collar: { detail: true, small: true, fur: "#f1ece3", calico: true, collar: "#3f9a55", bell: true, ears: "#c9935c", rightEar: "#323034", eyes: "#b5b648", mouth: "#7a6a62" },
   grey_chest_spot: { detail: true, small: true, fur: "#7f7e7b", chestPatch: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#6e6d6a" },
   longhair_tuxedo: { detail: true, fur: "#1d1d20", tuxedo: true, fluffy: true, whiteBackPaws: true, marks: [["#0e0e10", "39:29-30;40:29-30"], ["#f1ece3", "33:28-30;34:27-30;35:26-30;36:26-30;37:26-30;38:26-30;39:26-30;40:26-30;41:26-30;42:26-30;43:26-30"]], tailTaper: [3, 1.1], outline: "#000", mouth: "#888", tailFix: { 6: { line: "39:37;40:38" }, 7: { line: "39:37", under: "40:30" }, 8: { under: "40:29-30", fur: "41:29" }, 9: { line: "39:32-33,37;40:31", under: "38:30-33;39:30-31" } } },
-  brown_tabby: { detail: true, small: true, fur: "#3b281e", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#1e1410", mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
-  charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true },
+  brown_tabby: { detail: true, small: true, fur: "#3e3029", ears: "#201915", innerEar: "#6a4f3d", tabby: true, classicTabby: true, tabbyBold: true, tabbyDark: "#201915", bellyFade: true, lightFeet: true, neckFade: true, mouth: "#1a1210", pale: "#6a4f3d", spottedBelly: true, plainBelly: true, eyeliner: "#6a4f3d", rimTop: true },
+  charcoal_white_chest: { detail: true, grow: true, tailW: 1.5, fur: "#5a5856", whiteBackPaws: true, whiteBackLegs: true, whiteChest: true, softChest: true },
   black: { detail: true, small: true, slim: true, fur: "#1d1d20", outline: "#000", mouth: "#888" },
   smoky_banded_tail: { detail: true, slim: true, shoulderLean: false, pixels: [[30, 26, "#69615a"], [30, 28, "#3a3532"], [31, 28, "#69615a"], [31, 30, "#3a3532"], [14, 4, "#a89b90"], [14, 5, "#a89b90"], [14, 6, "#a89b90"], [14, 7, "#a89b90"], [14, 8, "#a89b90"], [14, 9, "#a89b90"], [14, 10, "#a89b90"], [33, 4, "#a89b90"], [33, 5, "#a89b90"], [33, 6, "#a89b90"], [33, 7, "#a89b90"], [33, 8, "#a89b90"], [33, 9, "#a89b90"], [33, 10, "#a89b90"], [20, 11, "#a89b90"], [27, 11, "#a89b90"], [14, 13, "#a89b90"], [15, 13, "#a89b90"], [32, 13, "#a89b90"], [33, 13, "#a89b90"], [22, 22, "#a29a92"], [23, 22, "#b0a8a0"], [24, 22, "#b0a8a0"], [25, 22, "#a29a92"], [18, 22, "#534c46"], [19, 22, "#534c46"], [20, 22, "#534c46"], [27, 22, "#534c46"], [28, 22, "#534c46"], [29, 22, "#534c46"], [21, 22, "#7f7770"], [26, 22, "#7f7770"]], leftLegPixels: [[17, 26, "#69615a"], [17, 28, "#3a3532"], [16, 28, "#69615a"], [16, 30, "#3a3532"]], softSpots: true, bellyPale: "#bbb3aa", tearMarks: true, mouth: "#8d7f78", legBars: [31, 34, 37], tall: 2, bellyDrop: 3, shoulders: true, contrast: true, tailW: 1.5, fur: "#69615a", pale: "#e8e3dc", faintTabby: true, bandedTail: true, rings: 10, ringPeriod: 3, ringColor: "#49433c", spottedBelly: true, eyeliner: "#ddd7cf", paleMuzzle: true, nose: "#c49088", innerEar: "#c49088", eyes: "#8a9a4e", eyeLow: "#b0a548", lidLine: "#3d3833", marks: [["#5a534c", "13:23-24;14:23-24;15:23-24;16:23-24"], ["#45403b", "11:20,27"], ["#5a534c", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-47;8:0-47;9:0-47;10:0-17,30-47;11:0-15,32-47;12:0-13,34-47;13:0-13,34-47;14:0-13,34-47"], ["#e8e3dc", "22:23-24"], ["#57504a", "24:13-17,30-34;25:18-21,26-29"], ["#857d76", "26:22-25"], ["#9a928a", "23:21,26"], ["#c9c2b9", "23:22-25"], ["#a29a92", "24:22,25"], ["#b8b0a8", "24:23-24"], ["#8c847d", "25:22,25;26:22,25;27:22,25"], ["#a8a098", "25:23-24;26:23-24;27:23-24"], ["#918982", "28:22,25"], ["#7f7770", "29:22,25"], ["#aea69e", "28:23-24;29:23-24"], ["#b6aea6", "30:23-24;31:23-24"], ["#45403b", "15:16,31;16:14-15,32-33"]] },
   bicolour_mask_paw_up: { detail: true, short: true, jawUp: 1, pixels: [[25, 10, "#1d1d20"], [26, 10, "#1d1d20"], [14, 16, "#1d1d20"], [24, 12, "#f1ece3"], [24, 13, "#f1ece3"], [30, 13, "#f1ece3"], [31, 13, "#f1ece3"], [30, 14, "#f1ece3"], [31, 14, "#f1ece3"], [22, 16, "#f1ece3"], [22, 17, "#f1ece3"], [27, 19, "#f1ece3"]], fur: "#f1ece3", tailW: 0.75, tailWrap: true, sides: "#1d1d20", tailColor: "#1d1d20", cuffs: "#1d1d20", pawUp: true, small: true, ears: "#1d1d20", nose: "#2a2324", eyes: "#b9a843", mouth: "#7a6a62", marks: [["#1d1d20", "0:0-47;1:0-47;2:0-47;3:0-47;4:0-47;5:0-47;6:0-47;7:0-23,27-47;8:0-23,28-47;9:0-23,29-47"], ["#1d1d20", "10:30-47;11:30-47;12:30-31,33-47;13:30-31,33-47"], ["#1d1d20", "10:17-20;11:16-21;12:15-22;13:14-22;14:14-22;15:15-22"], ["#1d1d20", "10:0-23;11:0-23;12:0-23"], ["#1d1d20", "15:23-26;16:22-28;17:22-28;18:21-28;19:21-27;20:21-26;21:22-25;22:23-24"], ["#1d1d20", "7:24-26;8:24-26;9:24,27;10:24,28-29;11:24,29;12:24;13:23;14:23-26;16:16-17,21"], ["#1d1d20", "14:18-19;15:18-20"], ["#1d1d20", "36:31-47;37:31-47;38:31-47;39:31-47;40:31-47"]] },
@@ -2899,14 +3011,20 @@ function spriteFrames(spec) {
   const key = JSON.stringify(spec);
   if (!SPRITE_FRAMES.has(key)) {
     let frames = [];
-    if (spec.cat) frames = spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat)) : idleCatFrames(spriteLook(spec.cat));
+    if (spec.cat)
+      frames =
+        spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat))
+        : spec.mode === "sleep" ? sleepCatFrames(spriteLook(spec.cat), spec.share)
+        : idleCatFrames(spriteLook(spec.cat));
     else if (spec.wild && WILD[spec.wild]) {
       const make = WILD[spec.wild];
       frames = idleWildFrames(make, spec.wild); // wildlife has no alert pose: it just idles
       // Newly seen: it walks in first (a few steps), then idles.
       if (spec.mode === "walk") frames = [...[0, 1, 2].flatMap(() => walkerFrames(make)), ...frames];
     }
-    SPRITE_FRAMES.set(key, frames.map(([g, d]) => [spriteImage(g), d]));
+    const images = new Map(); // a long loop (sleep) repeats the same grids: convert each once
+    const image = (g) => images.get(g) || images.set(g, spriteImage(g)).get(g);
+    SPRITE_FRAMES.set(key, frames.map(([g, d]) => [image(g), d]));
     if (SPRITE_FRAMES.size > 200) SPRITE_FRAMES.delete(SPRITE_FRAMES.keys().next().value);
   }
   return SPRITE_FRAMES.get(key);
@@ -3040,5 +3158,5 @@ window.customCards.push({
   preview: true,
   documentationURL: "https://github.com/b2dmx/neighborhood-watch",
 });
-  return { mountSprites, isInfrared, spriteKind, hasCollar: (look) => !!spriteLook(look).collar };
+  return { mountSprites, isInfrared, spriteKind, sleepShare, hasCollar: (look) => !!spriteLook(look).collar };
 })();
