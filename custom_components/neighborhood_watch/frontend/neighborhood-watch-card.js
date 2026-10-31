@@ -1147,7 +1147,8 @@ function idleCatFrames(o) {
   const down = { ...o, pawUp: false };
   const shuffle = (t) => [[catGrid({ ...o, tail: t, pawShift: 1 }), 0.3], [catGrid({ ...o, tail: t }), 0.7], [catGrid({ ...o, tail: t, pawShift: 1 }), 0.25], [catGrid({ ...o, tail: t }), 0.5]];
   const lower = (t) => [[catGrid({ ...down, tail: t, lick: "up" }), 0.15]];
-  const up = [...idleFrames(o).slice(0, 14), ...shuffle(0), ...idleFrames(o).slice(14)];
+  const base = idleFrames(o);
+  const up = [...base.slice(0, 14), ...shuffle(0), ...base.slice(14)];
   if (!o.tailWrap) return [...up, ...lower(0), ...idleFrames(down), ...lower(0)];
   // With tailWrap the tail also spends a stretch curled round the paw: it wraps in, the paws
   // go down and up again with it wrapped, and it unwraps before the moves that swing it.
@@ -1303,7 +1304,25 @@ function alertCatFrames(o) {
   const a = catGrid({ ...o, alert: true });
   return [[a, jitter(2.4)], [catGrid({ ...o, alert: true, blink: true }), 0.18], [a, 1.2]];
 }
+// A loop asks for the same few poses over and over (and each pose for its tailless body), so
+// each is drawn once and shared: nothing may change a grid catGrid returned. During a dry run
+// (dryPoses set) a pose not drawn yet is only noted, and a blank grid stands in for it.
+const CAT_GRIDS = new Map();
+let dryPoses = null;
 function catGrid(o) {
+  const key = JSON.stringify(o);
+  let g = CAT_GRIDS.get(key);
+  if (g) return g;
+  if (dryPoses) {
+    dryPoses.set(key, o);
+    return grid();
+  }
+  g = drawCat(o);
+  CAT_GRIDS.set(key, g);
+  if (CAT_GRIDS.size > 400) CAT_GRIDS.delete(CAT_GRIDS.keys().next().value);
+  return g;
+}
+function drawCat(o) {
   const g = grid();
   const fur = o.fur, WHITE = "#f1ece3";
   const isFur = (c) => c === fur;
@@ -2389,7 +2408,7 @@ function catGrid(o) {
   // straight on down past the tail instead: the outline moves out to the tail and the old edge
   // pixel becomes the leg's fur, so it stays a single line.
   if (!o.noTail && !o.fluffy && !o.tailWrap) {
-    const bare = catGrid({ ...o, tail: 0, noTail: true });
+    const bare = catGrid({ ...o, tail: 0, noTail: true }).map((r) => r.slice()); // (changed below; the drawn one is shared)
     const re = (y) => { for (let x = N - 2; x > N / 2; x--) if (bare[y][x] === line && !bare[y][x + 1]) return x; return -1; };
     for (let y = 31; y < N - 1; y++) {
       const top = re(y - 1), e = re(y);
@@ -3129,16 +3148,24 @@ function spriteLook(look) {
   const { preset, ...own } = look || {};
   return { ...(SPRITE_PRESETS[preset] || {}), ...own };
 }
+const catFrames = (spec) =>
+  spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat))
+  : spec.mode === "sleep" ? sleepCatFrames(spriteLook(spec.cat), spec.share)
+  : idleCatFrames(spriteLook(spec.cat));
+// The frame a sprite rests on (the first of its loop), shown while the rest is being built.
+function restGrid(spec) {
+  if (spec.cat) {
+    const o = spriteLook(spec.cat);
+    return spec.mode === "alert" ? catGrid({ ...o, alert: true }) : spec.mode === "sleep" ? sleepLoop(o)[0][0] : catGrid({ ...o, tail: 0 });
+  }
+  return spec.wild && WILD[spec.wild] ? WILD[spec.wild]({ tail: 0 }) : null;
+}
 const SPRITE_FRAMES = new Map();
 function spriteFrames(spec) {
   const key = JSON.stringify(spec);
   if (!SPRITE_FRAMES.has(key)) {
     let frames = [];
-    if (spec.cat)
-      frames =
-        spec.mode === "alert" ? alertCatFrames(spriteLook(spec.cat))
-        : spec.mode === "sleep" ? sleepCatFrames(spriteLook(spec.cat), spec.share)
-        : idleCatFrames(spriteLook(spec.cat));
+    if (spec.cat) frames = catFrames(spec);
     else if (spec.wild && WILD[spec.wild]) {
       const make = WILD[spec.wild];
       frames = idleWildFrames(make, spec.wild); // wildlife has no alert pose: it just idles
@@ -3152,40 +3179,111 @@ function spriteFrames(spec) {
   }
   return SPRITE_FRAMES.get(key);
 }
+const RGB = new Map(); // "#rgb" or "#rrggbb" -> [r, g, b]
 function spriteImage(g) {
-  const img = new ImageData(N, N);
+  const img = new ImageData(N, N), d = img.data;
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
       const c = g[y][x];
       if (!c) continue;
-      const n = parseInt((c.length === 4 ? c.replace(/#(.)(.)(.)/, "#$1$1$2$2$3$3") : c).slice(1), 16);
+      let v = RGB.get(c);
+      if (!v) {
+        const n = parseInt((c.length === 4 ? c.replace(/#(.)(.)(.)/, "#$1$1$2$2$3$3") : c).slice(1), 16);
+        RGB.set(c, (v = [n >> 16, (n >> 8) & 255, n & 255]));
+      }
       const i = (y * N + x) * 4;
-      img.data[i] = n >> 16;
-      img.data[i + 1] = (n >> 8) & 255;
-      img.data[i + 2] = n & 255;
-      img.data[i + 3] = 255;
+      d[i] = v[0];
+      d[i + 1] = v[1];
+      d[i + 2] = v[2];
+      d[i + 3] = 255;
     }
   return img;
 }
+// A sprite's frames take a while to build the first time (a cat's loop has dozens of poses),
+// so they are built a few milliseconds at a time and the page never stalls: every waiting
+// sprite's resting frame first, then each loop in turn. For a cat a dry run lists the poses its
+// loop needs, each is drawn in a step of its own, and the real build then finds them all ready.
+const FIRSTS = [], BUILDS = [];
+let building = false;
+function buildWork() {
+  const until = performance.now() + 8;
+  while (performance.now() < until && (FIRSTS.length || BUILDS.length)) {
+    const job = FIRSTS.length ? FIRSTS.shift() : BUILDS[0];
+    if (job.cancelled) {
+      if (job === BUILDS[0]) BUILDS.shift();
+      continue;
+    }
+    try {
+      if (!job.shown) {
+        job.shown = true;
+        job.first();
+      } else if (job.steps.length) job.steps.shift()();
+      else {
+        BUILDS.shift();
+        job.done();
+      }
+    } catch (e) {
+      job.cancelled = true;
+    }
+  }
+  building = FIRSTS.length > 0 || BUILDS.length > 0;
+  if (building) setTimeout(buildWork, 0);
+}
+function buildLater(spec, first, done) {
+  const job = { first, done, shown: false, cancelled: false, steps: [] };
+  if (spec.cat)
+    job.steps.push(() => {
+      dryPoses = new Map();
+      try {
+        catFrames(spec);
+      } finally {
+        job.steps.unshift(...[...dryPoses.values()].map((o) => () => catGrid(o)));
+        dryPoses = null;
+      }
+    });
+  if (spec.mode === "walk") job.steps.push(() => spriteFrames({ ...spec, mode: "idle" }));
+  job.steps.push(() => spriteFrames(spec));
+  FIRSTS.push(job);
+  BUILDS.push(job);
+  if (!building) {
+    building = true;
+    setTimeout(buildWork, 0);
+  }
+  return job;
+}
 // Plays a sprite on a canvas until stopped; a walk-in plays once, then the idle loops.
 function playSprite(canvas, spec) {
-  const frames = spriteFrames(spec);
   const ctx = canvas.getContext("2d");
-  if (!frames.length || !ctx) return () => {};
-  const loopFrom = spec.mode === "walk" ? frames.length - spriteFrames({ ...spec, mode: "idle" }).length : 0;
-  // Held still (reduced motion), it shows its resting frame, never one caught mid-move.
-  let i = reducedMotion() ? loopFrom : spec.mode === "walk" ? 0 : Math.floor(Math.random() * frames.length);
+  if (!ctx) return () => {};
   let timer = null;
-  const step = () => {
+  const show = (img) => {
     ctx.clearRect(0, 0, N, N);
-    ctx.putImageData(frames[i][0], 0, 0);
-    if (reducedMotion()) return;
-    const wait = frames[i][1] * 1000;
-    i = i + 1 >= frames.length ? loopFrom : i + 1;
-    timer = setTimeout(step, wait);
+    ctx.putImageData(img, 0, 0);
   };
-  step();
-  return () => clearTimeout(timer);
+  const play = () => {
+    const frames = spriteFrames(spec);
+    if (!frames.length) return;
+    const loopFrom = spec.mode === "walk" ? frames.length - spriteFrames({ ...spec, mode: "idle" }).length : 0;
+    // Held still (reduced motion), it shows its resting frame, never one caught mid-move.
+    let i = reducedMotion() ? loopFrom : spec.mode === "walk" ? 0 : Math.floor(Math.random() * frames.length);
+    const step = () => {
+      show(frames[i][0]);
+      if (reducedMotion()) return;
+      const wait = frames[i][1] * 1000;
+      i = i + 1 >= frames.length ? loopFrom : i + 1;
+      timer = setTimeout(step, wait);
+    };
+    step();
+  };
+  if (SPRITE_FRAMES.has(JSON.stringify(spec))) {
+    play();
+    return () => clearTimeout(timer);
+  }
+  const job = buildLater(spec, () => { const g = restGrid(spec); if (g) show(spriteImage(g)); }, play);
+  return () => {
+    job.cancelled = true;
+    clearTimeout(timer);
+  };
 }
 // Mounts every sprite canvas under root (data-sprite holds its spec); returns a stop function.
 function mountSprites(root) {
