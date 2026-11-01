@@ -316,7 +316,15 @@ def pick_device(wanted: str) -> str:
         return wanted
     import torch  # noqa: PLC0415
 
-    return "xpu" if hasattr(torch, "xpu") and torch.xpu.is_available() else "cpu"
+    if not (hasattr(torch, "xpu") and torch.xpu.is_available()):
+        return "cpu"
+    try:  # the GPU is visible, but check it can really compute before relying on it
+        x = torch.ones(256, 256, device="xpu")
+        float((x @ x).sum().cpu())
+    except Exception as err:  # noqa: BLE001 - e.g. a driver too old for this torch
+        print(f"Intel GPU found but unusable ({err}); training on the CPU", flush=True)
+        return "cpu"
+    return "xpu"
 
 
 def export_openvino(best_pt: Path, imgsz: int, target: Path) -> Path:
@@ -425,22 +433,35 @@ def run(args: argparse.Namespace) -> int:
         # barely trained one): then train every epoch and keep the last.
         small = val_animals < 30
         entry["checkpoint"] = "last" if small else "best"
-        model = YOLO(start)
-        model.add_callback(
-            "on_fit_epoch_end",
-            lambda trainer: status(stage="training", epoch=min(trainer.epoch + 1, trainer.epochs), epochs=trainer.epochs),
-        )
-        status(stage="training", epoch=0, epochs=args.epochs)
         t0 = time.time()
-        model.train(
-            data=str(data_yaml), epochs=args.epochs, patience=0 if small else args.patience, imgsz=args.imgsz,
-            batch=args.batch, device=device, workers=loader_workers(), seed=0, deterministic=True,
-            project=str(tdir / "runs"), name=f"round-{n}", exist_ok=True, plots=False, verbose=False,
-            cache=False, amp=device not in ("cpu", "xpu"),
-            # A small dataset with few boxes per batch: Ultralytics' automatic choice (AdamW plus a
-            # 0.1 bias learning rate during warm-up, meant for SGD) blows the class scores up.
-            optimizer="AdamW", lr0=0.001, warmup_bias_lr=0.0,
-        )
+
+        def fit(on: str) -> YOLO:
+            model = YOLO(start)
+            model.add_callback(
+                "on_fit_epoch_end",
+                lambda trainer: status(stage="training", epoch=min(trainer.epoch + 1, trainer.epochs), epochs=trainer.epochs),
+            )
+            status(stage="training", epoch=0, epochs=args.epochs)
+            model.train(
+                data=str(data_yaml), epochs=args.epochs, patience=0 if small else args.patience, imgsz=args.imgsz,
+                batch=args.batch, device=on, workers=loader_workers(), seed=0, deterministic=True,
+                project=str(tdir / "runs"), name=f"round-{n}", exist_ok=True, plots=False, verbose=False,
+                cache=False, amp=on not in ("cpu", "xpu"),
+                # A small dataset with few boxes per batch: Ultralytics' automatic choice (AdamW plus a
+                # 0.1 bias learning rate during warm-up, meant for SGD) blows the class scores up.
+                optimizer="AdamW", lr0=0.001, warmup_bias_lr=0.0,
+            )
+            return model
+
+        try:
+            model = fit(device)
+        except Exception as err:  # a GPU failure mid-round shouldn't waste the week
+            if device == "cpu":
+                raise
+            print(f"Training on {device} failed ({err}); starting again on the CPU", flush=True)
+            entry["gpu_error"] = str(err)[:300]
+            device = entry["device"] = "cpu"
+            model = fit(device)
         entry["train_minutes"] = round((time.time() - t0) / 60, 1)
         best = Path(model.trainer.last if small else model.trainer.best)
         if not best.exists():

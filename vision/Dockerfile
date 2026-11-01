@@ -13,10 +13,10 @@ RUN apt-get update \
  && apt-get purge -y software-properties-common gpg-agent && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
-# Training (train.py) uses PyTorch + Ultralytics. CPU wheels by default: they're small and
-# always work. Intel GPU training: build with --build-arg TORCH_FLAVOR=xpu (several GB more);
-# train.py then picks "xpu" by itself when torch can see the GPU.
-ARG TORCH_FLAVOR=cpu
+# Training (train.py) uses PyTorch + Ultralytics. Intel GPU (xpu) wheels by default: train.py
+# uses the GPU when torch can see it and falls back to the CPU otherwise (NW_TRAIN_DEVICE=cpu
+# forces the CPU). --build-arg TORCH_FLAVOR=cpu builds a much smaller CPU-only image.
+ARG TORCH_FLAVOR=xpu
 RUN python3 -m venv /venv \
  && /venv/bin/pip install --no-cache-dir openvino numpy pillow aiohttp pyyaml \
  && /venv/bin/pip install --no-cache-dir torch==2.14.1 torchvision==0.29.1 \
