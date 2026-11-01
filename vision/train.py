@@ -11,8 +11,8 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    last promoted model.
 4. Score the model being served and the new one on the evaluation set, the way the service
    runs them (OpenVINO, tiles) at the integration's threshold. The new model is promoted
-   only if it misses fewer animals and false alarms don't more than double (or stay within
-   5% of the empty photos).
+   only if it misses fewer animals and makes at least 10% fewer mistakes in all (misses
+   plus false alarms).
 5. A promoted model is exported to OpenVINO in WORK/models/trained-<n>/ and named in
    WORK/models/current.txt; the service switches to it within a minute.
 
@@ -272,11 +272,11 @@ def metrics(scores: list[float], evals: list[Sample], threshold: float) -> dict:
 
 
 def better(before: dict, after: dict) -> bool:
+    """Fewer misses, and at least 10% fewer mistakes in all (misses plus false alarms)."""
     if not after["animals"]:
         return False
-    fewer_misses = after["misses"] < before["misses"]
-    alarms_ok = after["false_alarms"] <= 2 * before["false_alarms"] or after["false_alarms"] <= 0.05 * after["empty"]
-    return fewer_misses and alarms_ok
+    mistakes = lambda m: m["misses"] + m["false_alarms"]  # noqa: E731
+    return after["misses"] < before["misses"] and mistakes(after) <= 0.9 * mistakes(before)
 
 
 # ---- helpers ----------------------------------------------------------------------------
