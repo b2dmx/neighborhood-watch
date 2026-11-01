@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="custom_components/neighborhood_watch/brand/dark_icon@2x.png">
-    <img src="custom_components/neighborhood_watch/brand/icon@2x.png" width="140" alt="Neighborhood Watch logo">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.png">
+    <img src="docs/logo.png" height="168" alt="Neighborhood Watch logo">
   </picture>
 </p>
 
