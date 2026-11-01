@@ -1971,6 +1971,10 @@ class WatchEngine:
     def _detector_url(self) -> str:
         return (self.options.get(CONF_DETECTOR_URL) or "").strip().rstrip("/")
 
+    @property
+    def detector_url(self) -> str:
+        return self._detector_url()
+
     async def async_scan(self, folder: str, identify: bool = True, limit: int = 50) -> str:
         """Start a bulk scan of a folder on the detector's machine; returns the scan id.
 

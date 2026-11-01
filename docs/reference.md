@@ -233,6 +233,8 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
+**Where to see it:** the **Neighborhood Watch** page in Home Assistant's sidebar (admins only) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
+
 ### Training the detector on your photos
 
 MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [training data](#corrections-and-training-data)) and gets better every week:
@@ -252,8 +254,8 @@ Set it up by mounting the training-data folder into the container (see [`vision/
       TZ: Europe/Berlin     # your time zone; the schedule uses local time
 ```
 
-- **Schedule:** every Sunday from 13:00 local time (`NW_TRAIN_DAY`, `NW_TRAIN_HOUR`), when at least 100 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. `NW_TRAIN=0` turns it off. Training runs in a separate low-priority process, so detection stays responsive. It trains on the Intel GPU when the container can see one (`/dev/dri`), and on the CPU otherwise or if the GPU fails; `NW_TRAIN_DEVICE=cpu` forces the CPU. A round takes from tens of minutes to a few hours, depending on how many photos there are and which of the two it runs on. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
-- **Now:** `POST /train` starts a round (409 if one is running). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
+- **Schedule:** every Sunday from 13:00 local time, when at least 100 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. Change the day, hour, photo count, GPU or CPU, or turn it off on either page. The page's settings are kept in `work/settings.json`; `NW_TRAIN`, `NW_TRAIN_DAY`, `NW_TRAIN_HOUR`, `NW_TRAIN_MIN_NEW` and `NW_TRAIN_DEVICE` only set the defaults. Training runs in a separate low-priority process, so detection stays responsive. It trains on the Intel GPU when the container can see one (`/dev/dri`), and on the CPU otherwise or if the GPU fails. A round takes from tens of minutes to a few hours, depending on how many photos there are and which of the two it runs on. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
+- **Now:** **Train now** on either page, or `POST /train`, starts a round (409 if one is running). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. `GET /train/history` lists every round, `GET`/`POST /settings` read and change the settings. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
 - **Which model is in use:** `GET /health` shows `model` and `trained`. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
 
 ## Bulk scanning (photos and videos)

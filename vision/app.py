@@ -10,6 +10,9 @@ GET  /scan/<id>/frame/<n>      ->  a visit's best frame (JPEG)
 POST /scan/<id>/report {"names": {"<n>": {"animal", "confidence"}}}  ->  writes the report into the folder
 POST /train   ->  starts a training round now (409 if one is running)
 GET  /train   ->  training status and the last round's results
+GET  /train/history  ->  every round's results (without the photo id lists)
+GET  /settings       ->  the training settings; POST /settings {...} changes some of them
+GET  /               ->  a web page with all of the above
 
 Boxes are in pixels of the image that was sent. Labels: animal, person, vehicle (a trained
 model only has animal). Runs on an Intel GPU/NPU when the container can see /dev/dri,
@@ -42,14 +45,31 @@ DATASET = Path(os.environ.get("NW_DATASET", "/dataset"))
 SCANS: dict = {}
 KEEP_SCANS = 20  # finished scans (and their frames in WORK) kept; older ones are deleted
 
-# Weekly training (train.py) on the labelled photos in NW_DATASET; NW_TRAIN=0 turns it off.
-TRAIN = os.environ.get("NW_TRAIN", "1").strip().lower() not in ("0", "false", "no", "off")
+# Weekly training (train.py) on the labelled photos in NW_DATASET. The environment gives the
+# defaults (NW_TRAIN=0 turns it off); changes made on the web page or through POST /settings
+# are kept in WORK/settings.json and win over them.
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-_day = os.environ.get("NW_TRAIN_DAY", "sunday").strip().lower()
-TRAIN_DAY = int(_day) % 7 if _day.isdigit() else next((i for i, d in enumerate(_DAYS) if d.startswith(_day[:3])), 6)
-TRAIN_HOUR = int(os.environ.get("NW_TRAIN_HOUR", "13"))
+_DEVICES = ["auto", "cpu"]  # auto: the Intel GPU when torch can use it, otherwise the CPU
+
+
+def _day_name(value: str) -> str:
+    v = str(value).strip().lower()
+    if v.isdigit():
+        return _DAYS[int(v) % 7]
+    return next((d for d in _DAYS if v and d.startswith(v[:3])), "sunday")
+
+
+DEFAULTS = {
+    "train_enabled": os.environ.get("NW_TRAIN", "1").strip().lower() not in ("0", "false", "no", "off"),
+    "train_day": _day_name(os.environ.get("NW_TRAIN_DAY", "sunday")),
+    "train_hour": int(os.environ.get("NW_TRAIN_HOUR", "13")) % 24,
+    "train_device": "cpu" if os.environ.get("NW_TRAIN_DEVICE", "").strip().lower() == "cpu" else "auto",
+    "min_new": int(os.environ.get("NW_TRAIN_MIN_NEW", "100")),
+}
 TRAIN_DIR = WORK / "train"
 CURRENT = WORK / "models" / "current.txt"
+SETTINGS_FILE = WORK / "settings.json"
+UI_DIR = Path(__file__).parent
 
 # Memory: OpenVINO, the GPU driver and the compiled model (~500 MB together) live in a
 # separate detector process (worker.py), started on the first request and stopped after
@@ -188,7 +208,15 @@ def start_training(*args: str) -> bool:
         log = TRAIN_DIR / "train.log"
         if log.exists() and log.stat().st_size > 5_000_000:
             log.replace(TRAIN_DIR / "train.log.1")
-        env = {**os.environ, "NW_DATASET": str(DATASET), "NW_WORK": str(WORK), "NW_MODEL": str(MODEL_DIR)}
+        conf = settings()
+        env = {
+            **os.environ,
+            "NW_DATASET": str(DATASET),
+            "NW_WORK": str(WORK),
+            "NW_MODEL": str(MODEL_DIR),
+            "NW_TRAIN_DEVICE": "cpu" if conf["train_device"] == "cpu" else "",
+            "NW_TRAIN_MIN_NEW": str(conf["min_new"]),
+        }
         with log.open("a", encoding="utf-8") as fh:
             fh.write(f"\n=== {datetime.now().isoformat(timespec='seconds')} train.py {' '.join(args)}\n")
             fh.flush()
@@ -205,16 +233,71 @@ def start_training(*args: str) -> bool:
         return True
 
 
+def settings() -> dict:
+    """The training settings: the environment's defaults with the saved changes on top."""
+    saved = _read_json(SETTINGS_FILE, {})
+    saved = saved if isinstance(saved, dict) else {}
+    return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
+
+
+def _clean_settings(changes: dict) -> dict:
+    """Validated copies of the settings in changes; ValueError names a bad one."""
+    out: dict = {}
+    for key, value in changes.items():
+        if key == "train_enabled":
+            if not isinstance(value, bool):
+                raise ValueError("train_enabled must be true or false")
+            out[key] = value
+        elif key == "train_day":
+            if str(value).lower() not in _DAYS:
+                raise ValueError(f"train_day must be one of {', '.join(_DAYS)}")
+            out[key] = str(value).lower()
+        elif key in ("train_hour", "min_new"):
+            low, high = (0, 23) if key == "train_hour" else (1, 10000)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"{key} must be {low} to {high}")
+            out[key] = value
+        elif key == "train_device":
+            if value not in _DEVICES:
+                raise ValueError(f"train_device must be one of {', '.join(_DEVICES)}")
+            out[key] = value
+        else:
+            raise ValueError(f"unknown setting {key}")
+    return out
+
+
+_settings_lock = threading.Lock()
+
+
+def save_settings(changes: dict) -> dict:
+    clean = _clean_settings(changes)
+    with _settings_lock:
+        saved = _read_json(SETTINGS_FILE, {})
+        saved = {**(saved if isinstance(saved, dict) else {}), **clean}
+        WORK.mkdir(parents=True, exist_ok=True)
+        tmp = SETTINGS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(saved, indent=1), encoding="utf-8")
+        tmp.replace(SETTINGS_FILE)
+    return settings()
+
+
 def _schedule_training() -> None:
-    """Once on NW_TRAIN_DAY from NW_TRAIN_HOUR (local time; set TZ): train.py --if-needed,
-    which only trains when enough new confirmed photos arrived since the last round."""
+    """Once on the training day from the training hour (local time; set TZ): train.py
+    --if-needed, which only trains when enough new confirmed photos arrived since the last
+    round. The settings are read every minute, so changes apply without a restart."""
     done_on = None
-    while TRAIN:
+    while True:
         time.sleep(60)
-        now = datetime.now()
-        if now.weekday() == TRAIN_DAY and now.hour >= TRAIN_HOUR and done_on != now.date() and DATASET.is_dir():
-            if start_training("--if-needed"):
-                done_on = now.date()
+        conf, now = settings(), datetime.now()
+        if (
+            conf["train_enabled"]
+            and _DAYS[now.weekday()] == conf["train_day"]
+            and now.hour >= conf["train_hour"]
+            and done_on != now.date()
+            and DATASET.is_dir()
+            and start_training("--if-needed")
+        ):
+            done_on = now.date()
 
 
 def _read_json(path: Path, default):
@@ -304,11 +387,13 @@ async def train_start(_request: web.Request) -> web.Response:
 
 async def train_status(_request: web.Request) -> web.Response:
     history = _read_json(TRAIN_DIR / "history.json", [])
+    conf = settings()
     return web.json_response(
         {
             "running": training_running(),
-            "enabled": TRAIN,
-            "schedule": f"{_DAYS[TRAIN_DAY]} from {TRAIN_HOUR}:00",
+            "enabled": conf["train_enabled"],
+            "schedule": f"{conf['train_day']} from {conf['train_hour']}:00",
+            "settings": conf,
             "dataset": DATASET.is_dir(),
             "serving": _det.info.get("name"),
             "status": _read_json(TRAIN_DIR / "status.json", {}),
@@ -316,6 +401,43 @@ async def train_status(_request: web.Request) -> web.Response:
             "last": history[-1] if history else None,
         }
     )
+
+
+def _compact(entry: dict) -> dict:
+    """A history entry without the long photo id lists."""
+    out = dict(entry)
+    for key in ("before", "after"):
+        if isinstance(out.get(key), dict):
+            out[key] = {k: v for k, v in out[key].items() if not k.endswith("_ids")}
+    return out
+
+
+async def train_history(_request: web.Request) -> web.Response:
+    history = _read_json(TRAIN_DIR / "history.json", [])
+    return web.json_response([_compact(e) for e in history if isinstance(e, dict)])
+
+
+async def settings_get(_request: web.Request) -> web.Response:
+    return web.json_response({"settings": settings(), "days": _DAYS, "devices": _DEVICES})
+
+
+async def settings_set(request: web.Request) -> web.Response:
+    try:
+        changes = await request.json()
+        if not isinstance(changes, dict):
+            raise ValueError("send an object of settings")
+        conf = await asyncio.get_running_loop().run_in_executor(None, save_settings, changes)
+    except ValueError as err:
+        return web.json_response({"error": str(err)}, status=400)
+    return web.json_response({"settings": conf})
+
+
+async def ui_page(_request: web.Request) -> web.Response:
+    return web.FileResponse(UI_DIR / "ui.html", headers={"Cache-Control": "no-cache"})
+
+
+async def ui_font(_request: web.Request) -> web.Response:
+    return web.FileResponse(UI_DIR / "GoogleSans.woff2", headers={"Cache-Control": "public, max-age=31536000"})
 
 
 def _detect_bytes(data: bytes) -> tuple[list[dict], int, int, int]:
@@ -446,6 +568,11 @@ def make_app() -> web.Application:
             web.post("/scan/{id}/report", scan_report),
             web.post("/train", train_start),
             web.get("/train", train_status),
+            web.get("/train/history", train_history),
+            web.get("/settings", settings_get),
+            web.post("/settings", settings_set),
+            web.get("/", ui_page),
+            web.get("/GoogleSans.woff2", ui_font),
         ]
     )
     return app

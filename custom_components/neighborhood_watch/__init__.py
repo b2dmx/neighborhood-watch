@@ -32,7 +32,10 @@ LEVELS = vol.In(["high", "medium", "low"])
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    from .panel import async_register_panel  # noqa: PLC0415
+
     await _register_card(hass)
+    await async_register_panel(hass, str((await async_get_integration(hass, DOMAIN)).version))
     if getattr(hass, "http", None) is not None:
         from .views import FrameView  # noqa: PLC0415
 

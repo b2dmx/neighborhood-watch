@@ -1023,3 +1023,40 @@ async def test_missing_second_opinion_is_a_repairs_warning(hass, watch):
     hass.config_entries.async_update_entry(entry, options={**entry.options, "second_opinion": []})
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, "no_second_opinion") is not None
+
+
+async def test_panel_reads_and_changes_the_vision_service(hass, watch, aioclient_mock, hass_ws_client):
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "neighborhood_watch/vision"})
+    answer = await ws.receive_json()
+    assert answer["result"]["error"]["code"] == "not_configured"
+
+    await _with_detector(hass, watch, "shadow", aioclient_mock)
+    aioclient_mock.get("http://vision:8765/health", json={"ok": True, "device": "GPU", "model": "trained-1"})
+    aioclient_mock.get("http://vision:8765/train", json={"running": False, "settings": {"train_device": "auto"}})
+    aioclient_mock.get("http://vision:8765/train/history", json=[{"round": 1, "promoted": True}])
+    aioclient_mock.post("http://vision:8765/settings", json={"settings": {"train_device": "cpu"}})
+    aioclient_mock.post("http://vision:8765/train", status=409, json={"error": "a training round is already running"})
+    await ws.send_json({"id": 2, "type": "neighborhood_watch/vision"})
+    result = (await ws.receive_json())["result"]
+    assert result["health"]["device"] == "GPU" and result["history"][0]["round"] == 1 and "error" not in result
+
+    await ws.send_json({"id": 3, "type": "neighborhood_watch/vision/settings", "changes": {"train_device": "cpu"}})
+    assert (await ws.receive_json())["result"]["settings"]["train_device"] == "cpu"
+    sent = next(c for c in aioclient_mock.mock_calls if c[0] == "POST" and str(c[1]).endswith("/settings"))
+    assert sent[2] == {"train_device": "cpu"}
+
+    await ws.send_json({"id": 4, "type": "neighborhood_watch/vision/train"})
+    answer = await ws.receive_json()
+    assert not answer["success"] and "already running" in answer["error"]["message"]
+
+
+async def test_panel_handles_an_older_vision_service(hass, watch, aioclient_mock, hass_ws_client):
+    await _with_detector(hass, watch, "shadow", aioclient_mock)
+    aioclient_mock.get("http://vision:8765/health", json={"ok": True, "device": "CPU", "model": "megadetector"})
+    aioclient_mock.get("http://vision:8765/train", json={"running": False, "enabled": True, "schedule": "sunday from 13:00"})
+    aioclient_mock.get("http://vision:8765/train/history", status=404, text="404: Not Found")
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "neighborhood_watch/vision"})
+    result = (await ws.receive_json())["result"]
+    assert result["outdated"] and "error" not in result and result["health"]["model"] == "megadetector"
