@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.png">
-    <img src="docs/logo.png" height="168" alt="Neighborhood Watch logo">
+    <img src="docs/logo.png" height="120" alt="Neighborhood Watch">
   </picture>
 </p>
-
-<h1 align="center">Neighborhood Watch</h1>
 
 <p align="center"><b>Know which animal is outside, using the cameras you already have.</b></p>
 
