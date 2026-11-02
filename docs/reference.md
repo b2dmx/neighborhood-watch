@@ -62,7 +62,7 @@ Onboarding walks through:
 Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Missing mode and critical sound**, **Mutes** and **Quiet zones and hours**; for an animal: **Card picture and tips**, **Alerts and strictness** and **Last seen**):
 
 - **Cameras**. Besides its sensors and cooldowns, a camera has:
-  - **Never ring through silent mode here for**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
+  - **Never ring through silent mode here for**: while its **Critical alerts for anything here** switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
 - **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Ring through silent mode at** (see [Alerts](#alerts)).
@@ -87,12 +87,12 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | AI models | First look, second opinion, paid models; optional busy hours for the first model (see [AI models](#ai-models)) |
 | Advanced → AI instructions | Notes for the AI (all cameras), common visitors (hints, not a limit), reference photos (on), recently absent after 14 days, the AI instructions (with placeholders; empty follows the built-in default) |
 | Advanced → Saved photos | Save checked photos (on; needed for Review); folder (media folder, or a NAS share); keep at most 5 GB |
-| Advanced → Local detector | Address (empty: off); mode (Test only); how sure the detector must be (0.2). See [Local detector](#local-detector-optional) |
+| Advanced → Local detector | Address (empty: off; checked when you save); mode (Test only); how sure the detector must be (0.2). See [Local detector](#local-detector-optional) |
 
 ### AI models
 
 - **First look** runs on every sighting. Its models are tried in order until one answers.
-- **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, or came from a backup and names an animal. Its models are tried in order too.
+- **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, or came from a backup and names an animal. Its models are tried in order too, and must differ from the First look ones (a model rarely disagrees with itself).
 - **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer.
 - **Save the first model for busy hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
 
@@ -112,8 +112,8 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 After setup, a **Neighborhood Watch** page appears in Home Assistant's sidebar (admins only). It has everything in one place, by topic:
 
 - **Review:** the sightings waiting for your answer, the same list as the card's To review section.
-- **Cameras, Animals, People:** a list of each. Open one to change it, or add a new one.
-- **Alerts, AI, Detector:** all the other settings, plus the local detector's status, training and past rounds.
+- **Cameras, Animals, People:** a list of each. Open one to change it, add a new one, or remove it (**Remove camera**, **Remove person**, **Remove animal**; each asks first). A camera's or animal's page starts with its **Critical alerts** switch, and the Animals tab has the ones for pests, unknown animals, other wildlife and unsure motion, so they're next to the cameras they ring at. An animal's page also draws its card picture as you pick a look.
+- **Alerts, AI, Detector:** all the other settings, plus the local detector's status, training and past rounds, and how often it agreed with the AI this week.
 
 These are the same settings as **Configure** and **Add animal** on the integration page, with the same checks and explanations. A change in one shows in the other.
 
@@ -152,7 +152,7 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 | Animal | What it is seeing now (clears after the on-camera window), or "None" |
 | Last detection | The last result, with both AI answers, the models used and the time |
 | Last frame | The frame the AI last judged |
-| Critical alerts | A switch: anything seen here rings through silent mode, except the animals on the camera's page |
+| Critical alerts for anything here | A switch: anything seen here rings through silent mode, except the animals on the camera's page |
 
 ### Overall
 
@@ -243,6 +243,8 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 
 - **Test only:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
+
+The address is checked when you save it: if the service doesn't answer at `<address>/health`, the form says so.
 
 **Where to see it:** the **Detector** tab of the [Neighborhood Watch page](#the-neighborhood-watch-page) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
 

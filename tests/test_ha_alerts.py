@@ -112,7 +112,7 @@ async def test_switches_exist_where_they_should(hass, watch):
                       "switch.luna_missing_mode", "switch.milo_missing_mode"):
         assert hass.states.get(entity_id) is not None, entity_id
     for entity_id in ("switch.neighborhood_watch_pests_critical_alerts", "switch.milo_critical_alerts",
-                      "switch.garage_critical_alerts", "switch.neighborhood_watch_unknown_animals_critical_alerts",
+                      "switch.garage_critical_alerts_for_anything_here", "switch.neighborhood_watch_unknown_animals_critical_alerts",
                       "switch.neighborhood_watch_unsure_motion_critical_alerts"):
         assert hass.states.get(entity_id).state == "off", entity_id  # every critical switch starts off
     assert hass.states.get("switch.raccoon_alerts") is None  # no switches per wild animal
@@ -134,7 +134,7 @@ async def test_critical_switch_rings_only_at_its_cameras(hass, watch, freezer):
 
 
 async def test_critical_camera_rings_for_anything_except_listed(hass, watch, freezer):
-    await switch(hass, "switch.garage_critical_alerts", True)
+    await switch(hass, "switch.garage_critical_alerts_for_anything_here", True)
     watch["ai"].say(FIRST, "Milo|high|na|na|", "Luna|high|blotchy|white|")
     watch["ai"].say(SECOND, "Luna|high|blotchy|white|")
     await trigger(hass, "garage")
@@ -172,7 +172,7 @@ async def test_alerts_switch_off_but_critical_still_rings(hass, watch, freezer):
     watch["ai"].say(FIRST, "Milo|high|na|na|", "Milo|high|na|na|")
     await trigger(hass, "yard")
     assert watch["sent"] == []
-    await switch(hass, "switch.garage_critical_alerts", True)
+    await switch(hass, "switch.garage_critical_alerts_for_anything_here", True)
     await trigger(hass, "garage")
     assert level(to(watch["sent"], "bo")[-1]) == "critical"
 
@@ -230,7 +230,7 @@ async def test_catch_all_critical_switch(hass, watch):
 
 async def test_person_critical_switch_turns_their_critical_alerts_normal(hass, watch):
     await switch(hass, "switch.neighborhood_watch_bo_gets_critical_alerts", False)
-    await switch(hass, "switch.garage_critical_alerts", True)
+    await switch(hass, "switch.garage_critical_alerts_for_anything_here", True)
     watch["ai"].say(FIRST, "Milo|high|na|na|")
     await trigger(hass, "garage")
     assert level(to(watch["sent"], "bo")[-1]) == "active"

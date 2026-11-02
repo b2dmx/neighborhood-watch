@@ -7,6 +7,7 @@ people are managed under Configure → Cameras / People.
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from collections.abc import Mapping
@@ -17,6 +18,8 @@ try:  # Home Assistant 2026.10 replaced voluptuous with probatio (same API).
     import probatio as vol
 except ImportError:  # pragma: no cover - older Home Assistant
     import voluptuous as vol
+
+import aiohttp
 
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -30,6 +33,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
     DateTimeSelector,
@@ -330,7 +334,19 @@ def _schedule_schema(values: Mapping[str, Any]) -> vol.Schema:
 def _validate_models(user_input: Mapping[str, Any]) -> dict[str, str]:
     if not user_input.get(CONF_FIRST_LOOK):
         return {CONF_FIRST_LOOK: "first_look_required"}
+    if set(user_input[CONF_FIRST_LOOK]) & set(user_input.get(CONF_SECOND_OPINION) or []):
+        return {CONF_SECOND_OPINION: "same_model"}
     return {}
+
+
+async def _detector_answers(hass: HomeAssistant, url: str) -> bool:
+    """The vision service at `url` answers its health check."""
+    try:
+        async with asyncio.timeout(10):
+            response = await async_get_clientsession(hass).get(f"{url}/health")
+            return response.status < 400
+    except (TimeoutError, aiohttp.ClientError, ValueError):
+        return False
 
 
 def suggest_camera(hass: HomeAssistant, camera_entity: str) -> dict[str, Any]:
@@ -910,6 +926,13 @@ class WatchOptionsFlow(OptionsFlow):
             elif slug in taken or name_slug in taken:
                 errors[CONF_NAME] = "name_taken"
             else:
+                moved = user_input.get(CONF_CAMERA)
+                if editing and moved and moved != current[CONF_CAMERA]:
+                    # Another camera: its own device's sensors, unless they were picked by hand.
+                    suggested = suggest_camera(self.hass, moved)
+                    for key in (CONF_TRIGGERS, CONF_SKIP_WHEN):
+                        if list(user_input.get(key) or []) == list(current.get(key) or []):
+                            user_input[key] = suggested[key]
                 cams[editing or uuid4().hex] = _camera_data(
                     user_input, slug, user_input.get(CONF_CAMERA) or current[CONF_CAMERA]
                 )
@@ -1125,11 +1148,17 @@ class WatchOptionsFlow(OptionsFlow):
         )
 
     async def async_step_detector(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            user_input.setdefault(CONF_DETECTOR_URL, "")
-            return self._save(user_input)
-        values = self._values
+            url = (user_input.get(CONF_DETECTOR_URL) or "").strip().rstrip("/")
+            user_input[CONF_DETECTOR_URL] = url
+            if url and not await _detector_answers(self.hass, url):
+                errors[CONF_DETECTOR_URL] = "detector_unreachable"
+            else:
+                return self._save(user_input)
+        values = {**self._values, **(user_input or {})}
         return self.async_show_form(
+            errors=errors,
             step_id="detector",
             description_placeholders={"example": "http://nas.local:8765"},
             data_schema=vol.Schema(

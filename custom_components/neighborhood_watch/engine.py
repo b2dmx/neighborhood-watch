@@ -1976,6 +1976,12 @@ class WatchEngine:
     def detector_url(self) -> str:
         return self._detector_url()
 
+    def detector_week(self) -> list[dict[str, Any]]:
+        """The detector's answers compared with the AI's over the last 7 days."""
+        since = dt_util.utcnow() - timedelta(days=7)
+        rows = self.data.get("detector", {}).get("log", [])
+        return [r for r in rows if (_dt(r.get("time")) or since) >= since]
+
     async def async_scan(self, folder: str, identify: bool = True, limit: int = 50) -> str:
         """Start a bulk scan of a folder on the detector's machine; returns the scan id.
 

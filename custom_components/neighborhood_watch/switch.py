@@ -1,7 +1,7 @@
 """Quick on/off switches, all starting off except Alerts.
 
 Each named animal: Alerts, Critical alerts (rings through silent mode at its
-critical cameras) and Missing mode. Each camera: Critical alerts
+critical cameras) and Missing mode. Each camera: Critical alerts for anything here
 (anything there rings, except the animals its page lists). The hub: Critical alerts for
 unknown animals, other wildlife and unsure motion, and one per person: gets critical alerts
 (starts on)."""
@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import WatchConfigEntry
 from .const import BUILTIN_KEYS
-from .engine import RecipientConfig, WatchEngine, builtin_switch_key
+from .engine import CameraConfig, RecipientConfig, WatchEngine, builtin_switch_key
 from .entity import WatchEntity, phone_device
 
 
@@ -33,7 +33,7 @@ async def async_setup_entry(
         ]
         async_add_entities(entities, config_subentry_id=subject.subentry_id)
     for cam in watch.cameras.values():
-        async_add_entities([CriticalAlerts(watch, "critical_alerts", camera=cam)])
+        async_add_entities([CameraCritical(watch, cam)])
     # The catch-alls (unknown animals, other wildlife, unsure motion) live on the hub.
     async_add_entities([CatchAllCritical(watch, f"{key}_critical") for key in BUILTIN_KEYS.values()])
     for person in watch.recipients:
@@ -86,6 +86,14 @@ class CriticalAlerts(WatchEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.watch.async_set_critical(self._key, False)
+
+
+class CameraCritical(CriticalAlerts):
+    """Named apart from an animal's, as it covers everything seen at the camera."""
+
+    def __init__(self, watch: WatchEngine, camera: CameraConfig) -> None:
+        super().__init__(watch, "critical_alerts", camera=camera)  # keeps the unique id
+        self._attr_translation_key = "camera_critical"
 
 
 class CatchAllCritical(CriticalAlerts):

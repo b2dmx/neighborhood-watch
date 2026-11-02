@@ -292,9 +292,7 @@ class DetectorAgreement(WatchEntity, SensorEntity):
     _rows: list[dict[str, Any]] = []
 
     def _refresh(self) -> None:
-        since = dt_util.utcnow() - timedelta(days=7)
-        rows = self.watch.data.get("detector", {}).get("log", [])
-        self._rows = [r for r in rows if (_dt(r.get("time")) or since) >= since]
+        self._rows = self.watch.detector_week()
 
     @property
     def native_value(self) -> float | None:

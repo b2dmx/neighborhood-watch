@@ -98,7 +98,7 @@
       },
       "animal": {
         "title": "Animals",
-        "description": "Describe each animal the AI should recognise, one per page. {count} added so far.\n\n**Done? Leave Name empty and press Submit.** You can add more later with Add animal.\n\n{notes}",
+        "description": "Describe each animal the AI should recognise, one per page. {count} added so far.\n\n**Done? Leave Name empty and press Submit.** You can add more later with Add animal. Everything can be changed later on the Neighborhood Watch page in the sidebar (admins), or under Configure.\n\n{notes}",
         "data": {
           "name": "Name",
           "species": "Species",
@@ -190,7 +190,8 @@
       "name_letters": "Use at least one letter or number in the name.",
       "sprite_cats_only": "Card pictures are cats only. Clear Picture on the card and Advanced: custom card picture, or set Species to Cat.",
       "appearance_not_settings": "Use setting: value lines, e.g. fur: \"#d0813f\" and tabby: true. Leave it empty to use the picture picked above.",
-      "needs_second_opinion": "Priority and Always strict need a Second opinion model. Add one under Configure → AI models, or turn these off."
+      "needs_second_opinion": "Priority and Always strict need a Second opinion model. Add one under Configure → AI models, or turn these off.",
+      "same_model": "Pick different models for Second opinion: a model rarely disagrees with itself."
     },
     "abort": {
       "no_ai_task": "Set up an AI integration with an AI Task that can read images first (for example Google Generative AI), then add Neighborhood Watch again.",
@@ -558,7 +559,9 @@
       "folder_unwritable": "That folder can't be created or written to. Check the path and that the share is connected.",
       "camera_taken": "That camera is already set up. Pick it from the Cameras list to change it.",
       "quiet_hours_both": "Set both Quiet hours start and end (different times), or leave both empty.",
-      "notify_unknown": "No notify service by that name. Pick one from the list."
+      "notify_unknown": "No notify service by that name. Pick one from the list.",
+      "same_model": "Pick different models for Second opinion: a model rarely disagrees with itself.",
+      "detector_unreachable": "Couldn't reach the detector at that address. Check it's running and the address (including http:// and the port) is right."
     }
   },
   "config_subentries": {
@@ -871,6 +874,9 @@
       },
       "critical_alerts": {
         "name": "Critical alerts"
+      },
+      "camera_critical": {
+        "name": "Critical alerts for anything here"
       },
       "alerts": {
         "name": "Alerts"

@@ -18,9 +18,10 @@ except ImportError:  # pragma: no cover - older Home Assistant
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, NAME
+from .const import BUILTIN_KEYS, CONF_SECOND_OPINION, DOMAIN, NAME
 from .engine import WatchEngine
 
 PANEL_URL = f"/{DOMAIN}/neighborhood-watch-panel.js"
@@ -79,6 +80,12 @@ async def ws_vision(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     """Everything the panel shows, in one answer (errors included, so the page can explain)."""
     watch = _engine(hass)
     result: dict[str, Any] = {"loaded": watch is not None, "url": watch.detector_url if watch else ""}
+    rows = watch.detector_week() if watch else []  # the Detector agreement sensor's numbers
+    if rows:
+        result["agreement"] = {
+            "percent": round(100 * sum(r["kind"] == "agree" for r in rows) / len(rows)),
+            "misses": sum(r["kind"] == "miss" for r in rows),
+        }
     try:
         result["health"], result["train"] = await asyncio.gather(
             _vision(hass, "GET", "/health"), _vision(hass, "GET", "/train")
@@ -103,13 +110,23 @@ def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
     if watch is None:
         connection.send_result(msg["id"], {"loaded": False})
         return
+    entry_id = watch.entry.entry_id
+    entities = er.async_get(hass)
+
+    def critical(owner: str, key: str = "critical_alerts") -> str | None:
+        """The entity id of a critical-alerts switch (switch.py's unique ids)."""
+        return entities.async_get_entity_id("switch", DOMAIN, f"{entry_id}_{owner}_{key}")
+
+    strict = watch.strict_keys()
     connection.send_result(
         msg["id"],
         {
             "loaded": True,
-            "entry_id": watch.entry.entry_id,
+            "entry_id": entry_id,
+            "second_opinion": bool(watch.options.get(CONF_SECOND_OPINION)),
+            "catch_all_critical": {key: critical("hub", f"{key}_critical") for key in BUILTIN_KEYS.values()},
             "cameras": [
-                {"id": c.subentry_id, "name": c.name, "camera": c.camera}
+                {"id": c.subentry_id, "name": c.name, "camera": c.camera, "critical": critical(c.subentry_id)}
                 for c in sorted(watch.cameras.values(), key=lambda c: c.name.lower())
             ],
             "people": [
@@ -122,6 +139,9 @@ def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
                     "name": a.name,
                     "species": a.species,
                     "appearance": ({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None,
+                    "critical": critical(a.subentry_id),
+                    # Priority, Always strict, new or not seen lately: only a second model confirms it.
+                    "needs_second_opinion": a.priority or a.key in strict,
                 }
                 for a in sorted(watch.animals.values(), key=lambda a: a.name.lower())
             ],

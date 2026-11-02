@@ -22,6 +22,12 @@ const MIN_FIRST = 40;
 const firstRound = (rounds) => !(rounds || []).some((r) => r.confirmed != null && !r.error);
 const NO_DATASET =
   "The vision service can't see your saved photos. In its compose file, mount the folder from Detector → Saved photos at /dataset.";
+// The critical-alerts switches the page shows as toggles (switch.py), and what each does.
+const CRITICAL_HINT = {
+  animals: "Rings through silent mode at the cameras set below.",
+  cameras: "Everything seen here rings through silent mode, except what's listed below.",
+};
+const CATCH_ALLS = [["pest", "Pests"], ["unknown", "Unknown animals"], ["other", "Other wildlife"], ["motion", "Unsure motion"]];
 const SCHEDULE_HINT =
   "Saved on the vision service itself, not in Home Assistant. The detector's address, mode and threshold are in Local detector above. Times are in the vision service's time zone (TZ in its compose file).";
 
@@ -185,6 +191,12 @@ const STYLE = `
   .back button { font: inherit; font-size: 14px; color: var(--nw-accent); background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 8px; }
   .back svg { width: 18px; height: 18px; fill: currentColor; }
   ha-form { display: block; }
+  .toggle { display: flex; align-items: center; gap: 12px; }
+  .toggle .text { flex: 1; min-width: 0; }
+  .toggle .hint { margin: 2px 0 0; }
+  .grid .toggle { gap: 10px; font-size: 14px; }
+  .preview { display: flex; justify-content: center; margin-bottom: 12px; }
+  .preview neighborhood-watch-sprite { width: 96px; height: 96px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 `;
 
@@ -233,8 +245,9 @@ class Flow {
 
 // One settings form: a flow walked to its form, drawn with ha-form, saved with the flow.
 class FlowForm {
-  constructor(panel, { kind = "options", path = [], subentryId = null, heading = true, onDone = null }) {
+  constructor(panel, { kind = "options", path = [], subentryId = null, heading = true, onDone = null, preview = false }) {
     this.panel = panel;
+    this.preview = preview; // the card picture, drawn live from the form
     this.kind = kind;
     this.path = path;
     this.subentryId = subentryId;
@@ -298,14 +311,20 @@ class FlowForm {
     const title = this.t(`${this.prefix}.title`, placeholders);
     const description = this.t(`${this.prefix}.description`, placeholders);
     this.data = initialData(result.data_schema);
+    // A camera's or person's Remove toggle is a button here (with a confirmation).
+    const removable = this.kind === "options" && ["camera", "person"].includes(result.step_id) &&
+      result.data_schema.some((f) => f.name === "remove");
+    const remove = this.kind === "animal" && this.subentryId ? "Remove animal"
+      : removable ? `Remove ${result.step_id}` : "";
     this.el.innerHTML = `
       ${this.heading && title ? `<h3></h3>` : ""}
       ${description ? `<div class="desc"><ha-markdown breaks></ha-markdown></div>` : ""}
       <div class="error base" hidden></div>
+      ${this.preview ? `<div class="preview" hidden></div>` : ""}
       <ha-form></ha-form>
       <div class="actions end">
         <span class="saved" ${this.saved ? "" : "hidden"}>Saved</span>
-        ${this.kind === "animal" && this.subentryId ? `<button class="btn danger" data-act="remove">Remove animal</button>` : ""}
+        ${remove ? `<button class="btn danger" data-act="remove">${remove}</button>` : ""}
         <button class="btn" data-act="save">${result.last_step === false || result.step_id.endsWith("_add") ? "Next" : "Save"}</button>
       </div>`;
     if (this.heading && title) this.el.querySelector("h3").textContent = title;
@@ -313,7 +332,7 @@ class FlowForm {
     this.saved = false;
     const form = this.el.querySelector("ha-form");
     form.hass = this.panel._hass;
-    form.schema = result.data_schema;
+    form.schema = removable ? result.data_schema.filter((f) => f.name !== "remove") : result.data_schema;
     form.data = this.data;
     form.error = this.errors(result.errors);
     form.localizeValue = (key) => this.t(`component.${DOMAIN}.selector.${key}`);
@@ -325,7 +344,10 @@ class FlowForm {
       this.data = ev.detail.value;
       form.data = this.data;
       this.el.querySelector(".saved").hidden = true;
+      this.drawPreview();
     });
+    this._previewKey = null;
+    this.drawPreview();
     const base = result.errors?.base;
     if (base) {
       const box = this.el.querySelector(".error.base");
@@ -333,7 +355,36 @@ class FlowForm {
       box.textContent = form.computeError(base);
     }
     this.el.querySelector("[data-act=save]").addEventListener("click", () => this.submit());
-    this.el.querySelector("[data-act=remove]")?.addEventListener("click", () => this.panel._removeAnimal(this.subentryId));
+    this.el.querySelector("[data-act=remove]")?.addEventListener("click", () =>
+      removable ? this.panel._removeItem(this) : this.panel._removeAnimal(this.subentryId));
+  }
+
+  // The card picture for the coat or look picked so far (cats only: the pictures are cats).
+  drawPreview() {
+    const box = this.el.querySelector(".preview");
+    if (!box) return;
+    const d = this.data || {};
+    const look = d.looks?.appearance;
+    const appearance = look && typeof look === "object" && !Array.isArray(look) && Object.keys(look).length ? look : null;
+    const cat = String(d.species || "cat").trim().toLowerCase() === "cat";
+    const config = cat && (d.sprite || appearance)
+      ? { ...(d.sprite ? { preset: d.sprite } : {}), ...(appearance ? { appearance } : {}), size: 96 }
+      : null;
+    if (config && !customElements.get("neighborhood-watch-sprite")) {
+      this.panel._loadCard().then(() => this.drawPreview());
+      return;
+    }
+    box.hidden = !config;
+    const key = JSON.stringify(config);
+    if (!config || key === this._previewKey) return;
+    this._previewKey = key;
+    const sprite = document.createElement("neighborhood-watch-sprite");
+    try {
+      sprite.setConfig(config);
+      box.replaceChildren(sprite);
+    } catch (err) {
+      box.hidden = true;
+    }
   }
 
   label(schema, options, field, sectionField) {
@@ -350,11 +401,11 @@ class FlowForm {
     return out;
   }
 
-  async submit() {
+  async submit(data = this.data) {
     const button = this.el.querySelector("[data-act=save]");
     button.disabled = true;
     try {
-      this.show(await this.flow.step(this.data));
+      this.show(await this.flow.step(data));
     } catch (err) {
       button.disabled = false;
       const box = this.el.querySelector(".error.base");
@@ -376,6 +427,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._tab = TABS.some((t) => `#${t.id}` === location.hash) ? location.hash.slice(1) : "review";
     this._forms = [];
+    this._toggles = []; // critical-alerts toggles on the page, kept in step with their switches
     this._vision = null;
     this._busy = false;
     this._message = "";
@@ -389,6 +441,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (this._card) this._card.hass = hass;
+    this._syncToggles();
     if (first && this.isConnected) this._start();
   }
 
@@ -503,6 +556,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     this._closeForms();
     this._editing = null;
     this._card = null;
+    this._toggles = [];
     const main = this._main();
     main.innerHTML = "";
     if (!this._roster?.loaded) {
@@ -512,7 +566,9 @@ class NeighborhoodWatchPanel extends HTMLElement {
     }
     this._intro(main);
     if (this._tab === "review") return this._showReview(main);
+    if (this._tab === "animals") this._secondOpinionNotice(main);
     if (this._tab === "cameras" || this._tab === "people" || this._tab === "animals") this._showList(main);
+    if (this._tab === "animals") this._catchAllToggles(main);
     const [first, ...rest] = FORMS[this._tab] || [];
     if (first) this._addForm(main, { path: first });
     if (this._tab === "detector") {
@@ -537,8 +593,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
   _showReview(main) {
     if (!customElements.get("neighborhood-watch-card")) {
       main.insertAdjacentHTML("beforeend", `<div class="card muted">The review list is loading…</div>`);
-      // The same address as Home Assistant's own copy, so it never loads twice.
-      if (this._cardUrl) import(this._cardUrl).catch(() => {});
+      this._loadCard();
       customElements.whenDefined("neighborhood-watch-card").then(() => this._tab === "review" && this._showTab());
       return;
     }
@@ -549,7 +604,69 @@ class NeighborhoodWatchPanel extends HTMLElement {
     main.append(card);
   }
 
+  // The dashboard card's script (the review list and the animal pictures).
+  _loadCard() {
+    // The same address as Home Assistant's own copy, so it never loads twice.
+    if (this._cardUrl && !this._cardLoading && !customElements.get("neighborhood-watch-card")) {
+      this._cardLoading = import(this._cardUrl).catch(() => {});
+    }
+    return customElements.whenDefined("neighborhood-watch-sprite");
+  }
+
   // ---- cameras, people, animals ----
+
+  // One on/off row for a critical-alerts switch, live from Home Assistant.
+  _toggle(entityId, label, hint) {
+    const row = document.createElement("div");
+    row.className = "toggle";
+    row.innerHTML = `<span class="text"><div></div>${hint ? `<div class="hint"></div>` : ""}</span>
+      <label class="switch"><input type="checkbox"><span></span></label>`;
+    row.querySelector(".text div").textContent = label;
+    if (hint) row.querySelector(".hint").textContent = hint;
+    const input = row.querySelector("input");
+    input.setAttribute("aria-label", label);
+    input.addEventListener("change", async () => {
+      try {
+        await this._hass.callService("switch", input.checked ? "turn_on" : "turn_off", { entity_id: entityId });
+      } catch (err) {
+        this._syncToggles(); // back to what the switch says
+      }
+    });
+    this._toggles.push({ input, entityId });
+    this._syncToggles();
+    return row;
+  }
+
+  _syncToggles() {
+    for (const { input, entityId } of this._toggles || []) {
+      const state = this._hass?.states[entityId]?.state;
+      input.checked = state === "on";
+      input.disabled = state !== "on" && state !== "off";
+    }
+  }
+
+  // The hub's critical switches, above the Pests and Other animals forms they go with.
+  _catchAllToggles(main) {
+    const ids = this._roster.catch_all_critical || {};
+    const card = document.createElement("section");
+    card.className = "card";
+    card.innerHTML = `<h3>Critical alerts</h3>
+      <div class="desc">On: they ring through silent mode at the cameras set below.</div><div class="grid"></div>`;
+    const grid = card.querySelector(".grid");
+    for (const [key, label] of CATCH_ALLS) if (ids[key]) grid.append(this._toggle(ids[key], label));
+    if (grid.children.length) main.append(card);
+  }
+
+  _secondOpinionNotice(main) {
+    const animals = this._roster.animals || [];
+    if (this._roster.second_opinion || !animals.some((a) => a.needs_second_opinion)) return;
+    const card = document.createElement("section");
+    card.className = "card";
+    card.innerHTML = `<div class="head" style="margin: 0"><span style="flex: 1">Some animals need a Second opinion model to be confirmed. Add one under AI → AI models.</span>
+      <button class="btn quiet">Open AI</button></div>`;
+    card.querySelector("button").addEventListener("click", () => this._select("ai"));
+    main.append(card);
+  }
 
   _showList(main) {
     const kind = this._tab;
@@ -628,12 +745,19 @@ class NeighborhoodWatchPanel extends HTMLElement {
     h.textContent = item ? item.name : `New ${{ cameras: "camera", people: "person", animals: "animal" }[kind]}`;
     h.style.margin = "0 4px 12px";
     main.append(h);
+    this._toggles = [];
+    if (item?.critical) {
+      const card = document.createElement("section");
+      card.className = "card";
+      card.append(this._toggle(item.critical, "Critical alerts", CRITICAL_HINT[kind]));
+      main.append(card);
+    }
     const done = async () => {
       await this._loadRoster(true);
       this._showTab();
     };
     if (kind === "animals") {
-      this._addForm(main, { kind: "animal", subentryId: item?.id || null, heading: false, onDone: done });
+      this._addForm(main, { kind: "animal", subentryId: item?.id || null, heading: false, onDone: done, preview: true });
     } else {
       const pick = kind === "cameras" ? { camera: item?.id || NEW } : { person: item?.id || NEW };
       this._addForm(main, { path: [kind, pick], heading: false, onDone: done });
@@ -646,6 +770,15 @@ class NeighborhoodWatchPanel extends HTMLElement {
     await this._hass.callWS({ type: "config_entries/subentries/delete", entry_id: this.entryId, subentry_id: subentryId });
     await this._loadRoster(true);
     this._showTab();
+  }
+
+  // A camera or person is removed by saving its form with Remove on, as Configure does.
+  _removeItem(form) {
+    const name = this._editing?.item?.name;
+    const question = form.result.step_id === "camera"
+      ? `Remove ${name || "this camera"}? It is no longer checked, and its sensors go too.`
+      : `Remove ${name || "this person"}? They no longer get alerts.`;
+    if (confirm(question)) form.submit({ ...form.data, remove: true });
   }
 
   async _afterSave() {
@@ -786,6 +919,12 @@ class NeighborhoodWatchPanel extends HTMLElement {
     </section>`;
   }
 
+  // The Detector agreement sensor's week, in one line.
+  _agreement(a) {
+    if (!a) return "";
+    return `<div class="hint" style="margin-top: 14px">This week: ${esc(a.percent)}% agree with the AI · ${esc(a.misses)} missed animal${a.misses === 1 ? "" : "s"}</div>`;
+  }
+
   _renderVision() {
     const box = this._visionBox;
     if (!box) return;
@@ -804,6 +943,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
             <div><div class="label">Hardware found</div><div class="value">${esc((h.available || []).map(devName).join(", ") || "—")}</div></div>
             <div><div class="label">Right now</div><div class="value">${h.loaded ? "Awake" : "Asleep until the next photo"}</div></div>
           </div>
+          ${this._agreement(d.agreement)}
           <div class="actions" style="margin-top: 14px">
             <a class="btn quiet" href="${esc(d.url)}/" target="_blank" rel="noreferrer">Open the vision page</a>
           </div>

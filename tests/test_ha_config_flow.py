@@ -723,3 +723,64 @@ async def test_a_new_reference_photo_wins_over_remove(hass: HomeAssistant, ready
     assert result["reason"] == "reconfigure_successful"
     store.assert_called_once()
     remove.assert_not_called()
+
+
+async def test_second_opinion_must_be_a_different_model(hass: HomeAssistant, ready):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini_pro", "ai_task.gemini"]}
+    )
+    assert result["errors"] == {"second_opinion": "same_model"}
+    entry = _entry(hass)
+    result = await _options(hass, entry, "models")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini"]}
+    )
+    assert result["errors"] == {"second_opinion": "same_model"}
+
+
+async def test_a_camera_moved_to_another_entity_gets_that_ones_sensors(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    cam1 = {**entry.options["cameras"]["cam1"], "camera": "camera.side_gate"}
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "cameras": {"cam1": cam1}})
+    form = {"name": "Garage", "timing": {}, "critical_alerts": {}, "deterrent": {}, "remove": False}
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "cam1"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**form, "camera": "camera.backyard_cam_high_resolution_channel"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    saved = entry.options["cameras"]["cam1"]
+    assert sorted(saved["triggers"]) == ["binary_sensor.backyard_cam_animal_detected", "binary_sensor.backyard_cam_motion"]
+    assert sorted(saved["skip_when"]) == ["binary_sensor.backyard_cam_person_detected", "binary_sensor.backyard_cam_vehicle_detected"]
+    # Sensors picked by hand in the same save are kept.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "cameras": {"cam1": cam1}})
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "cam1"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {**form, "camera": "camera.backyard_cam_high_resolution_channel", "triggers": ["binary_sensor.backyard_cam_motion"]},
+    )
+    saved = entry.options["cameras"]["cam1"]
+    assert saved["triggers"] == ["binary_sensor.backyard_cam_motion"]
+    assert len(saved["skip_when"]) == 2  # left as it was, so suggested
+
+
+async def test_detector_address_is_checked(hass: HomeAssistant, ready, aioclient_mock):
+    entry = _entry(hass)
+    form = {"detector_mode": "shadow", "detector_min": 0.2}
+    aioclient_mock.get("http://nas.local:8765/health", json={"ok": True})
+    aioclient_mock.get("http://offline:8765/health", exc=TimeoutError())
+    aioclient_mock.get("http://wrong:8765/health", status=404)
+    result = await _options(hass, entry, "detector")
+    for url in ("http://offline:8765", "http://wrong:8765"):
+        result = await hass.config_entries.options.async_configure(result["flow_id"], {**form, "detector_url": url})
+        assert result["errors"] == {"detector_url": "detector_unreachable"}, url
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**form, "detector_url": " http://nas.local:8765/ "}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["detector_url"] == "http://nas.local:8765"
+    result = await _options(hass, entry, "detector")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {**form, "detector_url": ""})
+    assert result["type"] is FlowResultType.CREATE_ENTRY and entry.options["detector_url"] == ""

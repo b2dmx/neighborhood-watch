@@ -173,7 +173,7 @@ async def test_wildlife_is_tracked_on_the_hub(hass, watch):
     assert (pest.state, pest.attributes["animal"], pest.attributes["camera"]) == ("on", "Raccoon", "Yard")
     assert state(hass, "switch.neighborhood_watch_pests_critical_alerts").state == "off"
     assert hass.states.get("sensor.raccoon_location") is None  # no device per wild animal
-    assert state(hass, "switch.garage_critical_alerts").state == "off"
+    assert state(hass, "switch.garage_critical_alerts_for_anything_here").state == "off"
     (event,) = watch["events"]
     assert event.data["sighting_id"]
 
@@ -1053,13 +1053,24 @@ async def test_panel_reads_and_changes_the_vision_service(hass, watch, aioclient
     await ws.send_json({"id": 2, "type": "neighborhood_watch/vision"})
     result = (await ws.receive_json())["result"]
     assert result["health"]["device"] == "GPU" and result["history"][0]["round"] == 1 and "error" not in result
+    assert "agreement" not in result  # nothing compared yet
+    now = dt_util.utcnow()
+    watch["entry"].runtime_data.data.setdefault("detector", {})["log"] = [  # reloaded with the detector
+        {"time": (now - timedelta(days=9)).isoformat(), "kind": "miss"},  # older than a week
+        {"time": now.isoformat(), "kind": "agree"},
+        {"time": now.isoformat(), "kind": "agree"},
+        {"time": now.isoformat(), "kind": "agree"},
+        {"time": now.isoformat(), "kind": "miss"},
+    ]
+    await ws.send_json({"id": 3, "type": "neighborhood_watch/vision"})
+    assert (await ws.receive_json())["result"]["agreement"] == {"percent": 75, "misses": 1}
 
-    await ws.send_json({"id": 3, "type": "neighborhood_watch/vision/settings", "changes": {"train_device": "cpu"}})
+    await ws.send_json({"id": 4, "type": "neighborhood_watch/vision/settings", "changes": {"train_device": "cpu"}})
     assert (await ws.receive_json())["result"]["settings"]["train_device"] == "cpu"
     sent = next(c for c in aioclient_mock.mock_calls if c[0] == "POST" and str(c[1]).endswith("/settings"))
     assert sent[2] == {"train_device": "cpu"}
 
-    await ws.send_json({"id": 4, "type": "neighborhood_watch/vision/train"})
+    await ws.send_json({"id": 5, "type": "neighborhood_watch/vision/train"})
     answer = await ws.receive_json()
     assert not answer["success"] and "already running" in answer["error"]["message"]
 
@@ -1084,3 +1095,9 @@ async def test_panel_roster_lists_cameras_people_and_animals(hass, watch, hass_w
     assert [p["name"] for p in result["people"]] == ["Ann", "Bo"]
     assert [a["name"] for a in result["animals"]] == ["Luna", "Milo"]
     assert result["cameras"][0]["camera"] == "camera.garage"
+    # The critical-alerts switches the page shows as toggles.
+    assert result["cameras"][0]["critical"] == "switch.garage_critical_alerts_for_anything_here"
+    assert result["animals"][0]["critical"] == "switch.luna_critical_alerts"
+    assert result["catch_all_critical"]["pest"] == "switch.neighborhood_watch_pests_critical_alerts"
+    assert result["catch_all_critical"]["motion"] == "switch.neighborhood_watch_unsure_motion_critical_alerts"
+    assert result["second_opinion"] is True and result["animals"][0]["needs_second_opinion"] is True  # priority
