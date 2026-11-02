@@ -394,10 +394,39 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("select[data-sid]").forEach((el) =>
       el.addEventListener("change", () => {
         if (!el.value) return;
+        if (el.value === TYPE_IT) {
+          // Not on the list: type it instead.
+          this._typing = el.dataset.sid;
+          this._render(true);
+          this.shadowRoot.querySelector("input[data-type-sid]")?.focus();
+          return;
+        }
         el.disabled = true;
         this._answer(el.dataset.sid, el.value);
       })
     );
+    const typed = this.shadowRoot.querySelector("input[data-type-sid]");
+    if (typed) {
+      const send = () => {
+        const v = typed.value.trim();
+        if (!v) return typed.focus();
+        this._typing = null;
+        this._answer(typed.dataset.typeSid, v);
+      };
+      typed.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") send();
+        else if (ev.key === "Escape") {
+          ev.stopPropagation();
+          this._typing = null;
+          this._render(true);
+        }
+      });
+      this.shadowRoot.querySelector("[data-type-ok]")?.addEventListener("click", send);
+      this.shadowRoot.querySelector("[data-type-cancel]")?.addEventListener("click", () => {
+        this._typing = null;
+        this._render(true);
+      });
+    }
     const noteSave = this.shadowRoot.querySelector("[data-note-save]");
     if (noteSave)
       noteSave.addEventListener("click", () => {
@@ -461,6 +490,8 @@ class NeighborhoodWatchCard extends HTMLElement {
   _answer(sid, answer) {
     // Remembered so the buttons stay off until the sighting leaves the list.
     this._answered.add(sid);
+    // Gone from the list at once; Home Assistant catches up in the background.
+    this._render(true);
     Promise.resolve(this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid })).catch((err) => {
       this._answered.delete(sid);
       this._render(true);
@@ -577,7 +608,11 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _review(d) {
     const s = this._state(d.hub.keys.to_review);
-    const items = s?.attributes?.items || [];
+    const listed = s?.attributes?.items || [];
+    // Answered here but not yet gone from the sensor: hidden already. Forget the rest.
+    const ids = new Set(listed.map((it) => String(it.id)));
+    for (const id of this._answered) if (!ids.has(id)) this._answered.delete(id);
+    const items = listed.filter((it) => !this._answered.has(String(it.id)));
     // The last answer (from here or a phone) can be taken back for an hour.
     const la = s?.attributes?.last_answer;
     const said = { right: "Right", unsure: "Not sure", other: "Other", wrong: "Wrong" };
@@ -590,25 +625,34 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!items.length)
       return this._note || undo ? `<div class="section"><h2>To review</h2>${undo}${this._noteBox()}</div>` : "";
     const limit = this._config.review_limit || 6;
-    const options = ["Nothing", ...this._names(d)].map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    const names = ["Nothing", ...this._names(d)];
+    const options =
+      names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("") +
+      `<option value="${TYPE_IT}">Something else (type it)…</option>`;
+    const suggest = `<datalist id="nw-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
     const rows = items.slice(0, limit).map((it) => {
       const sid = esc(it.id);
-      const off = this._answered.has(String(it.id)) ? " disabled" : "";
+      const off = "";
+      const pick =
+        this._typing === String(it.id)
+          ? `<input class="typed" data-type-sid="${sid}" list="nw-names" placeholder="What was it?" aria-label="What was it?">` +
+            `<button class="mini" data-type-ok title="Save" aria-label="Save">✓</button>` +
+            `<button class="mini" data-type-cancel title="Cancel" aria-label="Cancel">✕</button>`
+          : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>
+            <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure">?</button>
+            <select data-sid="${sid}" aria-label="It was"><option value="">It was…</option>${options}</select>`;
       return `<div class="rev">
           <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
           <div class="revname"><b>${esc(it.animal)}</b> <span class="muted">${esc(it.confidence)}</span></div>
           <div class="muted small">${esc(it.where)} · ${clock(it.time)} · <span data-ago="${esc(it.time)}">${ago(it.time)}</span></div>
-          <div class="acts">
-            <button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right"${off}>✓</button>
-            <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure"${off}>?</button>
-            <select data-sid="${sid}" aria-label="It was"${off}><option value="">It was…</option>${options}</select>
-          </div>
+          <div class="acts">${pick}</div>
         </div>`;
     });
     // The sensor lists at most 40; its state is the full count.
     const total = Number.isFinite(Number(s.state)) ? Number(s.state) : items.length;
-    const more = total > limit ? `<div class="muted">${total - limit} more after these.</div>` : "";
-    return `<div class="section"><h2>To review · ${esc(s.state)}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}</div>`;
+    const left = total - (listed.length - items.length);
+    const more = left > limit ? `<div class="muted">${left - limit} more after these.</div>` : "";
+    return `<div class="section"><h2>To review · ${left}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}${suggest}</div>`;
   }
 
   _scan(hub) {
@@ -823,6 +867,7 @@ class NeighborhoodWatchCard extends HTMLElement {
 }
 
 const FOLD_KEY = "neighborhood-watch-card-folded";
+const TYPE_IT = "__type__"; // the "It was…" choice that opens a box to type an answer
 
 // A cat face drawn from how the animal is described: its coat pattern and main tone, and
 // words in its description (colours, calico/tortie, tabby, spotted, tuxedo, bicolour/van,
@@ -999,6 +1044,7 @@ const STYLE = `
   .small { font-size: .8em; }
   .rev .acts { gap: 4px; }
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
+  .rev input.typed { flex: 1; min-width: 0; font: inherit; font-size: .85em; padding: 4px 10px; min-height: 32px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-out; }
