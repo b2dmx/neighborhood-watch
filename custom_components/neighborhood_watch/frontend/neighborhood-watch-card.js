@@ -338,8 +338,8 @@ class NeighborhoodWatchCard extends HTMLElement {
       <style>${this._style}</style>
       <ha-card>
         <div class="whole">
-          <h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>
-          <div class="inner">${parts.join("") || (this._sectionsSet && !(this._config.sections || []).length ? `<div class="empty">No sections are picked in this card's settings.</div>` : "") || `<div class="empty">Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.</div>`}</div>
+          ${this._config.hide_title ? "" : `<h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>`}
+          <div class="inner">${parts.join("") || (this._sectionsSet && !(this._config.sections || []).length ? `<div class="empty">No sections are picked in this card's settings.</div>` : "") || `<div class="empty">${esc(this._config.empty || "Nothing to show yet. On the Neighborhood Watch integration page, add cameras under Configure → Cameras and animals with Add animal.")}</div>`}</div>
         </div>
       </ha-card>${this._lightbox()}`;
     this._stopSprites?.();

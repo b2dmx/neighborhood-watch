@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - older Home Assistant
     import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, NAME
@@ -94,6 +94,41 @@ async def ws_vision(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     connection.send_result(msg["id"], result)
 
 
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/roster"})
+@websocket_api.require_admin
+@callback
+def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Who and what is set up, for the page's lists (changes go through the settings flows)."""
+    watch = _engine(hass)
+    if watch is None:
+        connection.send_result(msg["id"], {"loaded": False})
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "loaded": True,
+            "entry_id": watch.entry.entry_id,
+            "cameras": [
+                {"id": c.subentry_id, "name": c.name, "camera": c.camera}
+                for c in sorted(watch.cameras.values(), key=lambda c: c.name.lower())
+            ],
+            "people": [
+                {"id": r.subentry_id, "name": r.name, "person": r.person}
+                for r in sorted(watch.recipients, key=lambda r: r.name.lower())
+            ],
+            "animals": [
+                {
+                    "id": a.subentry_id,
+                    "name": a.name,
+                    "species": a.species,
+                    "appearance": ({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None,
+                }
+                for a in sorted(watch.animals.values(), key=lambda a: a.name.lower())
+            ],
+        },
+    )
+
+
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/vision/settings", vol.Required("changes"): dict}
 )
@@ -121,7 +156,7 @@ async def ws_vision_train(hass: HomeAssistant, connection: websocket_api.ActiveC
 
 
 async def async_register_panel(hass: HomeAssistant, version: str) -> None:
-    for command in (ws_vision, ws_vision_settings, ws_vision_train):
+    for command in (ws_roster, ws_vision, ws_vision_settings, ws_vision_train):
         websocket_api.async_register_command(hass, command)
     if getattr(hass, "http", None) is None or "frontend" not in hass.config.components:
         return
@@ -143,7 +178,8 @@ async def async_register_panel(hass: HomeAssistant, version: str) -> None:
             sidebar_title=NAME,
             sidebar_icon="mdi:cat",
             module_url=f"{PANEL_URL}?v={version}",
-            config={"font": FONT_URL},
+            # The review list is the dashboard card's; the page loads it if it isn't yet.
+            config={"font": FONT_URL, "card": f"/{DOMAIN}/neighborhood-watch-card.js?v={version}"},
             require_admin=True,
         )
     except Exception:  # noqa: BLE001

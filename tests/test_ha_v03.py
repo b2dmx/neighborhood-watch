@@ -1060,3 +1060,14 @@ async def test_panel_handles_an_older_vision_service(hass, watch, aioclient_mock
     await ws.send_json({"id": 1, "type": "neighborhood_watch/vision"})
     result = (await ws.receive_json())["result"]
     assert result["outdated"] and "error" not in result and result["health"]["model"] == "megadetector"
+
+
+async def test_panel_roster_lists_cameras_people_and_animals(hass, watch, hass_ws_client):
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "neighborhood_watch/roster"})
+    result = (await ws.receive_json())["result"]
+    assert result["loaded"] and result["entry_id"] == watch["entry"].entry_id
+    assert [c["name"] for c in result["cameras"]] == ["Garage", "Yard"]
+    assert [p["name"] for p in result["people"]] == ["Ann", "Bo"]
+    assert [a["name"] for a in result["animals"]] == ["Luna", "Milo"]
+    assert result["cameras"][0]["camera"] == "camera.garage"

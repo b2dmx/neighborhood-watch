@@ -106,6 +106,16 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 
 **A check on these cameras ends the cooldown** reopens a camera when an animal is seen on its way there, e.g. the driveway reopens the garage.
 
+## The Neighborhood Watch page
+
+After setup, a **Neighborhood Watch** page appears in Home Assistant's sidebar (admins only). It has everything in one place, by topic:
+
+- **Review:** the sightings waiting for your answer, the same list as the card's To review section.
+- **Cameras, Animals, People:** a list of each. Open one to change it, or add a new one.
+- **Alerts, AI, Detector:** all the other settings, plus the local detector's status, training and past rounds.
+
+These are the same settings as **Configure** and **Add animal** on the integration page, with the same checks and explanations. A change in one shows in the other.
+
 ## Entities
 
 ### Per animal
@@ -233,7 +243,7 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 - **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
-**Where to see it:** the **Neighborhood Watch** page in Home Assistant's sidebar (admins only) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
+**Where to see it:** the **Detector** tab of the [Neighborhood Watch page](#the-neighborhood-watch-page) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
 
 ### Training the detector on your photos
 
