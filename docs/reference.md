@@ -80,7 +80,8 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 |---|---|
 | Cameras / People | Pick one to change or remove, or add one |
 | Alerts | Send alerts (on); lowest confidence that alerts (medium); Right / Not sure / Other buttons on alerts (on); page that opens when you tap an alert (empty) |
-| Pests, wildlife and unknown animals | The pest list; Alert at / Critical alerts only at for Pests, Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
+| Pests | The pest list; where pests alert (Alert at / Critical alerts only at; default every camera) |
+| Other animals and motion | Alert at / Critical alerts only at for Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
 | AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
 | Advanced → AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
@@ -177,7 +178,7 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 
 ## Alerts
 
-The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Pests, wildlife and unknown animals**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
+The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Pests** and **Configure → Other animals and motion**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
 - **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.

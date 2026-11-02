@@ -393,11 +393,15 @@ async def test_options_alerts_and_training(hass: HomeAssistant, ready, tmp_path)
     )
     assert entry.options["alerts"] is False and entry.options["min_confidence"] == "high"
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "pests"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"pests": ["Raccoon"], "pest_alert_at": ["garage"], "pest_critical_at": []}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "catch_alls"})
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"pest": {"pests": ["Raccoon"], "pest_alert_at": ["garage"], "pest_critical_at": []},
-         "unknown": {"unknown_alert_at": ["*"], "unknown_critical_at": []},
+        {"unknown": {"unknown_alert_at": ["*"], "unknown_critical_at": []},
          "other": {"other_alert_at": ["garage"], "other_critical_at": ["*"]},
          "motion": {"motion_alert_at": [], "motion_critical_at": []}},
     )
@@ -451,7 +455,7 @@ async def test_configure_menu_puts_the_advanced_pages_in_a_submenu(hass: HomeAss
     entry = _entry(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["menu_options"] == [
-        "cameras", "people", "alerts", "catch_alls", "schedule", "models", "advanced",
+        "cameras", "pests", "catch_alls", "people", "alerts", "schedule", "models", "advanced",
     ]
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "advanced"})
     assert result["type"] is FlowResultType.MENU and result["step_id"] == "advanced"
@@ -575,7 +579,7 @@ async def test_options_schedule_and_catch_alls_fold_into_sections(hass: HomeAssi
     assert entry.options["summary_time"] == "09:00:00" and entry.options["on_camera_minutes"] == 5
     assert "more" not in entry.options
     result = await _options(hass, entry, "catch_alls")
-    assert [str(k) for k in result["data_schema"].schema] == ["pest", "unknown", "other", "motion"]
+    assert [str(k) for k in result["data_schema"].schema] == ["unknown", "other", "motion"]
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})  # all left folded
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["unknown_alert_at"] == ["*"] and entry.options["motion_alert_at"] == []

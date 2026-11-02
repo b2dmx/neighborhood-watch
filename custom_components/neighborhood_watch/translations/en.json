@@ -216,9 +216,10 @@
         "title": "Neighborhood Watch",
         "menu_options": {
           "cameras": "Cameras",
+          "pests": "Pests",
+          "catch_alls": "Other animals and motion",
           "people": "People (who gets alerts)",
           "alerts": "Alerts",
-          "catch_alls": "Pests, wildlife and unknown animals",
           "schedule": "When to watch",
           "models": "AI models",
           "advanced": "Advanced"
@@ -362,23 +363,9 @@
         }
       },
       "catch_alls": {
-        "title": "Pests, wildlife and unknown animals",
-        "description": "Every animal that isn't one of yours is recognised and tracked as wildlife, without adding it. Pests are the kinds you list here; everything else is other wildlife. Unknown animals: a cat or dog that isn't one of yours. Unsure motion: the AI saw movement but couldn't say what. Each group below sets where it alerts; its Critical alerts switch is on the Neighborhood Watch device.",
+        "title": "Other animals and motion",
+        "description": "Every animal is recognised and tracked without adding it. Here you set where the rest alert: unknown animals (a cat or dog that isn't one of yours), other wildlife (anything that isn't one of yours or a pest) and unsure motion (the AI saw movement but couldn't say what). Each group's Critical alerts switch is on the Neighborhood Watch device.",
         "sections": {
-          "pest": {
-            "name": "Pests",
-            "description": "The kinds you list here alert every time they come back.",
-            "data": {
-              "pests": "Pests",
-              "pest_alert_at": "Alert at",
-              "pest_critical_at": "Critical alerts only at"
-            },
-            "data_description": {
-              "pests": "Alert every time they come back, and are scared off with a camera's lights and sound.",
-              "pest_alert_at": "Empty: never.",
-              "pest_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
-            }
-          },
           "unknown": {
             "name": "Unknown animals",
             "description": "A cat or dog that isn't one of yours.",
@@ -393,7 +380,7 @@
           },
           "other": {
             "name": "Other wildlife",
-            "description": "Any other animal that isn't a pest.",
+            "description": "Any wild animal that isn't a pest.",
             "data": {
               "other_alert_at": "Alert at",
               "other_critical_at": "Critical alerts only at"
@@ -555,6 +542,20 @@
         },
         "data_description": {
           "camera": "Its name and motion sensors are filled in from its device next."
+        }
+      },
+      "pests": {
+        "title": "Pests",
+        "description": "Pests are animals you want gone, like a raccoon at the bins. They alert every time they come back, and a camera's lights and sound (under Cameras → Scaring pests off) go on when one is seen there. Any animal not listed here is other wildlife.",
+        "data": {
+          "pests": "Pests",
+          "pest_alert_at": "Alert at",
+          "pest_critical_at": "Critical alerts only at"
+        },
+        "data_description": {
+          "pests": "Pick from the list or type any animal.",
+          "pest_alert_at": "Empty: never.",
+          "pest_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
         }
       }
     },

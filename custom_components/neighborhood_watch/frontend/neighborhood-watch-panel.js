@@ -32,18 +32,20 @@ const INTRO = {
   review:
     "Sightings the AI wasn't sure about, and the ones you haven't confirmed yet. Your answers fix tracking and become training data for the detector.",
   cameras:
-    "Each camera is checked by the AI when its motion sensor fires (or on a timer). Open one to change what starts a check, how often, and what it does when a pest shows up.",
+    "Each camera is checked by the AI when its motion sensor fires (or on a timer). Open one to change what starts a check, how often, and what it does when a pest shows up. Below the list: the hours the cameras are watched.",
   animals:
-    "Your own animals: how to recognise each one, which cameras matter for them, and when they count as missing.",
+    "Your own animals first: how to recognise each one and where it alerts. Below them: pests, and every other animal (wildlife, unknown cats and dogs, unsure motion). Those are recognised without adding them.",
   people: "Who gets alerts, on which phone, and when to keep quiet.",
-  alerts: "What sends an alert, how sure the AI has to be, and what happens with animals it doesn't know.",
-  ai: "Which AI models look at the photos, when they're used, and what they're told.",
+  alerts: "Alerts on or off, how sure the AI has to be, and the picture link on phones. Who gets them is under People; where each animal alerts is under Animals.",
+  ai: "Which AI models look at the photos, and what they're told.",
   detector:
     "An optional local detector that checks every frame before the AI does and learns from your answers every week.",
 };
 const FORMS = {
-  alerts: [["alerts"], ["catch_alls"], ["advanced", "notifications"]],
-  ai: [["models"], ["schedule"], ["advanced", "identification"]],
+  cameras: [["schedule"]],
+  animals: [["pests"], ["catch_alls"]],
+  alerts: [["alerts"], ["advanced", "notifications"]],
+  ai: [["models"], ["advanced", "identification"]],
   detector: [["advanced", "detector"], ["advanced", "training"]],
 };
 
@@ -503,7 +505,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     }
     this._intro(main);
     if (this._tab === "review") return this._showReview(main);
-    if (this._tab === "cameras" || this._tab === "people" || this._tab === "animals") return this._showList(main);
+    if (this._tab === "cameras" || this._tab === "people" || this._tab === "animals") this._showList(main);
     if (this._tab === "detector") {
       this._visionBox = document.createElement("div");
       main.append(this._visionBox);
@@ -546,7 +548,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     const noun = { cameras: "camera", people: "person", animals: "animal" }[kind];
     const head = document.createElement("div");
     head.className = "list-head";
-    head.innerHTML = `<h2>${cap(kind)}</h2><button class="btn">Add ${noun}</button>`;
+    head.innerHTML = `<h2>${kind === "animals" ? "Your animals" : cap(kind)}</h2><button class="btn">Add ${noun}</button>`;
     head.querySelector("button").addEventListener("click", () => this._edit(kind, null));
     main.append(head);
     const card = document.createElement("div");

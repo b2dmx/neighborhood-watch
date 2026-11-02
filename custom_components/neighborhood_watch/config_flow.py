@@ -205,7 +205,7 @@ PERSON_SECTIONS = ("critical_alerts", "mutes", "quiet")
 ANIMAL_SECTIONS = ("looks", "rules", "last_seen")
 MODELS_SECTIONS = ("first_model_hours",)
 SCHEDULE_SECTIONS = ("more",)
-CATCH_ALL_SECTIONS = tuple(BUILTIN_KEYS.values())  # pest, other, unknown, motion
+CATCH_ALL_SECTIONS = ("unknown", "other", "motion")  # pests have their own page
 
 
 def _section(fields: dict[Any, Any], collapsed: bool = True) -> section:
@@ -797,9 +797,10 @@ class WatchOptionsFlow(OptionsFlow):
             step_id="init",
             menu_options=[
                 "cameras",
+                "pests",
+                "catch_alls",
                 "people",
                 "alerts",
-                "catch_alls",
                 "schedule",
                 "models",
                 "advanced",
@@ -1006,24 +1007,35 @@ class WatchOptionsFlow(OptionsFlow):
             ),
         )
 
+    async def async_step_pests(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Which kinds are pests, and where they alert."""
+        if user_input is not None:
+            return self._save(
+                {
+                    CONF_PESTS: [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()],
+                    **_alert_data(user_input, "pest_"),
+                }
+            )
+        fields: dict[Any, Any] = {
+            vol.Optional(CONF_PESTS, default=list(self._values.get(CONF_PESTS) or [])): PESTS,
+            **_alert_fields(self._values, _camera_options(self.config_entry), "pest_"),
+        }
+        return self.async_show_form(step_id="pests", data_schema=vol.Schema(fields))
+
     async def async_step_catch_alls(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Unknown animals, other wildlife and unsure motion: where each alerts."""
         if user_input is not None:
             user_input = _flatten(user_input, CATCH_ALL_SECTIONS)
-            data: dict[str, Any] = {
-                CONF_PESTS: [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()]
-            }
-            for key in BUILTIN_KEYS.values():
+            data: dict[str, Any] = {}
+            for key in CATCH_ALL_SECTIONS:
                 data.update(_alert_data(user_input, f"{key}_"))
             return self._save(data)
         cameras = _camera_options(self.config_entry)
         # One folded group each, in the order the page describes them.
-        fields: dict[Any, Any] = {}
-        for key in ("pest", "unknown", "other", "motion"):
-            group = _alert_fields(self._values, cameras, f"{key}_")
-            if key == "pest":
-                group = {vol.Optional(CONF_PESTS, default=list(self._values.get(CONF_PESTS) or [])): PESTS, **group}
-            fields[vol.Required(key, default={})] = _section(group)
+        fields: dict[Any, Any] = {
+            vol.Required(key, default={}): _section(_alert_fields(self._values, cameras, f"{key}_"))
+            for key in CATCH_ALL_SECTIONS
+        }
         return self.async_show_form(step_id="catch_alls", data_schema=vol.Schema(fields))
 
     async def async_step_training(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
