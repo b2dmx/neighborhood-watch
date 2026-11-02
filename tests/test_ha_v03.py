@@ -213,6 +213,19 @@ async def test_alerts_reach_everyone_with_buttons(hass, watch):
     assert "url" not in data  # no review page set: tapping the alert opens the app as usual
 
 
+async def test_review_page_opens_even_without_buttons(hass, watch):
+    entry = watch["entry"]
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "review_page": "/lovelace/pets#review", "correction_buttons": False}
+    )
+    await hass.async_block_till_done()
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    data = watch["sent"][-1]["data"]
+    assert "actions" not in data
+    assert data["url"] == data["clickAction"] == "/lovelace/pets#review"
+
+
 async def test_other_takes_it_off_the_animal_and_keeps_it_for_review(hass, watch):
     entry = watch["entry"]
     hass.config_entries.async_update_entry(entry, options={**entry.options, "review_page": "/lovelace/pets#review"})

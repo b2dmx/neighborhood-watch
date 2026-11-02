@@ -3,35 +3,19 @@
     "step": {
       "user": {
         "title": "AI models",
-        "description": "Which AI Task entities look at each camera frame, in order. Pick at least one model for First look. Also add a different model under Second opinion: without one, priority animals are never confirmed, and an animal marked Always strict or not seen for a while is never counted. Each model is tried only when the one before gives no answer (busy, error or out of quota).",
+        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones: pick a different model there, or priority animals, look-alikes and new animals can never be confirmed. If a model is busy, failing or has used up its free daily allowance (quota), the next one in its list is tried.",
         "data": {
           "first_look": "First look",
-          "second_opinion": "Second opinion",
-          "paid_models": "Which of the models above cost money"
+          "second_opinion": "Second opinion"
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
-          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
-          "paid_models": "Tick the models from First look or Second opinion that cost money. They are used only as a last resort, and never to double-check a backup's answer. A model listed only here is never used."
-        },
-        "sections": {
-          "first_model_hours": {
-            "name": "First model's hours",
-            "description": "Optional: save the first model's daily quota for the busiest hours.",
-            "data": {
-              "main_start": "First model's hours (from)",
-              "main_end": "First model's hours (until)"
-            },
-            "data_description": {
-              "main_start": "Outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
-              "main_end": "Leave both empty to keep it first all the time."
-            }
-          }
+          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, names a wild animal like a raccoon or a fox (not a bird or a deer), or came from a backup and names an animal. Tip: a smarter model first, and different models from First look."
         }
       },
       "schedule": {
         "title": "When to watch",
-        "description": "Cameras are watched from the start time until the end time. Also watch whenever it is dark adds the hours the sun is down; Watch all day watches around the clock.",
+        "description": "Cameras are checked between Watch from and Watch until. Also watch whenever it is dark adds the hours the sun is down. Watch all day ignores both and checks around the clock (uses more AI quota).",
         "data": {
           "night_start": "Watch from",
           "night_end": "Watch until",
@@ -66,7 +50,7 @@
       },
       "camera": {
         "title": "Camera: {camera}",
-        "description": "Motion and animal sensors trigger a check; person and vehicle sensors skip it. Check the suggestions.{sensors}",
+        "description": "We filled this in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip one. Make sure they're right.{sensors}",
         "data": {
           "name": "Name",
           "triggers": "Start a check when any of these turn on",
@@ -76,8 +60,10 @@
         },
         "data_description": {
           "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
-          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet.",
-          "skip": "Picked by mistake? Turn this on and submit to leave it out."
+          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet. Notes you add while reviewing a sighting are added here too.",
+          "skip": "Picked by mistake? Turn this on and submit to leave it out.",
+          "triggers": "The camera's motion or animal sensors. A check runs each time one turns on, during the hours set under When to watch.",
+          "skip_when": "For example its person or vehicle sensor, so people and cars don't use AI quota. Checks you start by hand (the Identify action) ignore this."
         },
         "sections": {
           "timing": {
@@ -85,29 +71,26 @@
             "description": "How often this camera is checked.",
             "data": {
               "cooldown": "Cooldown",
-              "priority_cooldown": "Cooldown after a priority animal",
-              "missing_cooldown": "Cooldown in missing mode",
               "reopened_by": "A check on these cameras ends the cooldown",
               "check_every": "Also check every"
             },
             "data_description": {
-              "cooldown": "Minimum time between checks of this camera.",
-              "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
-              "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
-              "reopened_by": "For a camera an animal passes on its way here.",
-              "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+              "cooldown": "Shortest time between two checks of this camera.",
+              "reopened_by": "Cameras an animal passes on its way here (e.g. a gate before the porch). Once one of them is checked, this camera can be checked again straight away. Only cameras set up before this one are listed; add the others later under Configure → Cameras.",
+              "check_every": "For a camera with no motion sensor: check it on a timer, during watch hours only. 0 = only when a sensor turns on. Every check uses AI quota. The Cooldown still applies."
             }
           },
           "deterrent": {
             "name": "Scaring pests off",
             "description": "Lights and a sound for when a pest is seen here.",
             "data": {
-              "deterrent_lights": "Lights that scare pests off",
+              "deterrent_lights": "Lights or switches that scare pests off",
               "deterrent_minutes": "Leave them on for",
               "deterrent_sound": "Sound that scares pests off"
             },
             "data_description": {
               "deterrent_lights": "Turned on when a pest is seen here, then back off.",
+              "deterrent_minutes": "How long they stay on after the last pest sighting.",
               "deterrent_sound": "Played when a pest is seen here."
             }
           }
@@ -115,35 +98,31 @@
       },
       "animal": {
         "title": "Animals",
-        "description": "Describe each animal the AI should recognise. {count} added so far. Leave the name empty when you're done; you can add more later with Add animal.\n\n{notes}",
+        "description": "Describe each animal the AI should recognise, one per page. {count} added so far.\n\n**Done? Leave Name empty and press Submit.** You can add more later with Add animal.\n\n{notes}",
         "data": {
           "name": "Name",
           "species": "Species",
           "description": "What it looks like",
           "reference_upload": "Reference photo",
-          "sprite": "Sprite"
+          "sprite": "Picture on the card"
         },
         "data_description": {
-          "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-          "reference_upload": "A clear night photo, sent to the AI beside each frame.",
           "species": "Pick one or type any other kind.",
-          "sprite": "Optional. How the card draws it when there's no recent photo: a ready-made cat coat or breed. Cats only."
+          "description": "Sent to the AI. The most important field: lead with markings that still show at night in infrared (white paws, bib, tail rings, size).",
+          "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+          "sprite": "Cats only. How the card draws it when there's no recent photo. Doesn't affect recognition."
         },
         "sections": {
           "looks": {
-            "name": "Looks",
-            "description": "Coat details and tips that help the AI tell it apart, and a custom sprite for the card.",
+            "name": "Card picture and tips",
+            "description": "Extra tips for the AI, and a custom card picture.",
             "data": {
-              "pattern": "Coat pattern",
-              "base": "Main tone at night (infrared)",
               "tips": "Identification tips",
-              "appearance": "Sprite, custom (optional)"
+              "appearance": "Advanced: custom card picture"
             },
             "data_description": {
-              "pattern": "For a priority animal, both AI models must report this pattern.",
-              "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-              "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
-              "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar."
+              "tips": "Also sent to the AI, right after What it looks like: what it's confused with, how to tell them apart. Notes you add after correcting a sighting are added here too.",
+              "appearance": "Optional, for tinkerers. Changes the picked picture, one setting per line. Example:\nfur: \"#7f7e7b\"\ntabby: true\nwhitePaws: true\ncollar: \"#3f9a55\"\nLeave empty if the picture above is close enough."
             }
           },
           "rules": {
@@ -151,27 +130,31 @@
             "description": "How carefully it is checked, and where it alerts.",
             "data": {
               "priority": "Priority animal",
+              "pattern": "Coat pattern",
+              "base": "Main tone at night (infrared)",
               "always_strict": "Always strict",
               "alert_at": "Alert at",
-              "critical_at": "Critical alerts only at"
+              "critical_at": "Ring through silent mode at"
             },
             "data_description": {
-              "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model.",
-              "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically. Needs a Second opinion model.",
-              "alert_at": "Cameras where it sends an alert. Empty: never.",
-              "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
+              "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+              "pattern": "Priority animals only. Both AI models must report this pattern before it's confirmed. Leave Don't check if unsure: a wrong pick means it is never confirmed.",
+              "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
+              "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+              "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
+              "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           },
           "last_seen": {
             "name": "Last seen",
-            "description": "Optional: when and where it was last seen, if you already know.",
+            "description": "A new animal only counts once both AI models are sure it's this one. If it already visits, enter roughly when you last saw it, so it counts normally from the start.",
             "data": {
-              "known_last_seen": "Last seen",
-              "known_location": "Last seen at"
+              "known_last_seen": "When it was last seen",
+              "known_location": "Where it was last seen"
             },
             "data_description": {
-              "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
-              "known_location": "Optional: where it was last seen."
+              "known_last_seen": "Roughly. Leave empty for an animal that has never visited.",
+              "known_location": "Optional, e.g. Back garden."
             }
           }
         }
@@ -183,30 +166,34 @@
           "pests": "Pests"
         },
         "data_description": {
-          "pests": "Pick or type any animal."
+          "pests": "Pick from the list or type any animal."
         }
       },
       "people": {
         "title": "Who gets alerts",
-        "description": "These phones get Neighborhood Watch alerts. Quiet zones (like work), sounds and missing-mode alerts can be set per person later under Configure → People.",
+        "description": "These phones get Neighborhood Watch alerts, including missing-mode alerts. Each person's mutes, quiet zones and hours, and critical sound can be changed later under Configure → People.",
         "data": {
           "phones": "Phones"
+        },
+        "data_description": {
+          "phones": "Phones with the Home Assistant app. All are ticked; untick any that shouldn't get alerts."
         }
       }
     },
     "error": {
       "first_look_required": "Pick at least one model for the first look.",
       "name_required": "Enter a name.",
-      "name_taken": "That name is already used.",
+      "name_taken": "That name is already used (names differing only in capitals or punctuation count as the same). Pick another.",
       "name_reserved": "That name is used by Neighborhood Watch itself (Unknown…, None, Nothing, Pests, Other wildlife, Unknown animals, Unsure motion). Pick another.",
       "name_pipe": "Names cannot contain |.",
-      "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
       "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo.",
       "name_letters": "Use at least one letter or number in the name.",
-      "sprite_cats_only": "Sprites are cats only. Clear Sprite (and Sprite, custom) for other animals."
+      "sprite_cats_only": "Card pictures are cats only. Clear Picture on the card and Advanced: custom card picture, or set Species to Cat.",
+      "appearance_not_settings": "Use setting: value lines, e.g. fur: \"#d0813f\" and tabby: true. Leave it empty to use the picture picked above.",
+      "needs_second_opinion": "Priority and Always strict need a Second opinion model. Add one under Configure → AI models, or turn these off."
     },
     "abort": {
-      "no_ai_task": "Set up an AI Task integration first (for example Google Generative AI).",
+      "no_ai_task": "Set up an AI integration with an AI Task that can read images first (for example Google Generative AI), then add Neighborhood Watch again.",
       "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]"
     }
   },
@@ -216,11 +203,12 @@
         "title": "Neighborhood Watch",
         "menu_options": {
           "cameras": "Cameras",
+          "schedule": "When to watch",
           "pests": "Pests",
           "catch_alls": "Other animals and motion",
           "people": "People (who gets alerts)",
           "alerts": "Alerts",
-          "schedule": "When to watch",
+          "notifications": "Pictures in alerts",
           "models": "AI models",
           "advanced": "Advanced"
         },
@@ -231,14 +219,13 @@
         "description": "Settings most people never need to change.",
         "menu_options": {
           "identification": "AI instructions",
-          "training": "Training data",
-          "detector": "Local detector",
-          "notifications": "Notification pictures"
+          "training": "Saved photos",
+          "detector": "Local detector"
         }
       },
       "models": {
         "title": "AI models",
-        "description": "Pick at least one model for First look. Also add a different model under Second opinion: without one, priority animals are never confirmed, and an animal marked Always strict or not seen for a while is never counted. Each model is tried only when the one before gives no answer (busy, error or out of quota).",
+        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones: pick a different model there, or priority animals, look-alikes and new animals can never be confirmed. If a model is busy, failing or has used up its free daily allowance (quota), the next one in its list is tried.",
         "data": {
           "first_look": "First look",
           "second_opinion": "Second opinion",
@@ -246,19 +233,18 @@
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
-          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, or came from a backup and names an animal. Tip: put a smarter model first, and use different models from the first look.",
-          "paid_models": "Tick the models from First look or Second opinion that cost money. They are used only as a last resort, and never to double-check a backup's answer. A model listed only here is never used."
+          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, names a wild animal like a raccoon or a fox (not a bird or a deer), or came from a backup and names an animal. Tip: a smarter model first, and different models from First look.",
+          "paid_models": "Tick the models from First look or Second opinion that cost money. They always go last in their list, and are never used to double-check a backup's answer. A model ticked only here is never used."
         },
         "sections": {
           "first_model_hours": {
-            "name": "First model's hours",
-            "description": "Optional: save the first model's daily quota for the busiest hours.",
+            "name": "Save the first model for busy hours",
+            "description": "Optional, and only useful with two or more models in First look. Outside these hours the backups go first, so the first model's free daily allowance lasts through the busy hours.",
             "data": {
-              "main_start": "First model's hours (from)",
-              "main_end": "First model's hours (until)"
+              "main_start": "Busy hours from",
+              "main_end": "Busy hours until"
             },
             "data_description": {
-              "main_start": "Outside these hours the first model in First look waits behind the free backups, saving its daily quota for the busiest hours.",
               "main_end": "Leave both empty to keep it first all the time."
             }
           }
@@ -266,7 +252,7 @@
       },
       "schedule": {
         "title": "When to watch",
-        "description": "Cameras are watched from the start time until the end time. Also watch whenever it is dark adds the hours the sun is down; Watch all day watches around the clock.",
+        "description": "Cameras are checked between Watch from and Watch until. Also watch whenever it is dark adds the hours the sun is down. Watch all day ignores both and checks around the clock (uses more AI quota).",
         "data": {
           "night_start": "Watch from",
           "night_end": "Watch until",
@@ -294,25 +280,25 @@
       },
       "identification": {
         "title": "AI instructions",
-        "description": "The AI instructions. {animals} is replaced with each animal's description, {location} with the camera name, {absent} with the recently-absent line, {extra_rules} with the extra rules and {wildlife} with the wildlife list.",
+        "description": "What the AI is told on every check. Most people only need the notes and visitors below. If you edit the instructions, keep the words in braces: {animals} (required: your animals' descriptions), {location} (the camera's name), {absent}, {extra_rules} (the notes below), {wildlife} and {unknown_kinds}.",
         "data": {
-          "instructions": "Instructions",
-          "reset_instructions": "Discard my edits and restore the default instructions",
           "extra_rules": "Notes for the AI (all cameras)",
           "wildlife": "Common visitors (hints for the AI)",
+          "reference_photos": "Send reference photos",
           "absent_days": "Recently absent after",
-          "reference_photos": "Send reference photos"
+          "instructions": "Instructions",
+          "reset_instructions": "Discard my edits and restore the default instructions"
         },
         "data_description": {
           "extra_rules": "Rules for every camera. Notes about one camera go on that camera's page.",
           "wildlife": "Animals you often see, as hints. Not a limit: the AI names whatever it sees, and corrections accept any animal.",
-          "absent_days": "An animal not seen this long is named only when both AI models are sure.",
-          "reference_photos": "Each animal's reference photo goes to the AI beside the frame. More accurate; uses more tokens."
+          "reference_photos": "Each animal's reference photo goes to the AI beside the frame. More accurate; each check costs a little more of your AI allowance.",
+          "absent_days": "An animal not seen this long, or a new one until it's first confirmed, is named only when both AI models are sure. Needs a Second opinion model."
         }
       },
       "notifications": {
-        "title": "Notification pictures",
-        "description": "Each sighting event carries a picture link that phones can open. Leave empty to use this Home Assistant's external URL.",
+        "title": "Pictures in alerts",
+        "description": "Alerts carry a picture that phones open. Leave this empty if pictures already load away from home (Home Assistant Cloud, or an Internet address under Settings → System → Network). Fill it in only if they don't.",
         "data": {
           "public_url": "Public address"
         },
@@ -322,7 +308,7 @@
       },
       "alerts": {
         "title": "Alerts",
-        "description": "Who gets alerts is set per person, under People. Cameras, animals and wildlife each decide when they alert.",
+        "description": "Where each of your animals alerts is set on the animal; for everything else, under Pests and Other animals and motion. Who gets alerts, and their quiet times, is set per person under People.",
         "data": {
           "alerts": "Send alerts",
           "correction_buttons": "Right / Not sure / Other buttons on alerts",
@@ -333,33 +319,33 @@
           "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
           "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data.",
           "review_page": "The dashboard page with this card, e.g. /lovelace/pets#review (#review opens the To review section). Empty = the app opens as usual.",
-          "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in the review queue. Critical alerts and missing mode ignore this."
+          "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in the review queue. Critical alerts, unsure motion and missing mode ignore this."
         }
       },
       "training": {
-        "title": "Training data",
-        "description": "Every checked frame is saved, downscaled, with what the AI said and what you confirmed or corrected. It is what a custom model is trained on.",
+        "title": "Saved photos",
+        "description": "Every checked frame is saved, downscaled, with what the AI said and what you answered. These photos are shown in the Review list, used when you correct a sighting, and are what the local detector trains on.",
         "data": {
-          "dataset": "Save training data",
+          "dataset": "Save checked photos (needed for Review)",
           "dataset_dir": "Folder",
           "dataset_gb": "Keep at most"
         },
         "data_description": {
-          "dataset_dir": "Leave empty for the media folder. For a network share added under Settings → System → Storage, enter its path, e.g. /media/your_share/neighborhood_watch. Existing photos stay where they are; use the Move training data action to bring them over.",
-          "dataset_gb": "When full, the oldest unlabelled frames go first; labelled ones are kept longest."
+          "dataset_dir": "Leave empty for the media folder. For a network share added under Settings → System → Storage, enter its path, e.g. /media/your_share/neighborhood_watch. Existing photos stay where they are; use the Move training data action to bring them over. The local detector trains on this folder: mount it into the vision service at /dataset.",
+          "dataset_gb": "When full, the oldest unanswered photos go first; ones you answered are kept longest."
         }
       },
       "detector": {
         "title": "Local detector",
-        "description": "An optional MegaDetector service on your own machine (see the vision folder in the repository). It looks at every frame before the AI. Start with Shadow and watch the Detector agreement sensor; switch to Skip empty frames once it has no misses.",
+        "description": "Optional. A free animal detector that runs on your own NAS or PC and looks at every photo before the AI, so empty frames (wind, cobwebs, shadows) don't use up your AI allowance. Start in Test only. After a week, open the Detector agreement sensor: when its misses attribute is 0, switch to Skip empty frames.",
         "data": {
           "detector_url": "Address",
           "detector_mode": "Mode",
-          "detector_min": "Animal threshold"
+          "detector_min": "How sure the detector must be (0 to 1)"
         },
         "data_description": {
           "detector_url": "e.g. {example}. Leave empty to turn it off.",
-          "detector_min": "Below this confidence the frame counts as empty. Lower finds more but also more false alarms; 0.2 is a good start."
+          "detector_min": "Below this the photo counts as empty. Lower catches more animals but skips fewer empty frames. 0.2 is a good start; lower it if the Detector agreement sensor shows misses."
         }
       },
       "catch_alls": {
@@ -371,11 +357,11 @@
             "description": "A cat or dog that isn't one of yours.",
             "data": {
               "unknown_alert_at": "Alert at",
-              "unknown_critical_at": "Critical alerts only at"
+              "unknown_critical_at": "Ring through silent mode at"
             },
             "data_description": {
               "unknown_alert_at": "Empty: never.",
-              "unknown_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
+              "unknown_critical_at": "Only while the Unknown animals critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           },
           "other": {
@@ -383,11 +369,11 @@
             "description": "Any wild animal that isn't a pest.",
             "data": {
               "other_alert_at": "Alert at",
-              "other_critical_at": "Critical alerts only at"
+              "other_critical_at": "Ring through silent mode at"
             },
             "data_description": {
               "other_alert_at": "Empty: never.",
-              "other_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
+              "other_critical_at": "Only while the Other wildlife critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           },
           "motion": {
@@ -395,18 +381,18 @@
             "description": "The AI saw movement but couldn't say what.",
             "data": {
               "motion_alert_at": "Alert at",
-              "motion_critical_at": "Critical alerts only at"
+              "motion_critical_at": "Ring through silent mode at"
             },
             "data_description": {
               "motion_alert_at": "Empty: never.",
-              "motion_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
+              "motion_critical_at": "Only while the Unsure motion critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           }
         }
       },
       "camera": {
-        "title": "Camera",
-        "description": "Settings for {camera}.{sensors}",
+        "title": "Camera: {camera}",
+        "description": "Settings for {camera}. Motion and animal sensors start a check; person and vehicle sensors skip it. A new camera's sensors are suggested from its device, so check them.{sensors}",
         "data": {
           "camera": "Camera",
           "name": "Name",
@@ -417,8 +403,10 @@
         },
         "data_description": {
           "name": "Used in the AI prompt, alerts and the summary, e.g. Garage.",
-          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet.",
-          "remove": "Its entities go too."
+          "ai_notes": "Only this camera's checks see it. E.g. the bins are at the left; a cat behind the window on the right is an indoor pet. Notes you add while reviewing a sighting are added here too.",
+          "remove": "Turn on, then Submit, to delete this camera and its switches and sensors. Other changes on this page are not saved.",
+          "triggers": "The camera's motion or animal sensors. A check runs each time one turns on, during the hours set under When to watch.",
+          "skip_when": "For example its person or vehicle sensor, so people and cars don't use AI quota. Checks you start by hand (the Identify action) ignore this."
         },
         "sections": {
           "timing": {
@@ -432,33 +420,34 @@
               "check_every": "Also check every"
             },
             "data_description": {
-              "cooldown": "Minimum time between checks of this camera.",
-              "priority_cooldown": "Used instead when this camera's last real animal was a priority animal. 0 = off.",
-              "missing_cooldown": "Used instead while any missing mode is on. 0 = off.",
-              "reopened_by": "For a camera an animal passes on its way here.",
-              "check_every": "For a camera without a motion sensor (any RTSP / ONVIF camera): look on a timer. 0 = only when a sensor triggers. Uses AI quota on every check."
+              "cooldown": "Shortest time between two checks of this camera.",
+              "priority_cooldown": "Used instead of Cooldown after this camera last saw a priority animal, e.g. longer so a pet resting here doesn't use quota every few minutes. 0 = same as Cooldown.",
+              "missing_cooldown": "Used instead of both while any animal's Missing mode is on, e.g. 1 so no sighting is missed. 0 = same as Cooldown.",
+              "reopened_by": "Cameras an animal passes on its way here (e.g. a gate before the porch). Once one of them is checked, this camera can be checked again straight away.",
+              "check_every": "For a camera with no motion sensor: check it on a timer, during watch hours only. 0 = only when a sensor turns on. Every check uses AI quota. The Cooldown still applies."
             }
           },
           "critical_alerts": {
             "name": "Critical alerts",
             "description": "What rings through silent mode here.",
             "data": {
-              "critical_except": "Critical alerts here, except"
+              "critical_except": "Never ring through silent mode here for"
             },
             "data_description": {
-              "critical_except": "While this camera's Critical alerts switch is on, anything seen here rings through silent mode except these (for example a pet that's allowed here)."
+              "critical_except": "While this camera's Critical alerts switch is on (on the camera's device; it starts off), everything seen here rings through silent mode: any confidence, unsure motion too, even animals whose alerts are off. List what's allowed here, e.g. a pet that sleeps in the garage. People's mutes still apply."
             }
           },
           "deterrent": {
             "name": "Scaring pests off",
             "description": "Lights and a sound for when a pest is seen here.",
             "data": {
-              "deterrent_lights": "Lights that scare pests off",
+              "deterrent_lights": "Lights or switches that scare pests off",
               "deterrent_minutes": "Leave them on for",
               "deterrent_sound": "Sound that scares pests off"
             },
             "data_description": {
               "deterrent_lights": "Turned on when a pest is seen here, then back off.",
+              "deterrent_minutes": "How long they stay on after the last pest sighting.",
               "deterrent_sound": "Played when a pest is seen here."
             }
           }
@@ -468,43 +457,43 @@
         "title": "Person",
         "data": {
           "name": "Name",
-          "person": "Person",
-          "notify_service": "Phone",
+          "person": "Their Home Assistant person",
+          "notify_service": "Send alerts to",
           "remove": "Remove this person"
         },
         "data_description": {
-          "person": "Needed for quiet zones (where they are).",
-          "notify_service": "The phone with the Home Assistant app that gets the alerts.",
-          "remove": "They stop getting alerts."
+          "person": "Optional. Used only to know where they are, for quiet zones.",
+          "notify_service": "Usually the phone with the Home Assistant app. Other notify services get the alert as text with a link to the picture: no critical sound, no buttons.",
+          "remove": "Turn on, then Submit, to delete this person. They stop getting alerts and their critical-alerts switch goes too. Other changes on this page are not saved."
         },
         "sections": {
           "critical_alerts": {
-            "name": "Critical alerts",
-            "description": "Missing-mode alerts, and the sound that rings through silent mode.",
+            "name": "Missing mode and critical sound",
+            "description": "Missing-mode alerts, and how critical alerts sound. To make all of this person's alerts normal ones, turn off their 'gets critical alerts' switch.",
             "data": {
               "missing_alerts": "Gets missing-mode alerts",
-              "critical_sound": "Critical sound",
+              "critical_sound": "Critical sound (iPhone)",
               "critical_volume": "Critical volume"
             },
             "data_description": {
-              "missing_alerts": "Critical alerts for any possible sighting of an animal in missing mode.",
-              "critical_sound": "For iPhones: a sound file name from the Companion app, or default.",
-              "critical_volume": "From 0 to 1; 1 is full volume. Missing-mode alerts always ring at full volume."
+              "missing_alerts": "They get the critical alert for any possible sighting of an animal in Missing mode, instead of the normal one.",
+              "critical_sound": "A sound file name from the iPhone Companion app, or default. Android ignores this.",
+              "critical_volume": "From 0.1 to 1 (full volume). Missing-mode alerts always ring at full volume."
             }
           },
           "mutes": {
             "name": "Mutes",
             "description": "Animals this person never hears about.",
             "data": {
-              "muted": "Don't notify me about"
+              "muted": "Never alert them about"
             },
             "data_description": {
-              "muted": "Animals this person never gets alerts for. Missing mode still reaches them."
+              "muted": "This person gets no alerts for these, critical ones included. If Gets missing-mode alerts is on, missing-mode alerts still reach them."
             }
           },
           "quiet": {
             "name": "Quiet zones and hours",
-            "description": "Where and when alerts are toned down.",
+            "description": "Where and when alerts stop ringing through silent mode, or stop altogether.",
             "data": {
               "quiet_zones": "Quiet zones",
               "quiet_start": "Quiet hours start",
@@ -512,7 +501,7 @@
               "quiet_mode": "When in a quiet zone or quiet hours"
             },
             "data_description": {
-              "quiet_zones": "Zones (like work) where alerts are toned down. Needs Person above.",
+              "quiet_zones": "Zones (like work) where the setting below applies. Needs Their Home Assistant person above.",
               "quiet_start": "Optional: a daily window, like overnight.",
               "quiet_end": "Leave both empty for no quiet hours.",
               "quiet_mode": "Missing-mode alerts always arrive, at most as normal ones."
@@ -546,16 +535,16 @@
       },
       "pests": {
         "title": "Pests",
-        "description": "Pests are animals you want gone, like a raccoon at the bins. They alert every time they come back, and a camera's lights and sound (under Cameras → Scaring pests off) go on when one is seen there. Any animal not listed here is other wildlife.",
+        "description": "Pests are animals you want gone, like a raccoon at the bins. They alert every time they come back, and a camera's lights and sound (under Cameras → Scaring pests off) go on when one is seen there. Any animal not listed here is other wildlife. By default pests alert at every camera. Their Pests critical alerts switch is on the Neighborhood Watch device.",
         "data": {
           "pests": "Pests",
           "pest_alert_at": "Alert at",
-          "pest_critical_at": "Critical alerts only at"
+          "pest_critical_at": "Ring through silent mode at"
         },
         "data_description": {
           "pests": "Pick from the list or type any animal.",
           "pest_alert_at": "Empty: never.",
-          "pest_critical_at": "Where its Critical alerts switch rings through silent mode. Empty: wherever it alerts."
+          "pest_critical_at": "Only while the Pests critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
         }
       }
     },
@@ -563,10 +552,13 @@
       "first_look_required": "Pick at least one model for the first look.",
       "missing_animals": "The instructions must contain {animals}.",
       "name_required": "Enter a name.",
-      "name_taken": "That name is already used.",
+      "name_taken": "Another camera already has this name (names differing only in capitals or punctuation count as the same). Pick another.",
       "person_needed": "Pick their Person to use quiet zones.",
       "folder_not_absolute": "Enter the full path, starting with /, e.g. /media/your_share/neighborhood_watch.",
-      "folder_unwritable": "That folder can't be created or written to. Check the path and that the share is connected."
+      "folder_unwritable": "That folder can't be created or written to. Check the path and that the share is connected.",
+      "camera_taken": "That camera is already set up. Pick it from the Cameras list to change it.",
+      "quiet_hours_both": "Set both Quiet hours start and end (different times), or leave both empty.",
+      "notify_unknown": "No notify service by that name. Pick one from the list."
     }
   },
   "config_subentries": {
@@ -584,29 +576,25 @@
             "species": "Species",
             "description": "What it looks like",
             "reference_upload": "Reference photo",
-            "sprite": "Sprite"
+            "sprite": "Picture on the card"
           },
           "data_description": {
-            "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-            "reference_upload": "A clear night photo, sent to the AI beside each frame.",
             "species": "Pick one or type any other kind.",
-            "sprite": "Optional. How the card draws it when there's no recent photo: a ready-made cat coat or breed. Cats only."
+            "description": "Sent to the AI. The most important field: lead with markings that still show at night in infrared (white paws, bib, tail rings, size).",
+            "reference_upload": "A clear night photo, sent to the AI beside each frame.",
+            "sprite": "Cats only. How the card draws it when there's no recent photo. Doesn't affect recognition."
           },
           "sections": {
             "looks": {
-              "name": "Looks",
-              "description": "Coat details and tips that help the AI tell it apart, and a custom sprite for the card.",
+              "name": "Card picture and tips",
+              "description": "Extra tips for the AI, and a custom card picture.",
               "data": {
-                "pattern": "Coat pattern",
-                "base": "Main tone at night (infrared)",
                 "tips": "Identification tips",
-                "appearance": "Sprite, custom (optional)"
+                "appearance": "Advanced: custom card picture"
               },
               "data_description": {
-                "pattern": "For a priority animal, both AI models must report this pattern.",
-                "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
-                "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar."
+                "tips": "Also sent to the AI, right after What it looks like: what it's confused with, how to tell them apart. Notes you add after correcting a sighting are added here too.",
+                "appearance": "Optional, for tinkerers. Changes the picked picture, one setting per line. Example:\nfur: \"#7f7e7b\"\ntabby: true\nwhitePaws: true\ncollar: \"#3f9a55\"\nLeave empty if the picture above is close enough."
               }
             },
             "rules": {
@@ -614,27 +602,31 @@
               "description": "How carefully it is checked, and where it alerts.",
               "data": {
                 "priority": "Priority animal",
+                "pattern": "Coat pattern",
+                "base": "Main tone at night (infrared)",
                 "always_strict": "Always strict",
                 "alert_at": "Alert at",
-                "critical_at": "Critical alerts only at"
+                "critical_at": "Ring through silent mode at"
               },
               "data_description": {
-                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model.",
-                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically. Needs a Second opinion model.",
-                "alert_at": "Cameras where it sends an alert. Empty: never.",
-                "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
+                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+                "pattern": "Priority animals only. Both AI models must report this pattern before it's confirmed. Leave Don't check if unsure: a wrong pick means it is never confirmed.",
+                "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
+                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+                "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
+                "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
               }
             },
             "last_seen": {
               "name": "Last seen",
-              "description": "Optional: when and where it was last seen, if you already know.",
+              "description": "A new animal only counts once both AI models are sure it's this one. If it already visits, enter roughly when you last saw it, so it counts normally from the start.",
               "data": {
-                "known_last_seen": "Last seen",
-                "known_location": "Last seen at"
+                "known_last_seen": "When it was last seen",
+                "known_location": "Where it was last seen"
               },
               "data_description": {
-                "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
-                "known_location": "Optional: where it was last seen."
+                "known_last_seen": "Roughly. Leave empty for an animal that has never visited.",
+                "known_location": "Optional, e.g. Back garden."
               }
             }
           }
@@ -647,30 +639,26 @@
             "description": "What it looks like",
             "reference_upload": "New reference photo",
             "remove_reference": "Remove the reference photo",
-            "sprite": "Sprite"
+            "sprite": "Picture on the card"
           },
           "data_description": {
-            "description": "Sent to the AI. Lead with the markings that still show in infrared at night.",
-            "reference_upload": "A clear night photo, sent to the AI beside each frame. Replaces the current one.",
-            "remove_reference": "The AI then judges each frame without one.",
             "species": "Pick one or type any other kind.",
-            "sprite": "Optional. How the card draws it when there's no recent photo: a ready-made cat coat or breed. Cats only."
+            "description": "Sent to the AI. The most important field: lead with markings that still show at night in infrared (white paws, bib, tail rings, size).",
+            "reference_upload": "A clear night photo, sent to the AI beside each frame. Replaces the current one.",
+            "remove_reference": "The AI then judges each frame without one. Ignored if you upload a new photo.",
+            "sprite": "Cats only. How the card draws it when there's no recent photo. Doesn't affect recognition."
           },
           "sections": {
             "looks": {
-              "name": "Looks",
-              "description": "Coat details and tips that help the AI tell it apart, and a custom sprite for the card.",
+              "name": "Card picture and tips",
+              "description": "Extra tips for the AI, and a custom card picture.",
               "data": {
-                "pattern": "Coat pattern",
-                "base": "Main tone at night (infrared)",
                 "tips": "Identification tips",
-                "appearance": "Sprite, custom (optional)"
+                "appearance": "Advanced: custom card picture"
               },
               "data_description": {
-                "pattern": "For a priority animal, both AI models must report this pattern.",
-                "base": "Infrared shows tones, not colours, so a ginger cat usually looks light or grey. Pick the tone covering most of the body. For a priority animal, both AI models must report it.",
-                "tips": "Extra rules for telling this animal apart, e.g. what it is never confused with.",
-                "appearance": "Optional. Your own sprite settings, or changes to the one picked above: fur colour and options such as tabby, tuxedo, whitePaws, collar."
+                "tips": "Also sent to the AI, right after What it looks like: what it's confused with, how to tell them apart. Notes you add after correcting a sighting are added here too.",
+                "appearance": "Optional, for tinkerers. Changes the picked picture, one setting per line. Example:\nfur: \"#7f7e7b\"\ntabby: true\nwhitePaws: true\ncollar: \"#3f9a55\"\nLeave empty if the picture above is close enough."
               }
             },
             "rules": {
@@ -678,27 +666,31 @@
               "description": "How carefully it is checked, and where it alerts.",
               "data": {
                 "priority": "Priority animal",
+                "pattern": "Coat pattern",
+                "base": "Main tone at night (infrared)",
                 "always_strict": "Always strict",
                 "alert_at": "Alert at",
-                "critical_at": "Critical alerts only at"
+                "critical_at": "Ring through silent mode at"
               },
               "data_description": {
-                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model.",
-                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while get this automatically. Needs a Second opinion model.",
-                "alert_at": "Cameras where it sends an alert. Empty: never.",
-                "critical_at": "Where its Critical alerts switch makes it ring through silent mode. Empty: wherever it alerts."
+                "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+                "pattern": "Priority animals only. Both AI models must report this pattern before it's confirmed. Leave Don't check if unsure: a wrong pick means it is never confirmed.",
+                "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
+                "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
+                "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
+                "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
               }
             },
             "last_seen": {
               "name": "Last seen",
-              "description": "Optional: when and where it was last seen, if you already know.",
+              "description": "A new animal only counts once both AI models are sure it's this one. If it already visits, enter roughly when you last saw it, so it counts normally from the start.",
               "data": {
-                "known_last_seen": "Last seen",
-                "known_location": "Last seen at"
+                "known_last_seen": "When it was last seen",
+                "known_location": "Where it was last seen"
               },
               "data_description": {
-                "known_last_seen": "Optional: when it was last seen, if you know (e.g. from an earlier setup). Animals not seen for a while are treated as recently absent.",
-                "known_location": "Optional: where it was last seen."
+                "known_last_seen": "Roughly. Leave empty for an animal that has never visited.",
+                "known_location": "Optional, e.g. Back garden."
               }
             }
           },
@@ -707,13 +699,14 @@
       },
       "error": {
         "name_required": "Enter a name.",
-        "name_taken": "That name is already used.",
+        "name_taken": "Another animal already has this name (names differing only in capitals or punctuation count as the same). Pick another.",
         "name_reserved": "That name is used by Neighborhood Watch itself (Unknown…, None, Nothing, Pests, Other wildlife, Unknown animals, Unsure motion). Pick another.",
         "name_pipe": "Names cannot contain |.",
-        "priority_not_strict": "A priority animal has its own stricter rules; turn off Always strict.",
         "photo_unreadable": "That photo can't be read. Use a JPEG, PNG or iPhone (HEIC) photo.",
         "name_letters": "Use at least one letter or number in the name.",
-        "sprite_cats_only": "Sprites are cats only. Clear Sprite (and Sprite, custom) for other animals."
+        "sprite_cats_only": "Card pictures are cats only. Clear Picture on the card and Advanced: custom card picture, or set Species to Cat.",
+        "appearance_not_settings": "Use setting: value lines, e.g. fur: \"#d0813f\" and tabby: true. Leave it empty to use the picture picked above.",
+        "needs_second_opinion": "Priority and Always strict need a Second opinion model. Add one under Configure → AI models, or turn these off."
       },
       "abort": {
         "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
@@ -726,7 +719,7 @@
         "blotchy": "Blotchy (e.g. calico)",
         "uniform": "One colour all over",
         "striped": "Stripes (e.g. tabby)",
-        "na": "Not checked"
+        "na": "Don't check (any coat)"
       }
     },
     "base": {
@@ -734,7 +727,7 @@
         "white": "White",
         "grey": "Grey",
         "black": "Black",
-        "na": "Not checked"
+        "na": "Don't check (any tone)"
       }
     },
     "priority_candidate": {
@@ -746,8 +739,8 @@
     },
     "detector_mode": {
       "options": {
-        "shadow": "Shadow: ask it and compare, change nothing",
-        "skip_empty": "Skip empty frames: no AI call when it finds no animal (never in missing mode)"
+        "shadow": "Test only: ask the detector and compare with the AI, change nothing",
+        "skip_empty": "Skip empty frames: no AI check when the detector sees no animal (never in missing mode)"
       }
     },
     "confidence": {

@@ -16,15 +16,15 @@ services:
       - ./work:/work
       # The folder you bulk-scan (photos and videos); reports are written back into it.
       - ./scan:/scan
-      # The integration's training-data folder (Configure -> training data). Adjust the left
+      # The integration's saved-photos folder (Configure -> Advanced -> Saved photos). Adjust the left
       # side to where that folder is on this machine; read-only is enough.
-      - /volume1/Workspace/neighborhood-watch/dataset:/dataset:ro
+      - /path/to/neighborhood_watch/dataset:/dataset:ro
     shm_size: 1gb           # training's data loaders share memory here (Docker's default is 64 MB)
     devices:
       - /dev/dri:/dev/dri   # Intel GPU; remove this line on machines without one (it then runs on the CPU)
     environment:
       NW_DEVICE: AUTO
-      TZ: Etc/UTC           # your time zone, e.g. Europe/Berlin: the training schedule uses local time
+      TZ: Etc/UTC           # CHANGE to your time zone, e.g. Europe/Berlin: training times use it
       NW_TRAIN: "1"         # 0 = never train automatically (POST /train still works)
       NW_TRAIN_DAY: sunday
       NW_TRAIN_HOUR: "13"

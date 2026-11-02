@@ -17,6 +17,13 @@ const MENU = "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z";
 const BACK = "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z";
 const CHEVRON = "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
 const NEW = "add_new"; // the options flow's "+ Add ..." choice
+// Training: vision/train.py's NW_TRAIN_MIN_FIRST default, and the hints that explain it.
+const MIN_FIRST = 40;
+const firstRound = (rounds) => !(rounds || []).some((r) => r.confirmed != null && !r.error);
+const NO_DATASET =
+  "The vision service can't see your saved photos. In its compose file, mount the folder from Detector → Saved photos at /dataset.";
+const SCHEDULE_HINT =
+  "Saved on the vision service itself, not in Home Assistant. The detector's address, mode and threshold are in Local detector above. Times are in the vision service's time zone (TZ in its compose file).";
 
 // Tabs, and the settings forms on each: the options-flow steps to walk to reach a form.
 const TABS = [
@@ -44,9 +51,9 @@ const INTRO = {
 const FORMS = {
   cameras: [["schedule"]],
   animals: [["pests"], ["catch_alls"]],
-  alerts: [["alerts"], ["advanced", "notifications"]],
+  alerts: [["alerts"], ["notifications"]],
   ai: [["models"], ["advanced", "identification"]],
-  detector: [["advanced", "detector"], ["advanced", "training"]],
+  detector: [["advanced", "detector"], ["advanced", "training"]],  // the vision status goes between them
 };
 
 const STYLE = `
@@ -506,13 +513,15 @@ class NeighborhoodWatchPanel extends HTMLElement {
     this._intro(main);
     if (this._tab === "review") return this._showReview(main);
     if (this._tab === "cameras" || this._tab === "people" || this._tab === "animals") this._showList(main);
+    const [first, ...rest] = FORMS[this._tab] || [];
+    if (first) this._addForm(main, { path: first });
     if (this._tab === "detector") {
       this._visionBox = document.createElement("div");
       main.append(this._visionBox);
       this._renderVision();
       this._refreshVision();
     }
-    for (const path of FORMS[this._tab] || []) this._addForm(main, { path });
+    for (const path of rest) this._addForm(main, { path });
   }
 
   _addForm(main, options) {
@@ -702,7 +711,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     return "";
   }
 
-  _stageText(t) {
+  _stageText(t, rounds) {
     const st = t.status || {};
     const s = t.settings;
     if (t.running) {
@@ -712,7 +721,9 @@ class NeighborhoodWatchPanel extends HTMLElement {
     }
     const enabled = s ? s.train_enabled : t.enabled;
     let when = "Weekly training is off.";
-    if (enabled && s) when = `Next round: ${cap(s.train_day)} from ${hourName(s.train_hour)}, once ${s.min_new} new photos are confirmed.`;
+    // Before the first round it waits for enough confirmed animal photos instead.
+    const need = firstRound(rounds) ? `there are ${MIN_FIRST} confirmed animal photos` : `${s?.min_new} new photos are confirmed`;
+    if (enabled && s) when = `Next round: ${cap(s.train_day)} from ${hourName(s.train_hour)}, once ${need}.`;
     else if (enabled) when = `Next round: ${cap(t.schedule)}.`;
     if (!st.state) return when;
     const last = { skipped: "Last check skipped", done: "Last round finished", error: "Last round failed" }[st.state] || "Last round";
@@ -753,23 +764,24 @@ class NeighborhoodWatchPanel extends HTMLElement {
 
   _settings(s) {
     if (!s) {
-      return `<section class="card"><h3>Training settings</h3><div class="hint">Update the vision service (pull its image again) to change its training settings here.</div></section>`;
+      return `<section class="card"><h3>Training schedule</h3><div class="hint">Update the vision service (pull its image again) to change its training settings here.</div></section>`;
     }
     const off = s.train_enabled ? "" : "disabled";
     const days = DAYS.map((d) => `<option value="${d}" ${d === s.train_day ? "selected" : ""}>${cap(d)}</option>`).join("");
     const hours = Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.train_hour ? "selected" : ""}>${hourName(h)}</option>`).join("");
     const dev = (v, label) => `<label><input type="radio" name="device" value="${v}" ${s.train_device === v ? "checked" : ""}>${label}</label>`;
-    return `<section class="card"><h3>Training settings</h3>
+    return `<section class="card"><h3>Training schedule</h3>
+      <div class="hint" style="margin: -6px 0 10px">${SCHEDULE_HINT}</div>
       <div class="row inline"><span class="label" id="l-enabled">Weekly training</span>
         <label class="switch"><input type="checkbox" id="enabled" aria-labelledby="l-enabled" ${s.train_enabled ? "checked" : ""}><span></span></label></div>
       <div class="row"><span class="label">When</span>
         <span class="group"><select id="day" aria-label="Training day" ${off}>${days}</select><span>from</span>
         <select id="hour" aria-label="Training hour" ${off}>${hours}</select></span></div>
-      <div class="row"><span class="label" id="l-min">New confirmed photos needed</span>
+      <div class="row"><span class="label" id="l-min">New answered photos needed (after the first round)</span>
         <input type="number" id="min_new" min="1" max="10000" value="${s.min_new}" aria-labelledby="l-min" ${off}></div>
       <div class="row"><span class="label" id="l-device">Train on</span>
         <span class="seg" role="radiogroup" aria-labelledby="l-device">${dev("auto", "GPU")}${dev("cpu", "CPU")}</span></div>
-      <div class="hint">These live on the vision service. GPU uses the Intel GPU when it can, and the CPU if it can't. Changes apply to the next round.</div>
+      <div class="hint">GPU uses the Intel GPU when it can, and the CPU if it can't. Changes apply to the next round.</div>
       ${this._settingsError ? `<div class="error">${esc(this._settingsError)}</div>` : ""}
     </section>`;
   }
@@ -799,8 +811,8 @@ class NeighborhoodWatchPanel extends HTMLElement {
         <section class="card">
           <div class="head"><h3>Training</h3>
             <button class="btn" id="train" ${t.running || this._busy || !t.dataset ? "disabled" : ""}
-              title="${t.dataset ? "" : "No dataset folder is mounted"}">Train now</button></div>
-          <div class="hint" style="margin-top: 0">${esc(this._stageText(t))}</div>
+              title="${t.dataset ? "" : NO_DATASET}">Train now</button></div>
+          <div class="hint" style="margin-top: 0">${esc(this._stageText(t, d.history))}</div>
           ${f === null ? "" : `<div class="bar"><div style="width: ${Math.round(f * 100)}%"></div></div>`}
           ${this._message ? `<div class="error">${esc(this._message)}</div>` : ""}
         </section>

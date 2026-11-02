@@ -529,6 +529,16 @@ async def test_backup_double_check_never_uses_paid_models(hass, setup):
     assert event.data["confidence"] == "medium"
 
 
+async def test_paid_models_always_go_last(hass, setup):
+    entry = setup["entry"]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "first_look": [PAID, FIRST, BACKUP]})
+    await hass.async_block_till_done()
+    setup["ai"].say(FIRST, HomeAssistantError("429 quota"))
+    setup["ai"].say(BACKUP, "None|high|na|na|")
+    await trigger(hass, "yard")
+    assert setup["ai"].calls == [FIRST, BACKUP]  # listed first, still tried last
+
+
 async def test_split_vote_on_luna_alerts_as_luna(hass, setup):
     """A split vote: the backup said the priority cat, the paid model another cat."""
     setup["ai"].say(FIRST, HomeAssistantError("429 quota"))

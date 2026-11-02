@@ -39,8 +39,8 @@ Setup walks you through it, all in the UI:
 
 1. **AI models:** a first look, and a second opinion (needed for priority and strict animals).
 2. **When to watch:** set hours, darkness, or both.
-3. **Cameras:** sensors are filled in from each camera's device.
-4. **Pests:** e.g. raccoon, opossum, skunk.
+3. **Pests:** e.g. raccoon, opossum, skunk.
+4. **Cameras:** sensors are filled in from each camera's device.
 5. **Who gets alerts:** phones with the Home Assistant app.
 6. **Your animals:** name, looks, and an optional reference photo. Leave the name empty and submit when you're done, or straight away if you only care about pests.
 

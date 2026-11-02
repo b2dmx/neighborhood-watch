@@ -58,14 +58,14 @@ async def ready(hass: HomeAssistant, tmp_path: Path):
 async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["step_id"] == "user"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": [], "first_model_hours": {}})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": []})
     assert result["errors"] == {"first_look": "first_look_required"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini_pro"], "paid_models": [],
-         "first_model_hours": {"main_start": "06:00:00", "main_end": "22:00:00"}},
+        {"first_look": ["ai_task.gemini"], "second_opinion": ["ai_task.gemini_pro"]},
     )
     assert result["step_id"] == "schedule"
+    assert {str(k) for k in result["data_schema"].schema} >= {"night_start", "more"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {
@@ -75,11 +75,15 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
             "more": {"summary_time": "08:05:00", "on_camera_minutes": 10},
         },
     )
+    assert result["step_id"] == "wildlife"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon", "skunk"]})
     assert result["step_id"] == "cameras"
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"cameras": ["camera.backyard_cam_high_resolution_channel"]}
     )
     assert result["step_id"] == "camera"
+    timing = next(v for k, v in result["data_schema"].schema.items() if str(k) == "timing")
+    assert {str(k) for k in timing.schema.schema} == {"cooldown", "check_every"}  # the special cooldowns wait
     # Pre-filled from the device.
     schema = {str(k): k.default() for k in result["data_schema"].schema if callable(getattr(k, "default", None))}
     assert schema["name"] == "Backyard Cam"
@@ -97,15 +101,14 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
             "name": "Garage",
             "triggers": schema["triggers"],
             "skip_when": schema["skip_when"],
-            "timing": {"cooldown": 15, "priority_cooldown": 30, "missing_cooldown": 2},
+            "timing": {"cooldown": 15},
             "deterrent": {},
         },
     )
-    assert result["step_id"] == "wildlife"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon", "skunk"]})
     assert result["step_id"] == "animal"  # no phones to choose from: the people step is skipped
     assert "No cameras were picked" not in result["description_placeholders"]["notes"]
     assert "No phones with the Home Assistant app" in result["description_placeholders"]["notes"]
+    assert "No Second opinion model" not in result["description_placeholders"]["notes"]
     assert {str(k) for k in result["data_schema"].schema} == {
         "name", "species", "sprite", "description", "reference_upload", "looks", "rules", "last_seen"
     }
@@ -113,15 +116,16 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
         "name": "Luna",
         "species": "cat",
         "description": "A calico, mostly white with dark blotches.",
-        "looks": {"pattern": "blotchy", "base": "white"},
-        "rules": {"priority": True, "always_strict": True},
+        "looks": {},
+        "rules": {"priority": True, "always_strict": True, "pattern": "blotchy", "base": "white"},
         "last_seen": {},
     }
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], luna)
-    assert result["errors"] == {"base": "priority_not_strict"}
+    # A half-filled form without a name asks for the name instead of finishing.
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {**luna, "rules": {"priority": True, "always_strict": False}}
+        result["flow_id"], {"species": "cat", "looks": {"tips": "Bigger than the others."}, "rules": {}, "last_seen": {}}
     )
+    assert result["errors"] == {"name": "name_required"}
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], luna)  # Always strict: dropped
     assert result["step_id"] == "animal"
     assert result["description_placeholders"]["count"] == "1"
     result = await hass.config_entries.flow.async_configure(
@@ -130,8 +134,8 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     assert result["errors"] == {"name": "name_taken"}
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {"name": "Pepper", "species": "cat", "looks": {"pattern": "uniform", "base": "black", "appearance": {"fur": "#1d1d20"}},
-         "rules": {"priority": False, "always_strict": True}, "last_seen": {}},
+        {"name": "Pepper", "species": "cat", "looks": {"appearance": {"fur": "#1d1d20"}},
+         "rules": {"priority": False, "always_strict": True, "pattern": "uniform", "base": "black"}, "last_seen": {}},
     )
     assert result["step_id"] == "animal"  # an empty name finishes
     result = await hass.config_entries.flow.async_configure(
@@ -141,7 +145,8 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     entry = result["result"]
     assert entry.options["first_look"] == ["ai_task.gemini"]
     assert entry.options["summary_time"] == "08:05:00" and "more" not in entry.options  # stored flat
-    assert entry.options["instructions"] == DEFAULT_INSTRUCTIONS
+    assert entry.options["instructions"] == ""  # the built-in instructions, following updates
+    assert entry.options["paid_models"] == [] and entry.options["main_start"] == ""  # defaults
     subs = sorted((s.subentry_type, s.title) for s in entry.subentries.values())
     # Only animals are pages; cameras and people live in the options, pests are a list.
     assert subs == [("animal", "Luna"), ("animal", "Pepper")]
@@ -149,10 +154,11 @@ async def test_onboarding_creates_cameras_and_animals(hass: HomeAssistant, ready
     (garage,) = entry.options["cameras"].values()
     assert garage["slug"] == "garage" and garage["name"] == "Garage"
     assert garage["camera"] == "camera.backyard_cam_high_resolution_channel"
-    assert garage["priority_cooldown"] == 30 and garage["missing_cooldown"] == 2
+    assert garage["priority_cooldown"] == 0 and garage["missing_cooldown"] == 0
     assert "timing" not in garage and garage["deterrent_minutes"] == 2  # stored flat, as before
     luna_data = next(s.data for s in entry.subentries.values() if s.title == "Luna")
     assert luna_data["pattern"] == "blotchy" and luna_data["priority"] is True and "looks" not in luna_data
+    assert luna_data["always_strict"] is False  # a priority animal is already stricter
     assert luna_data["appearance"] is None  # no sprite set: the card draws the face
     pepper_data = next(s.data for s in entry.subentries.values() if s.title == "Pepper")
     assert pepper_data["appearance"] == {"fur": "#1d1d20"}  # the card's sprite
@@ -167,17 +173,18 @@ async def test_onboarding_without_ai_task_aborts(hass: HomeAssistant, ready):
 
 async def test_onboarding_can_skip_cameras_and_animals(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True,
          "more": {"summary_time": "08:05:00", "on_camera_minutes": 10}},
     )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     assert result["step_id"] == "wildlife"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     assert result["step_id"] == "animal"
     assert "No cameras were picked" in result["description_placeholders"]["notes"]
+    assert "No Second opinion model was picked" in result["description_placeholders"]["notes"]
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"species": "cat", "looks": {}, "rules": {}, "last_seen": {}}
     )
@@ -188,19 +195,19 @@ async def test_onboarding_can_skip_cameras_and_animals(hass: HomeAssistant, read
 
 async def test_onboarding_can_skip_a_camera_picked_by_mistake(hass: HomeAssistant, ready):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"first_look": ["ai_task.gemini"]})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True,
          "more": {"summary_time": "08:05:00", "on_camera_minutes": 10}},
     )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"cameras": ["camera.backyard_cam_high_resolution_channel"]}
     )
     assert result["step_id"] == "camera"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"name": "Backyard Cam", "skip": True})
-    assert result["step_id"] == "wildlife"
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
+    assert result["step_id"] == "animal"
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"species": "cat", "looks": {}, "rules": {}, "last_seen": {}}
     )
@@ -235,7 +242,7 @@ def _entry(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
-ADVANCED = {"identification", "training", "detector", "notifications"}
+ADVANCED = {"identification", "training", "detector"}
 
 
 async def _options(hass: HomeAssistant, entry, step: str):
@@ -254,6 +261,9 @@ async def test_add_camera_prefills_and_rejects_duplicates(hass: HomeAssistant, r
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"camera": "camera.backyard_cam_high_resolution_channel"}
     )
+    assert result["errors"] == {"camera": "camera_taken"}  # already the Garage camera
+    hass.states.async_set("camera.side_gate", "idle")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "camera.side_gate"})
     assert result["step_id"] == "camera"
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -303,19 +313,20 @@ async def test_add_and_edit_animal(hass: HomeAssistant, ready):
         (entry.entry_id, "animal"), context={"source": config_entries.SOURCE_USER}
     )
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Unknown Cat", "species": "cat", "looks": {"pattern": "na", "base": "na"},
-                            "rules": {"priority": False, "always_strict": False}, "last_seen": {}},
+        result["flow_id"], {"name": "Unknown Cat", "species": "cat", "looks": {},
+                            "rules": {"priority": False, "always_strict": False, "pattern": "na", "base": "na"}, "last_seen": {}},
     )
     assert result["errors"] == {"name": "name_reserved"}
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {"name": "Ziggy", "species": "dog", "sprite": "black", "looks": {"pattern": "na", "base": "na"},
-                            "rules": {"priority": False, "always_strict": False}, "last_seen": {}},
+        result["flow_id"], {"name": "Ziggy", "species": "dog", "sprite": "black", "looks": {},
+                            "rules": {"priority": False, "always_strict": False, "pattern": "na", "base": "na"}, "last_seen": {}},
     )
     assert result["errors"] == {"sprite": "sprite_cats_only"}
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Milo", "species": "cat", "description": "Black, long-haired.",
-                            "looks": {"pattern": "uniform", "base": "black"},
-                            "rules": {"priority": False, "always_strict": False}, "last_seen": {}},
+                            "looks": {},
+                            "rules": {"priority": False, "always_strict": False, "pattern": "uniform", "base": "black"},
+                            "last_seen": {}},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     milo = next(s for s in entry.subentries.values() if s.title == "Milo")
@@ -325,8 +336,8 @@ async def test_add_and_edit_animal(hass: HomeAssistant, ready):
     result = await entry.start_subentry_reconfigure_flow(hass, milo.subentry_id)
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Milo", "species": "cat", "description": "Black with a white bib.",
-                            "looks": {"pattern": "uniform", "base": "black", "tips": "Bigger than the others."},
-                            "rules": {"priority": False, "always_strict": False},
+                            "looks": {"tips": "Bigger than the others."},
+                            "rules": {"priority": False, "always_strict": False, "pattern": "uniform", "base": "black"},
                             "last_seen": {"known_location": "Porch"}, "remove_reference": False},
     )
     assert result["reason"] == "reconfigure_successful"
@@ -338,6 +349,10 @@ async def test_add_and_edit_animal(hass: HomeAssistant, ready):
 async def test_options_identification_requires_animals_placeholder(hass: HomeAssistant, ready):
     entry = _entry(hass)
     result = await _options(hass, entry, "identification")
+    keys = [str(k) for k in result["data_schema"].schema]
+    assert keys == ["extra_rules", "wildlife", "reference_photos", "absent_days", "instructions", "reset_instructions"]
+    key = next(k for k in result["data_schema"].schema if str(k) == "instructions")
+    assert key.default() == DEFAULT_INSTRUCTIONS  # empty is shown as the built-in text
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {"instructions": "no placeholder here", "reset_instructions": False, "wildlife": ["Fox"],
@@ -350,9 +365,16 @@ async def test_options_identification_requires_animals_placeholder(hass: HomeAss
          "reference_photos": False},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options["instructions"] == DEFAULT_INSTRUCTIONS
+    assert entry.options["instructions"] == ""
     assert entry.options["absent_days"] == 10
     assert entry.options["first_look"] == ["ai_task.gemini"]
+    result = await _options(hass, entry, "identification")
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"instructions": DEFAULT_INSTRUCTIONS, "reset_instructions": False, "wildlife": ["Fox"], "absent_days": 10,
+         "reference_photos": False},
+    )
+    assert entry.options["instructions"] == ""  # unchanged text is not frozen in
 
 
 async def test_add_and_edit_person(hass: HomeAssistant, ready):
@@ -438,8 +460,8 @@ async def test_onboarding_people_step_lists_phones(hass: HomeAssistant, ready):
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True, "watch_always": False},
     )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": ["Raccoon"]})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     assert result["step_id"] == "people"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"phones": ["mobile_app_sams_phone"]})
     assert "Configure → People" not in result["description_placeholders"]["notes"]
@@ -455,11 +477,11 @@ async def test_configure_menu_puts_the_advanced_pages_in_a_submenu(hass: HomeAss
     entry = _entry(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["menu_options"] == [
-        "cameras", "pests", "catch_alls", "people", "alerts", "schedule", "models", "advanced",
+        "cameras", "schedule", "pests", "catch_alls", "people", "alerts", "notifications", "models", "advanced",
     ]
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "advanced"})
     assert result["type"] is FlowResultType.MENU and result["step_id"] == "advanced"
-    assert result["menu_options"] == ["identification", "training", "detector", "notifications"]
+    assert result["menu_options"] == ["identification", "training", "detector"]
 
 
 async def test_options_models_keeps_the_hours_flat(hass: HomeAssistant, ready):
@@ -506,6 +528,7 @@ async def test_species_is_a_list_with_any_kind_allowed(hass: HomeAssistant, read
 async def test_camera_without_sensors_points_to_the_timer(hass: HomeAssistant, ready):
     hass.states.async_set("camera.rtsp_only", "idle")
     entry = _entry(hass)
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "cameras": {}})  # both are new
     result = await _options(hass, entry, "cameras")
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "add_new"})
     result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "camera.rtsp_only"})
@@ -529,15 +552,15 @@ async def test_onboarding_lists_phones_by_device_name(hass: HomeAssistant, ready
     hass.services.async_register("notify", "mobile_app_other", lambda call: None)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"first_look": ["ai_task.gemini"], "first_model_hours": {}}
+        result["flow_id"], {"first_look": ["ai_task.gemini"]}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
         {"night_start": "20:00:00", "night_end": "08:00:00", "use_dark": True,
          "more": {"summary_time": "08:05:00", "on_camera_minutes": 10}},
     )
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"pests": []})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"cameras": []})
     assert result["step_id"] == "people"
     key = next(k for k in result["data_schema"].schema if str(k) == "phones")
     options = result["data_schema"].schema[key].config["options"]
@@ -584,3 +607,119 @@ async def test_options_schedule_and_catch_alls_fold_into_sections(hass: HomeAssi
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["unknown_alert_at"] == ["*"] and entry.options["motion_alert_at"] == []
 
+
+
+def _two_cameras(hass: HomeAssistant) -> MockConfigEntry:
+    entry = _entry(hass)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            "second_opinion": ["ai_task.gemini_pro"],
+            "cameras": {
+                **entry.options["cameras"],
+                "cam2": {"camera": "camera.driveway", "name": "Driveway", "slug": "driveway",
+                         "triggers": [], "skip_when": [], "cooldown": 3, "reopened_by": ["garage"]},
+            },
+        },
+    )
+    return entry
+
+
+async def test_camera_names_and_entities_are_not_set_up_twice(hass: HomeAssistant, ready):
+    entry = _two_cameras(hass)
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "add_new"})
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "camera.driveway"})
+    assert result["errors"] == {"camera": "camera_taken"}
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "cam1"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"camera": "camera.backyard_cam_high_resolution_channel", "name": "DRIVEWAY!",
+         "timing": {}, "critical_alerts": {}, "deterrent": {}, "remove": False},
+    )
+    assert result["errors"] == {"name": "name_taken"}  # reads as the Driveway camera
+
+
+async def test_removing_a_camera_takes_it_out_of_reopened_by(hass: HomeAssistant, ready):
+    entry = _two_cameras(hass)
+    result = await _options(hass, entry, "cameras")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"camera": "cam1"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"camera": "camera.backyard_cam_high_resolution_channel", "name": "Garage",
+         "timing": {}, "critical_alerts": {}, "deterrent": {}, "remove": True},
+    )
+    assert list(entry.options["cameras"]) == ["cam2"]
+    assert entry.options["cameras"]["cam2"]["reopened_by"] == []
+
+
+async def test_person_needs_both_quiet_hours_and_a_known_notify_service(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
+    result = await _options(hass, entry, "people")
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"person": "add_new"})
+    sam = {"name": "Sam", "notify_service": "mobile_app_phone", "critical_alerts": {}, "mutes": {}}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**sam, "notify_service": "mobile_app_tablet", "quiet": {}}
+    )
+    assert result["errors"] == {"notify_service": "notify_unknown"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**sam, "quiet": {"quiet_start": "22:00:00"}}
+    )
+    assert result["errors"] == {"base": "quiet_hours_both"}
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**sam, "quiet": {"quiet_start": "22:00:00", "quiet_end": "22:00:00"}}
+    )
+    assert result["errors"] == {"base": "quiet_hours_both"}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {**sam, "quiet": {}})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_animal_checks_its_picture_and_second_opinion(hass: HomeAssistant, ready):
+    entry = _entry(hass)  # no Second opinion model
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "animal"), context={"source": config_entries.SOURCE_USER}
+    )
+    milo = {"name": "Milo", "species": "cat", "looks": {}, "rules": {}, "last_seen": {}}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**milo, "looks": {"appearance": "orange"}}
+    )
+    assert result["errors"] == {"appearance": "appearance_not_settings"}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**milo, "species": "dog", "looks": {"appearance": {"fur": "#7f7e7b"}}}
+    )
+    assert result["errors"] == {"appearance": "sprite_cats_only"}  # on the field that was filled in
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**milo, "rules": {"always_strict": True}}
+    )
+    assert result["errors"] == {"base": "needs_second_opinion"}
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "second_opinion": ["ai_task.gemini_pro"]}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**milo, "rules": {"always_strict": True}}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_a_new_reference_photo_wins_over_remove(hass: HomeAssistant, ready):
+    entry = _entry(hass)
+    luna = next(iter(entry.subentries.values()))
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "second_opinion": ["ai_task.gemini_pro"]}
+    )
+    result = await entry.start_subentry_reconfigure_flow(hass, luna.subentry_id)
+    with (
+        patch("custom_components.neighborhood_watch.config_flow._store_upload", return_value={}) as store,
+        patch("custom_components.neighborhood_watch.config_flow.remove_file") as remove,
+    ):
+        result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"],
+            {"name": "Luna", "species": "cat", "reference_upload": "0123456789abcdef0123456789abcdef", "remove_reference": True,
+             "looks": {}, "rules": {"priority": True}, "last_seen": {}},
+        )
+    assert result["reason"] == "reconfigure_successful"
+    store.assert_called_once()
+    remove.assert_not_called()

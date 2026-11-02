@@ -140,7 +140,7 @@
       </span>
     </div>
     <div class="row">
-      <span class="label" id="l-min">New confirmed photos needed</span>
+      <span class="label" id="l-min">New answered photos needed (after the first round)</span>
       <input type="number" id="min_new" min="1" max="10000" aria-labelledby="l-min">
     </div>
     <div class="row">
@@ -198,7 +198,10 @@ function showSettings(s) {
   for (const el of [$("day"), $("hour"), $("min_new")]) el.disabled = !s.train_enabled;
 }
 
-function stageText(t) {
+// Before the first round, training waits for NW_TRAIN_MIN_FIRST (train.py) confirmed animal photos.
+const MIN_FIRST = 40;
+
+function stageText(t, rounds) {
   const st = t.status || {};
   if (t.running) {
     if (st.stage === "training" && st.epochs) return `Training: pass ${st.epoch} of ${st.epochs}`;
@@ -206,7 +209,11 @@ function stageText(t) {
     return cap(st.stage || "starting");
   }
   const when = t.settings.train_enabled
-    ? `Next round: ${cap(t.settings.train_day)} from ${hourName(t.settings.train_hour)}, once ${t.settings.min_new} new photos are confirmed.`
+    ? `Next round: ${cap(t.settings.train_day)} from ${hourName(t.settings.train_hour)}, once ${
+      rounds.some((r) => r.confirmed != null && !r.error)
+        ? `${t.settings.min_new} new photos are confirmed`
+        : `there are ${MIN_FIRST} confirmed animal photos`
+    }.`
     : "Weekly training is off.";
   if (!st.state) return when;
   const last = { skipped: "Last check skipped", done: "Last round finished", error: "Last round failed" }[st.state] || "Last round";
@@ -257,10 +264,10 @@ async function refresh() {
     $("available").textContent = (h.available || []).map(devName).join(", ") || "—";
     $("loaded").textContent = h.loaded ? "Awake" : "Asleep until the next photo";
     chip(running ? "Training" : "Ready", running ? "warn" : "good");
-    $("train-state").textContent = stageText(t);
+    $("train-state").textContent = stageText(t, rounds || []);
     progress(t);
     $("train").disabled = running || busy || !t.dataset;
-    $("train").title = t.dataset ? "" : "No dataset folder is mounted";
+    $("train").title = t.dataset ? "" : "The vision service can't see your saved photos. In its compose file, mount the folder from Detector → Saved photos at /dataset.";
     if (document.activeElement !== $("min_new")) showSettings(t.settings);  // don't undo typing
     showHistory(rounds);
   } catch (err) {

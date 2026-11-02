@@ -16,7 +16,7 @@ It is all set up in the UI. A dashboard card comes with it.
 
 1. **A camera sees motion or an animal** during the watch window: between set times, or whenever it's dark, whichever is wider. Person and vehicle sensors skip the check; each camera has its own cooldown.
 2. **A snapshot is taken.** If it fails, the check stops, so the AI never judges an old photo.
-3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models are a last resort.
+3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models always go last.
 4. **A second model double-checks** (the **Second opinion** list, in order) when the first answer named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered. It also checks when a backup gave the first answer and named an animal; that check uses free models only.
 5. **The two answers become one verdict:**
    - Models that disagree give low confidence.
@@ -52,23 +52,23 @@ Copy `custom_components/neighborhood_watch` into your `config/custom_components`
 
 Onboarding walks through:
 
-1. **AI models.** The first look, the second opinion and any paid models, each in order. Only one model is needed (for the first look); the rest is optional.
+1. **AI models.** The first look and the second opinion, each in order. Only one model is needed (for the first look); the rest is optional. Paid models and the first model's busy hours are set later under **Configure → AI models**.
 2. **When to watch.** Start and end times, whether darkness also counts, and when the night summary is built.
-3. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
-4. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
+3. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
+4. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
-6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main tone at night (infrared shows tones, not colours), and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked or no phones were found, so nothing is missed.
+6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main tone at night (infrared shows tones, not colours), and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked, no phones were found or no second opinion model was picked, so nothing is missed.
 
-Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Critical alerts**, **Mutes** and **Quiet zones and hours**; for an animal: **Looks**, **Alerts and strictness** and **Last seen**):
+Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Missing mode and critical sound**, **Mutes** and **Quiet zones and hours**; for an animal: **Card picture and tips**, **Alerts and strictness** and **Last seen**):
 
 - **Cameras**. Besides its sensors and cooldowns, a camera has:
-  - **Critical alerts here, except**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
+  - **Never ring through silent mode here for**: while its Critical alerts switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
-- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts only at** (see [Alerts](#alerts)).
+- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Ring through silent mode at** (see [Alerts](#alerts)).
 - **People**: someone who gets alerts. Each has these settings:
   - their phone, and their critical sound and volume;
-  - **Don't notify me about**: animals this person never hears about;
+  - **Never alert them about**: animals this person never hears about;
   - **quiet zones** (like work) and **quiet hours**, and what happens there: critical alerts arrive as normal ones, or no alerts at all;
   - whether they get missing-mode alerts.
 
@@ -79,22 +79,22 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 | Page | Settings (defaults) |
 |---|---|
 | Cameras / People | Pick one to change or remove, or add one |
-| Alerts | Send alerts (on); lowest confidence that alerts (medium); Right / Not sure / Other buttons on alerts (on); page that opens when you tap an alert (empty) |
-| Pests | The pest list; where pests alert (Alert at / Critical alerts only at; default every camera) |
-| Other animals and motion | Alert at / Critical alerts only at for Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
-| AI models | First look, second opinion, paid models; optional hours for the first model (see [AI models](#ai-models)) |
-| Advanced → AI instructions | The AI instructions (with placeholders), notes for the AI (all cameras), common visitors (hints, not a limit), recently absent after 14 days, reference photos (on) |
-| Advanced → Training data | Save training data (on); folder (media folder, or a NAS share); keep at most 5 GB |
-| Advanced → Local detector | Address (empty: off); use (Shadow); animal threshold (0.2). See [Local detector](#local-detector-optional) |
-| Advanced → Notification pictures | Public address for picture links (defaults to the external URL) |
+| Pests | The pest list; where pests alert (Alert at / Ring through silent mode at; default every camera) |
+| Other animals and motion | Alert at / Ring through silent mode at for Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
+| Alerts | Send alerts (on); lowest confidence that alerts (medium); Right / Not sure / Other buttons on alerts (on); page that opens when you tap an alert (empty) |
+| Pictures in alerts | Public address for picture links (defaults to the external URL) |
+| AI models | First look, second opinion, paid models; optional busy hours for the first model (see [AI models](#ai-models)) |
+| Advanced → AI instructions | Notes for the AI (all cameras), common visitors (hints, not a limit), reference photos (on), recently absent after 14 days, the AI instructions (with placeholders; empty follows the built-in default) |
+| Advanced → Saved photos | Save checked photos (on; needed for Review); folder (media folder, or a NAS share); keep at most 5 GB |
+| Advanced → Local detector | Address (empty: off); mode (Test only); how sure the detector must be (0.2). See [Local detector](#local-detector-optional) |
 
 ### AI models
 
 - **First look** runs on every sighting. Its models are tried in order until one answers.
 - **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, or came from a backup and names an animal. Its models are tried in order too.
-- **Paid models** are only a last resort: they are tried after the free ones give no answer, and never to double-check a backup's answer. Put them last in each list.
-- **First model's hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
+- **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer.
+- **Save the first model for busy hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
 
 **Free-tier tip:** put the cheapest model with the biggest free allowance (for example Gemini Flash-Lite) first in First look, and a smarter model first in Second opinion.
 
@@ -181,7 +181,7 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Pests** and **Configure → Other animals and motion**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
-- **Critical alerts only at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: wherever it alerts.
+- **Ring through silent mode at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: every camera in Alert at. Picking a camera here also alerts there.
 
 Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera and animal, and one per catch-all on the Neighborhood Watch device. These all start off. Each person's **"<name> gets critical alerts"** switch starts on.
 
@@ -241,7 +241,7 @@ The AI models never learn from your corrections, so the integration keeps what's
 
 The `vision` folder holds a small service that runs [MegaDetector](https://microsoft.github.io/Biodiversity/base/models/detection/ultralytics_based/megadetectorv6/), a free camera-trap model that finds animals, people and vehicles. It can run on your own machine: a NAS, a mini PC or any Docker host. It uses an Intel GPU if there is one, otherwise the CPU. Once it's set under **Configure → Advanced → Local detector**, it looks at every frame before the AI:
 
-- **Shadow:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
+- **Test only:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
 **Where to see it:** the **Detector** tab of the [Neighborhood Watch page](#the-neighborhood-watch-page) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
@@ -311,7 +311,7 @@ columns: 3
 
 ### Pixel sprites
 
-Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page, pick a **Sprite** (right under the species): calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask; or a common breed or coat: orange, cream, grey or silver tabby, all white, Russian Blue, Bombay, British Shorthair, black-and-white or grey-and-white bicolour, Maine Coon, Siamese, Ragdoll, Birman, Himalayan, Sphynx, tortoiseshell, Bengal, Abyssinian, Scottish Fold or Persian. To change one, or draw your own, use **Sprite, custom** (in *Looks*): a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal the AI couldn't name (an Unknown Cat) shows under **Also seen**, drawn as the ready-made look nearest to the coat it described. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
+Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page, pick a **Picture on the card** (right under the reference photo): calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask; or a common breed or coat: orange, cream, grey or silver tabby, all white, Russian Blue, Bombay, British Shorthair, black-and-white or grey-and-white bicolour, Maine Coon, Siamese, Ragdoll, Birman, Himalayan, Sphynx, tortoiseshell, Bengal, Abyssinian, Scottish Fold or Persian. To change one, or draw your own, use **Advanced: custom card picture** (in *Card picture and tips*): a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal the AI couldn't name (an Unknown Cat) shows under **Also seen**, drawn as the ready-made look nearest to the coat it described. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
 
 A single sprite can go anywhere, e.g. for an indoor pet:
 

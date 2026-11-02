@@ -1146,11 +1146,12 @@ class WatchEngine:
         return f"{label} (backup)" if index else label
 
     def _chain(self, key: str, free_only: bool = False) -> list[str]:
+        """The models in a list, paid ones always last (in their order)."""
         chain = list(self.options.get(key) or [])
+        paid = set(self.options.get(CONF_PAID) or [])
         if free_only:
-            paid = set(self.options.get(CONF_PAID) or [])
             chain = [m for m in chain if m not in paid]
-        return chain
+        return [m for m in chain if m not in paid] + [m for m in chain if m in paid]
 
     def main_model_resting(self) -> bool:
         """Outside the main model's hours its daily quota is saved for the busy hours."""
@@ -1906,8 +1907,8 @@ class WatchEngine:
                 data.update({"ttl": 0, "priority": "high", "channel": "alarm_stream"})
             if actions:
                 data["actions"] = actions
-                if page := self.options.get(CONF_REVIEW_PAGE):
-                    data["url"] = data["clickAction"] = page  # tapping the alert opens the review
+            if page := self.options.get(CONF_REVIEW_PAGE):
+                data["url"] = data["clickAction"] = page  # tapping the alert opens the review
             payload["data"] = data
         elif image:
             # Other services have no attachment: the picture's link goes in the text.

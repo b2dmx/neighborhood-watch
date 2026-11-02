@@ -1,8 +1,8 @@
 """Onboarding, settings (Configure), and the Add animal / Edit animal flows.
 
 Onboarding walks through: which AI models look (and in what order), when to watch, which
-cameras (each pre-filled from its own device's motion and person/vehicle sensors), then the
-animals one by one. Animals are subentries (each a device with its own page); cameras and
+animals are pests, which cameras (each pre-filled from its own device's motion and
+person/vehicle sensors), who gets alerts, then the animals one by one. Animals are subentries (each a device with its own page); cameras and
 people are managed under Configure → Cameras / People.
 """
 from __future__ import annotations
@@ -288,24 +288,26 @@ def _pick(values: list[str], names: list[str]) -> list[str]:
     return [by_key.get(v.lower(), v) for v in values]
 
 
-def _models_schema(values: Mapping[str, Any]) -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(CONF_FIRST_LOOK, default=values.get(CONF_FIRST_LOOK, [])): AI_MODELS,
-            vol.Optional(CONF_SECOND_OPINION, default=values.get(CONF_SECOND_OPINION, [])): AI_MODELS,
-            vol.Optional(CONF_PAID, default=values.get(CONF_PAID, [])): AI_MODELS,
-            vol.Required("first_model_hours", default={}): _section(
-                {
-                    vol.Optional(
-                        CONF_MAIN_START, description={"suggested_value": values.get(CONF_MAIN_START) or None}
-                    ): TIME,
-                    vol.Optional(
-                        CONF_MAIN_END, description={"suggested_value": values.get(CONF_MAIN_END) or None}
-                    ): TIME,
-                }
-            ),
-        }
-    )
+def _models_schema(values: Mapping[str, Any], onboarding: bool = False) -> vol.Schema:
+    """Onboarding asks only for the two lists; paid models and the first model's hours
+    keep their defaults until Configure → AI models."""
+    fields: dict[Any, Any] = {
+        vol.Required(CONF_FIRST_LOOK, default=values.get(CONF_FIRST_LOOK, [])): AI_MODELS,
+        vol.Optional(CONF_SECOND_OPINION, default=values.get(CONF_SECOND_OPINION, [])): AI_MODELS,
+    }
+    if not onboarding:
+        fields[vol.Optional(CONF_PAID, default=values.get(CONF_PAID, []))] = AI_MODELS
+        fields[vol.Required("first_model_hours", default={})] = _section(
+            {
+                vol.Optional(
+                    CONF_MAIN_START, description={"suggested_value": values.get(CONF_MAIN_START) or None}
+                ): TIME,
+                vol.Optional(
+                    CONF_MAIN_END, description={"suggested_value": values.get(CONF_MAIN_END) or None}
+                ): TIME,
+            }
+        )
+    return vol.Schema(fields)
 
 
 def _schedule_schema(values: Mapping[str, Any]) -> vol.Schema:
@@ -373,7 +375,9 @@ def _camera_schema(
     others: list[SelectOptionDict],
     include_camera: bool,
     subjects: list[str] | None = None,
+    onboarding: bool = False,
 ) -> vol.Schema:
+    """In onboarding the two special cooldowns are left out (they start at 0, off)."""
     fields: dict[Any, Any] = {}
     if include_camera:
         fields[vol.Required(CONF_CAMERA, default=values.get(CONF_CAMERA))] = CAMERA
@@ -389,9 +393,10 @@ def _camera_schema(
     )
     timing: dict[Any, Any] = {
         vol.Required(CONF_COOLDOWN, default=values.get(CONF_COOLDOWN, 3)): _minutes(120),
-        vol.Required(CONF_PRIORITY_COOLDOWN, default=values.get(CONF_PRIORITY_COOLDOWN, 0)): _minutes(240),
-        vol.Required(CONF_MISSING_COOLDOWN, default=values.get(CONF_MISSING_COOLDOWN, 0)): _minutes(60),
     }
+    if not onboarding:
+        timing[vol.Required(CONF_PRIORITY_COOLDOWN, default=values.get(CONF_PRIORITY_COOLDOWN, 0))] = _minutes(240)
+        timing[vol.Required(CONF_MISSING_COOLDOWN, default=values.get(CONF_MISSING_COOLDOWN, 0))] = _minutes(60)
     if others:
         timing[vol.Optional(CONF_REOPENED_BY, default=values.get(CONF_REOPENED_BY, []))] = SelectSelector(
             SelectSelectorConfig(options=others, multiple=True)
@@ -467,28 +472,29 @@ def _animal_schema(
             CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
         ): TEXT,
         vol.Required(CONF_SPECIES, default=kind): _species([*(species or []), kind]),
-        # The look the card draws it with: a ready-made coat or breed.
-        vol.Optional(CONF_SPRITE, description={"suggested_value": values.get(CONF_SPRITE)}): SelectSelector(
-            SelectSelectorConfig(options=list(SPRITE_PRESETS), mode=SelectSelectorMode.DROPDOWN, translation_key="sprite")
-        ),
         vol.Optional(CONF_DESCRIPTION, description={"suggested_value": values.get(CONF_DESCRIPTION)}): LONG_TEXT,
         vol.Optional(CONF_REFERENCE_UPLOAD): PHOTO,
     }
     if reconfigure:
         fields[vol.Required(CONF_REMOVE_REFERENCE, default=False)] = BOOL
+    # The look the card draws it with: a ready-made coat or breed.
+    fields[vol.Optional(CONF_SPRITE, description={"suggested_value": values.get(CONF_SPRITE)})] = SelectSelector(
+        SelectSelectorConfig(options=list(SPRITE_PRESETS), mode=SelectSelectorMode.DROPDOWN, translation_key="sprite")
+    )
     fields[vol.Required("looks", default={})] = _section(
         {
-            vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
-            vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Optional(CONF_TIPS, description={"suggested_value": values.get(CONF_TIPS)}): LONG_TEXT,
             vol.Optional(
                 CONF_APPEARANCE, description={"suggested_value": values.get(CONF_APPEARANCE)}
             ): ObjectSelector(),
         }
     )
+    # The coat checks only apply to a priority animal, so they sit right under it.
     fields[vol.Required("rules", default={})] = _section(
         {
             vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
+            vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
+            vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
             **_alert_fields(values, cameras),
         }
@@ -501,7 +507,8 @@ def _animal_schema(
             vol.Optional(
                 CONF_KNOWN_LOCATION, description={"suggested_value": values.get(CONF_KNOWN_LOCATION)}
             ): TEXT,
-        }
+        },
+        collapsed=False,  # left empty, a new animal only counts once both models agree
     )
     return vol.Schema(fields)
 
@@ -518,7 +525,8 @@ def _animal_data(user_input: Mapping[str, Any], slug: str, added: str) -> dict[s
         CONF_APPEARANCE: user_input.get(CONF_APPEARANCE) or None,
         CONF_SPRITE: user_input.get(CONF_SPRITE) or None,
         CONF_PRIORITY: bool(user_input.get(CONF_PRIORITY)),
-        CONF_ALWAYS_STRICT: bool(user_input.get(CONF_ALWAYS_STRICT)),
+        # A priority animal has its own, stricter rules: Always strict is ignored for it.
+        CONF_ALWAYS_STRICT: bool(user_input.get(CONF_ALWAYS_STRICT)) and not user_input.get(CONF_PRIORITY),
         **_alert_data(user_input),
         CONF_ADDED: added,
         CONF_KNOWN_LAST_SEEN: user_input.get(CONF_KNOWN_LAST_SEEN) or None,
@@ -555,7 +563,10 @@ def _writable(folder: str) -> bool:
     return True
 
 
-def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str, str]:
+def _validate_animal(
+    user_input: Mapping[str, Any], taken: set[str], second_opinion: bool
+) -> dict[str, str]:
+    """`second_opinion` = a Second opinion model is set (priority and strict need one)."""
     name = (user_input.get(CONF_NAME) or "").strip()
     if not name:
         return {CONF_NAME: "name_required"}
@@ -569,11 +580,16 @@ def _validate_animal(user_input: Mapping[str, Any], taken: set[str]) -> dict[str
         return {CONF_NAME: "name_pipe"}
     if not slugify(name):
         return {CONF_NAME: "name_letters"}
+    appearance = user_input.get(CONF_APPEARANCE)
+    if appearance and not isinstance(appearance, Mapping):
+        return {CONF_APPEARANCE: "appearance_not_settings"}
     species = (user_input.get(CONF_SPECIES) or "cat").strip().lower()
-    if (user_input.get(CONF_SPRITE) or user_input.get(CONF_APPEARANCE)) and species != "cat":
-        return {CONF_SPRITE: "sprite_cats_only"}  # the sprites are all cats
-    if user_input.get(CONF_PRIORITY) and user_input.get(CONF_ALWAYS_STRICT):
-        return {"base": "priority_not_strict"}  # its field sits in a folded section, so the form says it
+    sprite = user_input.get(CONF_SPRITE)
+    if (sprite or appearance) and species != "cat":
+        # The sprites are all cats; the error goes on whichever field was filled in.
+        return {(CONF_APPEARANCE if appearance and not sprite else CONF_SPRITE): "sprite_cats_only"}
+    if (user_input.get(CONF_PRIORITY) or user_input.get(CONF_ALWAYS_STRICT)) and not second_opinion:
+        return {"base": "needs_second_opinion"}  # its fields sit in a folded section, so the form says it
     return {}
 
 
@@ -617,14 +633,14 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_schedule()
         return self.async_show_form(
             step_id="user",
-            data_schema=_models_schema(user_input or self._options),
+            data_schema=_models_schema(user_input or self._options, onboarding=True),
             errors=errors,
         )
 
     async def async_step_schedule(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._options.update(_flatten(user_input, SCHEDULE_SECTIONS))
-            return await self.async_step_cameras()
+            return await self.async_step_wildlife()
         return self.async_show_form(step_id="schedule", data_schema=_schedule_schema(self._options))
 
     async def async_step_cameras(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -657,13 +673,15 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                 user_input = None
         if not errors:
             if not self._pending_cameras:
-                return await self.async_step_wildlife()
+                return await self.async_step_people()
             camera = self._pending_cameras.pop(0)
             self._camera_values = {CONF_CAMERA: camera, **suggest_camera(self.hass, camera)}
         others = self._onboarding_cameras()
         return self.async_show_form(
             step_id="camera",
-            data_schema=_camera_schema(user_input or self._camera_values, others, include_camera=False).extend(
+            data_schema=_camera_schema(
+                user_input or self._camera_values, others, include_camera=False, onboarding=True
+            ).extend(
                 {vol.Required("skip", default=False): BOOL}
             ),
             description_placeholders={
@@ -677,7 +695,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         """Which animals are pests. Every other animal is tracked as wildlife without setup."""
         if user_input is not None:
             self._options[CONF_PESTS] = [p.strip().title() for p in user_input.get(CONF_PESTS, []) if p.strip()]
-            return await self.async_step_people()
+            return await self.async_step_cameras()
         return self.async_show_form(
             step_id="wildlife",
             data_schema=vol.Schema({vol.Optional(CONF_PESTS, default=DEFAULT_WILDLIFE_PICKS): PESTS}),
@@ -715,11 +733,21 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _flatten(user_input, ANIMAL_SECTIONS)
-            filled = any(user_input.get(k) for k in (CONF_DESCRIPTION, CONF_REFERENCE_UPLOAD, CONF_SPRITE))
+            filled = any(
+                user_input.get(k)
+                for k in (
+                    CONF_DESCRIPTION, CONF_REFERENCE_UPLOAD, CONF_SPRITE, CONF_TIPS, CONF_APPEARANCE,
+                    CONF_PRIORITY, CONF_ALWAYS_STRICT, CONF_KNOWN_LAST_SEEN, CONF_KNOWN_LOCATION,
+                )
+            ) or (
+                (user_input.get(CONF_SPECIES) or "cat").strip().lower() != "cat"
+                or user_input.get(CONF_PATTERN, "na") != "na"
+                or user_input.get(CONF_BASE, "na") != "na"
+            )
             if not (user_input.get(CONF_NAME) or "").strip() and not filled:
                 return self._finish()  # an empty form finishes; a half-filled one asks for the name
             taken = {a["data"][CONF_NAME].lower() for a in self._animals}
-            errors = _validate_animal(user_input, taken)
+            errors = _validate_animal(user_input, taken, bool(self._options.get(CONF_SECOND_OPINION)))
             if not errors:
                 slug = slugify(user_input[CONF_NAME])
                 if (upload := user_input.get(CONF_REFERENCE_UPLOAD)) and (
@@ -764,6 +792,12 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                  "No phones with the Home Assistant app were found, so nobody gets alerts yet.")
                 + " Add people later under Configure → People."
             )
+        if not self._options.get(CONF_SECOND_OPINION):
+            notes.append(
+                "No Second opinion model was picked. Without one, priority and Always strict animals are "
+                "never confirmed, and a new animal or one not seen for a while is never counted. Add one "
+                "later under Configure → AI models."
+            )
         return {"count": str(len(self._animals)), "notes": " ".join(notes)}
 
     def _species(self) -> list[str]:
@@ -797,11 +831,12 @@ class WatchOptionsFlow(OptionsFlow):
             step_id="init",
             menu_options=[
                 "cameras",
+                "schedule",
                 "pests",
                 "catch_alls",
                 "people",
                 "alerts",
-                "schedule",
+                "notifications",
                 "models",
                 "advanced",
             ],
@@ -811,7 +846,7 @@ class WatchOptionsFlow(OptionsFlow):
         """Settings most people never need to change."""
         return self.async_show_menu(
             step_id="advanced",
-            menu_options=["identification", "training", "detector", "notifications"],
+            menu_options=["identification", "training", "detector"],
         )
 
     # --- cameras -------------------------------------------------------------------------
@@ -838,11 +873,16 @@ class WatchOptionsFlow(OptionsFlow):
         )
 
     async def async_step_camera_add(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._new_camera = user_input[CONF_CAMERA]
-            return await self.async_step_camera()
+            cams = self._values.get(CONF_CAMERAS) or {}
+            if any(d.get(CONF_CAMERA) == user_input[CONF_CAMERA] for d in cams.values()):
+                errors[CONF_CAMERA] = "camera_taken"
+            else:
+                self._new_camera = user_input[CONF_CAMERA]
+                return await self.async_step_camera()
         return self.async_show_form(
-            step_id="camera_add", data_schema=vol.Schema({vol.Required(CONF_CAMERA): CAMERA})
+            step_id="camera_add", data_schema=vol.Schema({vol.Required(CONF_CAMERA): CAMERA}), errors=errors
         )
 
     async def async_step_camera(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -854,13 +894,20 @@ class WatchOptionsFlow(OptionsFlow):
         if user_input is not None:
             user_input = _flatten(user_input, CAMERA_SECTIONS)
             if editing and user_input.get("remove"):
-                cams.pop(editing)
+                gone = cams.pop(editing)[CONF_SLUG]
+                # Other cameras it reopened no longer wait on it.
+                cams = {
+                    cid: {**d, CONF_REOPENED_BY: [s for s in d.get(CONF_REOPENED_BY) or [] if s != gone]}
+                    for cid, d in cams.items()
+                }
                 return self._save({CONF_CAMERAS: cams})
-            slug = current[CONF_SLUG] if editing else slugify(user_input.get(CONF_NAME) or "")
+            # A renamed camera keeps its slug, but its new name must not read as another's.
+            name_slug = slugify(user_input.get(CONF_NAME) or "")
+            slug = current[CONF_SLUG] if editing else name_slug
             taken = {d[CONF_SLUG] for cid, d in cams.items() if cid != editing}
             if not slug:
                 errors[CONF_NAME] = "name_required"
-            elif slug in taken:
+            elif slug in taken or name_slug in taken:
                 errors[CONF_NAME] = "name_taken"
             else:
                 cams[editing or uuid4().hex] = _camera_data(
@@ -919,8 +966,13 @@ class WatchOptionsFlow(OptionsFlow):
                 people.pop(editing)
                 return self._save({CONF_PEOPLE: people})
             data = _recipient_data(user_input)
+            start, end = data[CONF_QUIET_START], data[CONF_QUIET_END]
             if not data[CONF_NAME]:
                 errors[CONF_NAME] = "name_required"
+            elif data[CONF_NOTIFY] and data[CONF_NOTIFY] not in _notify_services(self.hass):
+                errors[CONF_NOTIFY] = "notify_unknown"
+            elif bool(start) != bool(end) or (start and start == end):
+                errors["base"] = "quiet_hours_both"  # its fields sit in a folded section
             elif data[CONF_QUIET_ZONES] and not data[CONF_PERSON]:
                 errors[CONF_PERSON] = "person_needed"  # quiet zones go by where their Person is
             else:
@@ -959,10 +1011,14 @@ class WatchOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         values = self._values
         if user_input is not None:
+            # Empty = the built-in instructions, so they follow updates; only edits are stored.
             if user_input.pop("reset_instructions", False):
-                user_input[CONF_INSTRUCTIONS] = logic.DEFAULT_INSTRUCTIONS
-            text = user_input.get(CONF_INSTRUCTIONS) or ""
-            if any(p not in text for p in logic.REQUIRED_PLACEHOLDERS):
+                user_input[CONF_INSTRUCTIONS] = ""
+            text = (user_input.get(CONF_INSTRUCTIONS) or "").strip()
+            if text == logic.DEFAULT_INSTRUCTIONS:
+                text = ""
+            user_input[CONF_INSTRUCTIONS] = text
+            if text and any(p not in text for p in logic.REQUIRED_PLACEHOLDERS):
                 errors[CONF_INSTRUCTIONS] = "missing_animals"
             else:
                 user_input.setdefault(CONF_EXTRA_RULES, "")
@@ -972,19 +1028,22 @@ class WatchOptionsFlow(OptionsFlow):
             step_id="identification",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_INSTRUCTIONS, default=values[CONF_INSTRUCTIONS]): LONG_TEXT,
-                    vol.Required("reset_instructions", default=False): BOOL,
                     vol.Optional(
                         CONF_EXTRA_RULES, description={"suggested_value": values[CONF_EXTRA_RULES]}
                     ): LONG_TEXT,
                     vol.Required(CONF_WILDLIFE, default=values[CONF_WILDLIFE]): WILDLIFE,
-                    vol.Required(CONF_ABSENT_DAYS, default=values[CONF_ABSENT_DAYS]): _number(1, 365, "d"),
                     vol.Required(CONF_REFERENCE_PHOTOS, default=values[CONF_REFERENCE_PHOTOS]): BOOL,
+                    vol.Required(CONF_ABSENT_DAYS, default=values[CONF_ABSENT_DAYS]): _number(1, 365, "d"),
+                    vol.Required(
+                        CONF_INSTRUCTIONS, default=values[CONF_INSTRUCTIONS] or logic.DEFAULT_INSTRUCTIONS
+                    ): LONG_TEXT,
+                    vol.Required("reset_instructions", default=False): BOOL,
                 }
             ),
             errors=errors,
             description_placeholders={
-                key: "{" + key + "}" for key in ("animals", "location", "absent", "extra_rules", "wildlife")
+                key: "{" + key + "}"
+                for key in ("animals", "location", "absent", "extra_rules", "wildlife", "unknown_kinds")
             },
         )
 
@@ -1128,6 +1187,9 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
             if s.subentry_type == SUBENTRY_ANIMAL
         ]
 
+    def _second_opinion(self) -> bool:
+        return bool(self._get_entry().options.get(CONF_SECOND_OPINION))
+
     def _taken(self, exclude: str | None = None) -> set[str]:
         return {
             s.data[CONF_NAME].lower()
@@ -1139,7 +1201,7 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _flatten(user_input, ANIMAL_SECTIONS)
-            errors = _validate_animal(user_input, self._taken())
+            errors = _validate_animal(user_input, self._taken(), self._second_opinion())
             if not errors:
                 name = user_input[CONF_NAME].strip()
                 slug = slugify(name)
@@ -1167,13 +1229,13 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _flatten(user_input, ANIMAL_SECTIONS)
-            errors = _validate_animal(user_input, self._taken(subentry.subentry_id))
+            errors = _validate_animal(user_input, self._taken(subentry.subentry_id), self._second_opinion())
             if not errors:
                 slug = subentry.data[CONF_SLUG]
-                if user_input.get(CONF_REMOVE_REFERENCE):
+                if upload := user_input.get(CONF_REFERENCE_UPLOAD):
+                    errors = await _store_upload(self.hass, upload, slug)  # a new photo wins over Remove
+                elif user_input.get(CONF_REMOVE_REFERENCE):
                     await self.hass.async_add_executor_job(remove_file, reference_file(self.hass, slug))
-                elif upload := user_input.get(CONF_REFERENCE_UPLOAD):
-                    errors = await _store_upload(self.hass, upload, slug)
             if not errors:
                 data = _animal_data(user_input, slug, subentry.data.get(CONF_ADDED) or dt_util.utcnow().isoformat())
                 return self.async_update_and_abort(
