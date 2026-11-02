@@ -191,7 +191,7 @@ async def test_missing_mode_for_any_animal_asks_twice_and_always_arrives(hass, w
     await trigger(hass, "yard")
     assert SECOND in watch["ai"].calls  # a missing animal always gets a second look
     (ann,) = to(watch["sent"], "ann")
-    assert (ann["title"], level(ann), ann["data"]["push"]["sound"]["volume"]) == ("Possible Milo — Yard", "critical", 1.0)
+    assert (ann["title"], level(ann), ann["data"]["push"]["sound"]["volume"]) == ("Missing: possible Milo — Yard", "critical", 1.0)
     (cy,) = to(watch["sent"], "cy")
     assert level(cy) == "active"  # quiet hours with "no alerts" still let missing mode through
     assert to(watch["sent"], "bo") == []  # a low guess at a cat that isn't missing for Bo

@@ -182,7 +182,7 @@ async def test_older_setup_is_moved_to_alert_at(hass, watch):
     """0.6 settings become today's: house cameras and alert scopes → Alert at, cameras and
     people → Configure, wildlife pages → the pest list."""
     entry = watch["entry"]
-    assert entry.minor_version == 3
+    assert entry.minor_version == 4
     assert sorted(s.subentry_type for s in entry.subentries.values()) == ["animal", "animal"]
     opts = entry.options
     garage, yard = camera_options(entry, "Garage"), camera_options(entry, "Yard")
@@ -283,7 +283,7 @@ async def test_missing_mode_goes_to_missing_people_only(hass, watch):
     await trigger(hass, "yard")
     (msg,) = watch["sent"]
     assert msg["to"] == "ann"
-    assert msg["title"] == "Possible Luna — Yard"
+    assert msg["title"] == "Missing: possible Luna — Yard"
     assert msg["data"]["push"]["sound"]["volume"] == 1.0
 
 
@@ -299,7 +299,7 @@ async def test_unsure_motion_near_the_house(hass, watch):
     watch["ai"].say(FIRST, "None|low|na|na|")
     watch["ai"].say(SECOND, "None|low|na|na|")
     await trigger(hass, "garage")
-    assert {m["title"] for m in watch["sent"]} == {"Motion — Garage"}
+    assert {m["title"] for m in watch["sent"]} == {"Unsure motion — Garage"}
 
 
 async def test_alerts_off(hass, watch):
@@ -1101,3 +1101,37 @@ async def test_panel_roster_lists_cameras_people_and_animals(hass, watch, hass_w
     assert result["catch_all_critical"]["pest"] == "switch.neighborhood_watch_pests_critical_alerts"
     assert result["catch_all_critical"]["motion"] == "switch.neighborhood_watch_unsure_motion_critical_alerts"
     assert result["second_opinion"] is True and result["animals"][0]["needs_second_opinion"] is True  # priority
+
+
+async def test_panel_roster_has_the_page_switches_and_a_reload_marker(hass, watch, hass_ws_client):
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "neighborhood_watch/roster"})
+    result = (await ws.receive_json())["result"]
+    assert result["dataset"] is True  # saving checked photos is on unless turned off
+    luna = result["animals"][0]
+    assert luna["alerts"] == "switch.luna_alerts" and luna["missing"] == "switch.luna_missing_mode"
+    assert all(p["critical"] and p["critical"].startswith("switch.") for p in result["people"])
+    await ws.send_json({"id": 2, "type": "neighborhood_watch/roster"})
+    assert (await ws.receive_json())["result"]["loaded_at"] == result["loaded_at"]  # same run, same marker
+
+    entry = watch["entry"]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "dataset": False})
+    await hass.async_block_till_done()
+    await ws.send_json({"id": 3, "type": "neighborhood_watch/roster"})
+    after = (await ws.receive_json())["result"]
+    assert after["loaded"] and after["dataset"] is False
+    assert after["loaded_at"] != result["loaded_at"]  # reloaded with the new settings
+
+
+async def test_panel_stops_and_undoes_training_rounds(hass, watch, aioclient_mock, hass_ws_client):
+    await _with_detector(hass, watch, "shadow", aioclient_mock)
+    aioclient_mock.post("http://vision:8765/train/stop", json={"stopping": True})
+    aioclient_mock.post("http://vision:8765/train/undo", status=409, json={"error": "there is no promoted round to undo"})
+    ws = await hass_ws_client(hass)
+    await ws.send_json({"id": 1, "type": "neighborhood_watch/vision/train_stop"})
+    assert (await ws.receive_json())["result"] == {"stopping": True}
+    await ws.send_json({"id": 2, "type": "neighborhood_watch/vision/train_undo"})
+    answer = await ws.receive_json()
+    assert not answer["success"] and answer["error"]["code"] == "refused"
+    assert "no promoted round" in answer["error"]["message"]
+    assert [str(c[1]).rsplit("/", 2)[-1] for c in aioclient_mock.mock_calls if c[0] == "POST"][-2:] == ["stop", "undo"]

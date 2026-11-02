@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 # Intel GPU runtime new enough for Core Ultra (Arc / Xe) iGPUs, from Intel's graphics PPA,
 # so OpenVINO can run on the GPU. Without a GPU it simply runs on the CPU.
-# tzdata: the weekly training schedule follows local time (set TZ).
+# tzdata: the weekly training schedule follows local time (the host's, via /etc/localtime).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends software-properties-common gpg-agent ca-certificates \

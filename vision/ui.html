@@ -61,7 +61,11 @@
     font: inherit; font-weight: 500; border: 0; border-radius: 99px; padding: 8px 18px;
     background: var(--accent); color: var(--accent-text); cursor: pointer;
   }
+  button.quiet { background: none; color: var(--accent); border: 1px solid var(--line); }
+  button.danger { background: none; color: var(--bad); border: 1px solid var(--line); }
   button:disabled { opacity: .45; cursor: default; }
+  h3 { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+  .hint + h3, .error + h3 { margin-top: 20px; }
   button:focus-visible, select:focus-visible, input:focus-visible, .seg label:has(input:focus-visible) {
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
@@ -109,7 +113,7 @@
     <h2>Detector</h2>
     <div class="grid">
       <div><div class="label">Model</div><div class="value" id="model">—</div></div>
-      <div><div class="label">Runs on</div><div class="value" id="device">—</div></div>
+      <div><div class="label">Detects with</div><div class="value" id="device">—</div></div>
       <div><div class="label">Hardware found</div><div class="value" id="available">—</div></div>
       <div><div class="label">Right now</div><div class="value" id="loaded">—</div></div>
     </div>
@@ -118,7 +122,11 @@
   <section class="card">
     <div class="row" style="justify-content: space-between">
       <h2 style="margin: 0">Training</h2>
-      <button id="train" disabled>Train now</button>
+      <span class="group">
+        <button id="undo" class="quiet" hidden>Undo the last round</button>
+        <button id="stop" class="danger" hidden>Stop training</button>
+        <button id="train" disabled>Train now</button>
+      </span>
     </div>
     <div class="hint" id="train-state" style="margin-top: 10px">—</div>
     <div class="bar" id="bar" hidden><div></div></div>
@@ -126,7 +134,17 @@
   </section>
 
   <section class="card">
-    <h2>Settings</h2>
+    <h2>Detector settings</h2>
+    <h3>Detecting</h3>
+    <div class="row">
+      <span class="label" id="l-detect">Detects with</span>
+      <span class="seg" role="radiogroup" aria-labelledby="l-detect">
+        <label><input type="radio" name="detect_device" value="auto">GPU</label>
+        <label><input type="radio" name="detect_device" value="cpu">CPU</label>
+      </span>
+    </div>
+    <div class="hint">GPU uses the Intel GPU when it can, and the CPU if it can't (in Trains with too). Saves straight away, and the detector restarts on it.</div>
+    <h3>Training</h3>
     <div class="row inline">
       <span class="label" id="l-enabled">Weekly training</span>
       <label class="switch"><input type="checkbox" id="enabled" aria-labelledby="l-enabled"><span></span></label>
@@ -140,17 +158,39 @@
       </span>
     </div>
     <div class="row">
+      <span class="label" id="l-first">Photos for the first round</span>
+      <input type="number" id="min_first" min="10" max="1000" aria-labelledby="l-first">
+    </div>
+    <div class="row">
       <span class="label" id="l-min">New answered photos needed (after the first round)</span>
       <input type="number" id="min_new" min="1" max="10000" aria-labelledby="l-min">
     </div>
     <div class="row">
-      <span class="label" id="l-device">Train on</span>
+      <span class="label" id="l-device">Trains with</span>
       <span class="seg" role="radiogroup" aria-labelledby="l-device">
         <label><input type="radio" name="device" value="auto">GPU</label>
         <label><input type="radio" name="device" value="cpu">CPU</label>
       </span>
     </div>
-    <div class="hint">GPU uses the Intel GPU when it can, and the CPU if it can't. Changes apply to the next round.</div>
+    <div class="row">
+      <span class="label" id="l-length">Training length</span>
+      <span class="seg" role="radiogroup" aria-labelledby="l-length">
+        <label><input type="radio" name="train_length" value="quick">Quick</label>
+        <label><input type="radio" name="train_length" value="normal">Normal</label>
+        <label><input type="radio" name="train_length" value="thorough">Thorough</label>
+      </span>
+    </div>
+    <div class="hint">Longer can be a little more accurate but takes hours more.</div>
+    <div class="row" style="margin-top: 14px">
+      <span class="label" id="l-size">Picture size</span>
+      <span class="seg" role="radiogroup" aria-labelledby="l-size">
+        <label><input type="radio" name="train_imgsz" value="640">Faster</label>
+        <label><input type="radio" name="train_imgsz" value="960">Normal</label>
+        <label><input type="radio" name="train_imgsz" value="1280">Sharper</label>
+      </span>
+    </div>
+    <div class="hint">Sharper finds small animals better but trains slower.</div>
+    <div class="hint">Times are the NAS's local time. Changes apply to the next round and save straight away.</div>
     <div class="error" id="settings-error" hidden></div>
   </section>
 
@@ -194,31 +234,44 @@ function showSettings(s) {
   $("day").value = s.train_day;
   $("hour").value = s.train_hour;
   $("min_new").value = s.min_new;
-  for (const r of document.querySelectorAll("input[name=device]")) r.checked = r.value === s.train_device;
-  for (const el of [$("day"), $("hour"), $("min_new")]) el.disabled = !s.train_enabled;
+  $("min_first").value = s.min_first ?? MIN_FIRST;
+  const pick = (name, value) => {
+    for (const r of document.querySelectorAll(`input[name=${name}]`)) r.checked = r.value === String(value);
+  };
+  pick("device", s.train_device);
+  pick("detect_device", s.detect_device);
+  pick("train_length", s.train_length);
+  pick("train_imgsz", s.train_imgsz);
+  for (const el of [$("day"), $("hour"), $("min_new"), $("min_first")]) el.disabled = !s.train_enabled;
 }
 
-// Before the first round, training waits for NW_TRAIN_MIN_FIRST (train.py) confirmed animal photos.
+// Before the first round, training waits for this many answered animal photos (the
+// Photos for the first round setting; this is only its default, for an older service).
 const MIN_FIRST = 40;
+const realRound = (r) => r.confirmed != null && !r.error && !r.stopped;
 
 function stageText(t, rounds) {
   const st = t.status || {};
   if (t.running) {
+    if (t.stopping) return "Stopping…";
     if (st.stage === "training" && st.epochs) return `Training: pass ${st.epoch} of ${st.epochs}`;
     if (st.stage === "labelling" && st.total) return `Marking animals in the photos: ${st.done} of ${st.total}`;
     return cap(st.stage || "starting");
   }
   const when = t.settings.train_enabled
     ? `Next round: ${cap(t.settings.train_day)} from ${hourName(t.settings.train_hour)}, once ${
-      rounds.some((r) => r.confirmed != null && !r.error)
-        ? `${t.settings.min_new} new photos are confirmed`
-        : `there are ${MIN_FIRST} confirmed animal photos`
+      rounds.some(realRound)
+        ? `${t.settings.min_new} new photos are answered`
+        : `there are ${t.settings.min_first ?? MIN_FIRST} answered animal photos`
     }.`
     : "Weekly training is off.";
   if (!st.state) return when;
-  const last = { skipped: "Last check skipped", done: "Last round finished", error: "Last round failed" }[st.state] || "Last round";
+  const last = {
+    skipped: "Last round skipped", done: "Last round finished", error: "Last round failed", stopped: "Last round stopped",
+  }[st.state] || "Last round";
   const at = st.finished || st.started;
-  return `${last}${at ? " " + new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""}: ${st.stage}. ${when}`;
+  const stage = st.stage && st.state !== "stopped" ? `: ${st.stage}` : "";
+  return `${last}${at ? " " + new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""}${stage}. ${when}`;
 }
 
 function progress(t) {
@@ -244,7 +297,8 @@ function showHistory(rounds) {
     return;
   }
   body.innerHTML = rounds.slice().reverse().map((r) => {
-    const result = r.error ? `<span class="worse">Failed</span>` : r.promoted ? `<span class="better">New model</span>` : "Kept the old one";
+    const result = r.error ? `<span class="worse">Failed</span>` : r.stopped ? "Stopped"
+      : r.promoted ? (r.undone ? "Undone" : `<span class="better">New model</span>`) : "Kept the old one";
     const date = r.time ? new Date(r.time).toLocaleDateString([], { dateStyle: "medium" }) : "—";
     const mins = r.minutes != null ? `${Math.round(r.minutes)} min` : "—";
     return `<tr><td>${r.round}</td><td>${date}</td><td>${devName(r.device)}</td><td>${mins}</td>` +
@@ -267,8 +321,13 @@ async function refresh() {
     $("train-state").textContent = stageText(t, rounds || []);
     progress(t);
     $("train").disabled = running || busy || !t.dataset;
-    $("train").title = t.dataset ? "" : "The vision service can't see your saved photos. In its compose file, mount the folder from Detector → Saved photos at /dataset.";
-    if (document.activeElement !== $("min_new")) showSettings(t.settings);  // don't undo typing
+    $("train").title = t.dataset ? "" : "The vision service can't see your saved photos. In its compose file, mount the folder set in Neighborhood Watch under Configure → Advanced → Saved photos at /dataset.";
+    $("stop").hidden = !running;
+    $("stop").disabled = busy || t.stopping;
+    undoRound = !running && t.undo ? t.undo.round : null;
+    $("undo").hidden = undoRound == null;
+    $("undo").disabled = busy;
+    if (![$("min_new"), $("min_first")].includes(document.activeElement)) showSettings(t.settings);  // don't undo typing
     showHistory(rounds);
   } catch (err) {
     chip("Can't reach the service", "bad");
@@ -292,23 +351,38 @@ $("enabled").addEventListener("change", (e) => save({ train_enabled: e.target.ch
 $("day").addEventListener("change", (e) => save({ train_day: e.target.value }));
 $("hour").addEventListener("change", (e) => save({ train_hour: Number(e.target.value) }));
 $("min_new").addEventListener("change", (e) => save({ min_new: Math.round(Number(e.target.value)) }, e.target));
-for (const r of document.querySelectorAll("input[name=device]")) {
-  r.addEventListener("change", (e) => save({ train_device: e.target.value }));
+$("min_first").addEventListener("change", (e) => save({ min_first: Math.round(Number(e.target.value)) }, e.target));
+const radios = { device: "train_device", detect_device: "detect_device", train_length: "train_length", train_imgsz: "train_imgsz" };
+for (const [name, key] of Object.entries(radios)) {
+  for (const r of document.querySelectorAll(`input[name=${name}]`)) {
+    r.addEventListener("change", (e) => save({ [key]: key === "train_imgsz" ? Number(e.target.value) : e.target.value }));
+  }
 }
 
-$("train").addEventListener("click", async () => {
-  if (!confirm("Start a training round now? It takes from tens of minutes to a few hours.")) return;
+let undoRound = null;
+
+async function trainAction(path) {
   busy = true;
-  $("train").disabled = true;
+  for (const id of ["train", "stop", "undo"]) $(id).disabled = true;
   $("train-error").hidden = true;
   try {
-    await api("train", {});
+    await api(path, {});
   } catch (err) {
     $("train-error").textContent = err.message;
     $("train-error").hidden = false;
   }
   busy = false;
   refresh();
+}
+
+$("train").addEventListener("click", () => {
+  if (confirm("Start a training round now? It takes from tens of minutes to a few hours.")) trainAction("train");
+});
+$("stop").addEventListener("click", () => {
+  if (confirm("Stop this training round? What it has done so far is thrown away, and the current model stays.")) trainAction("train/stop");
+});
+$("undo").addEventListener("click", () => {
+  if (undoRound != null && confirm(`Go back to the model from before round ${undoRound}?`)) trainAction("train/undo");
 });
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });

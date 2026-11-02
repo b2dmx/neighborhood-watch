@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from bisect import bisect_left, bisect_right, insort
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from functools import partial
@@ -492,7 +492,7 @@ class WatchEngine:
                 added=_dt(d.get(CONF_ADDED)),
                 known_last_seen=_local_dt(d.get(CONF_KNOWN_LAST_SEEN)),
                 known_location=d.get(CONF_KNOWN_LOCATION),
-                appearance=d.get(CONF_APPEARANCE) or None,
+                appearance=_appearance(d.get(CONF_APPEARANCE)),
                 sprite=d.get(CONF_SPRITE) or None,
                 alert_at=logic.cameras(d.get(CONF_ALERT_AT, [logic.EVERY])),
                 critical_at=logic.cameras(d.get(CONF_CRITICAL_AT, [])),
@@ -915,7 +915,8 @@ class WatchEngine:
     # --- triggers -------------------------------------------------------------------------
 
     def is_night(self) -> bool:
-        if self.options.get(CONF_ALWAYS):
+        """Watch hours. Watch all day, or any animal in missing mode, watches around the clock."""
+        if self.options.get(CONF_ALWAYS) or self.any_missing_mode():
             return True
         now = dt_util.now()
         start = dt_util.parse_time(self.options.get(CONF_NIGHT_START, "20:00:00"))
@@ -2235,6 +2236,11 @@ class WatchEngine:
             self.hass, self._deliver(self._plan_alerts(cam, verdict, now, None, test=True)), f"{DOMAIN} test alert"
         )
         return data
+
+
+def _appearance(value: Any) -> dict[str, Any] | None:
+    """A stored card look; anything that isn't settings (text typed into an old form) is none."""
+    return dict(value) if isinstance(value, Mapping) and value else None
 
 
 def builtin_switch_key(key: str) -> str:

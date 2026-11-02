@@ -10,21 +10,24 @@ services:
       - "8765:8765"
     volumes:
       - ./models:/models:ro
-      # The service's code, so updates are a file copy (it restarts itself when it changes).
+      # Runs the code from ./app (copy this repo's vision folder there) so updates are a file copy:
+      # the service restarts itself when a .py file changes. Remove this line to use the image's own code.
       - ./app:/app:ro
       # Working files: scans, trained models (models/current.txt names the one in use), training history.
       - ./work:/work
       # The folder you bulk-scan (photos and videos); reports are written back into it.
       - ./scan:/scan
       # The integration's saved-photos folder (Configure -> Advanced -> Saved photos). Adjust the left
-      # side to where that folder is on this machine; read-only is enough.
+      # side to where that folder is on this machine; read-only is enough. The default folder is
+      # <media>/neighborhood_watch/dataset; use yours if you changed it.
       - /path/to/neighborhood_watch/dataset:/dataset:ro
+      # This machine's clock and time zone, so the training hour is local time.
+      - /etc/localtime:/etc/localtime:ro
     shm_size: 1gb           # training's data loaders share memory here (Docker's default is 64 MB)
     devices:
       - /dev/dri:/dev/dri   # Intel GPU; remove this line on machines without one (it then runs on the CPU)
     environment:
       NW_DEVICE: AUTO
-      TZ: Etc/UTC           # CHANGE to your time zone, e.g. Europe/Berlin: training times use it
       NW_TRAIN: "1"         # 0 = never train automatically (POST /train still works)
       NW_TRAIN_DAY: sunday
       NW_TRAIN_HOUR: "13"

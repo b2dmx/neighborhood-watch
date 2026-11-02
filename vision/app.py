@@ -10,8 +10,10 @@ GET  /scan/<id>/frame/<n>      ->  a visit's best frame (JPEG)
 POST /scan/<id>/report {"names": {"<n>": {"animal", "confidence"}}}  ->  writes the report into the folder
 POST /train   ->  starts a training round now (409 if one is running)
 GET  /train   ->  training status and the last round's results
+POST /train/stop     ->  stops the round that is running (it is recorded as stopped, never promoted)
+POST /train/undo     ->  serves the model from before the last promoted round again
 GET  /train/history  ->  every round's results (without the photo id lists)
-GET  /settings       ->  the training settings; POST /settings {...} changes some of them
+GET  /settings       ->  the detector and training settings; POST /settings {...} changes some of them
 GET  /               ->  a web page with all of the above
 
 Boxes are in pixels of the image that was sent. Labels: animal, person, vehicle (a trained
@@ -28,6 +30,7 @@ import os
 from pathlib import Path
 import pickle
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -49,7 +52,10 @@ KEEP_SCANS = 20  # finished scans (and their frames in WORK) kept; older ones ar
 # defaults (NW_TRAIN=0 turns it off); changes made on the web page or through POST /settings
 # are kept in WORK/settings.json and win over them.
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-_DEVICES = ["auto", "cpu"]  # auto: the Intel GPU when torch can use it, otherwise the CPU
+_DEVICES = ["auto", "cpu"]  # auto: the Intel GPU when it can be used, otherwise the CPU
+# Training length: epochs and early-stop patience (normal: the environment's, 20 and 8).
+_LENGTHS = {"quick": (10, 4), "normal": None, "thorough": (40, 15)}
+_SIZES = [640, 960, 1280]  # training picture size; the export (and so the detector) uses it too
 
 
 def _day_name(value: str) -> str:
@@ -65,7 +71,12 @@ DEFAULTS = {
     "train_hour": int(os.environ.get("NW_TRAIN_HOUR", "13")) % 24,
     "train_device": "cpu" if os.environ.get("NW_TRAIN_DEVICE", "").strip().lower() == "cpu" else "auto",
     "min_new": int(os.environ.get("NW_TRAIN_MIN_NEW", "100")),
+    "min_first": int(os.environ.get("NW_TRAIN_MIN_FIRST", "40")),
+    "train_length": "normal",
+    "train_imgsz": int(os.environ.get("NW_TRAIN_IMGSZ", "960")),
+    "detect_device": "cpu" if os.environ.get("NW_DEVICE", "").strip().upper() == "CPU" else "auto",
 }
+STOP_GRACE = 20  # seconds a stopped round gets to tidy up before it is killed
 TRAIN_DIR = WORK / "train"
 CURRENT = WORK / "models" / "current.txt"
 SETTINGS_FILE = WORK / "settings.json"
@@ -102,7 +113,7 @@ class DetectorProcess:
             [sys.executable, str(Path(__file__).with_name("worker.py"))],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            env=os.environ,
+            env={**os.environ, "NW_DEVICE": detect_device()},
         )
         try:
             self.info = self._ask("info")
@@ -140,7 +151,8 @@ class DetectorProcess:
         return []
 
     def refresh(self) -> None:
-        """Stop the process and read the served model's details again (e.g. after a switch)."""
+        """Stop the process and read the served model's details again (after a model switch
+        or a change of Detects with: the next request starts it on the chosen device)."""
         with self.lock:
             self._stop()
             self._start()
@@ -154,9 +166,13 @@ class DetectorProcess:
         return False
 
 
-_det = DetectorProcess()
-_det.refresh()  # fail fast at start if no model can load
-print(f"Serving {_det.info['name']} ({_det.info['size']} px, labels {_det.info['labels']}) on {_det.info['device']}", flush=True)
+def detect_device() -> str:
+    """NW_DEVICE for the detector process: the CPU when Detects with is CPU, otherwise the
+    environment's choice (AUTO: the Intel GPU when there is one)."""
+    if settings()["detect_device"] == "cpu":
+        return "CPU"
+    wanted = os.environ.get("NW_DEVICE", "AUTO").strip().upper()
+    return "AUTO" if wanted in ("", "CPU") else wanted
 
 
 def _current_stamp() -> tuple:
@@ -166,15 +182,19 @@ def _current_stamp() -> tuple:
         return ()
 
 
+_model_seen: tuple = ()  # current.txt as the detector last loaded it (undo updates it too)
+
+
 def _watch_model() -> None:
     """Switch to a newly promoted model (current.txt changed) without a restart."""
-    seen = _current_stamp()
+    global _model_seen  # noqa: PLW0603
+    _model_seen = _current_stamp()
     while True:
         time.sleep(30)
         stamp = _current_stamp()
-        if stamp == seen:
+        if stamp == _model_seen:
             continue
-        seen = stamp
+        _model_seen = stamp
         try:
             _det.refresh()
         except Exception as err:  # noqa: BLE001
@@ -192,31 +212,45 @@ def _stop_when_idle() -> None:
 # ---- training -------------------------------------------------------------------------
 _train_proc: subprocess.Popen | None = None
 _train_lock = threading.Lock()
+_train_stopping = False  # Stop training was pressed; cleared once the process is gone
 
 
 def training_running() -> bool:
     return _train_proc is not None and _train_proc.poll() is None
 
 
+def _train_env(conf: dict) -> dict:
+    """train.py's environment from the settings."""
+    env = {
+        **os.environ,
+        "NW_DATASET": str(DATASET),
+        "NW_WORK": str(WORK),
+        "NW_MODEL": str(MODEL_DIR),
+        "NW_DEVICE": detect_device(),  # it scores the models the way the service runs them
+        "NW_TRAIN_DEVICE": "cpu" if conf["train_device"] == "cpu" else "",
+        "NW_TRAIN_MIN_NEW": str(conf["min_new"]),
+        "NW_TRAIN_MIN_FIRST": str(conf["min_first"]),
+        "NW_TRAIN_IMGSZ": str(conf["train_imgsz"]),
+    }
+    length = _LENGTHS.get(conf["train_length"])
+    if length:
+        env["NW_TRAIN_EPOCHS"], env["NW_TRAIN_PATIENCE"] = str(length[0]), str(length[1])
+    if conf["train_imgsz"] > 960 and "NW_TRAIN_BATCH" not in os.environ:
+        env["NW_TRAIN_BATCH"] = "4"  # bigger pictures: half the batch, so memory use stays about the same
+    return env
+
+
 def start_training(*args: str) -> bool:
     """Run train.py in its own low-priority process (never two at once). False if busy."""
     global _train_proc  # noqa: PLW0603
     with _train_lock:
-        if training_running():
+        if training_running() or _train_stopping:
             return False
         TRAIN_DIR.mkdir(parents=True, exist_ok=True)
         log = TRAIN_DIR / "train.log"
         if log.exists() and log.stat().st_size > 5_000_000:
             log.replace(TRAIN_DIR / "train.log.1")
-        conf = settings()
-        env = {
-            **os.environ,
-            "NW_DATASET": str(DATASET),
-            "NW_WORK": str(WORK),
-            "NW_MODEL": str(MODEL_DIR),
-            "NW_TRAIN_DEVICE": "cpu" if conf["train_device"] == "cpu" else "",
-            "NW_TRAIN_MIN_NEW": str(conf["min_new"]),
-        }
+        env = _train_env(settings())
         with log.open("a", encoding="utf-8") as fh:
             fh.write(f"\n=== {datetime.now().isoformat(timespec='seconds')} train.py {' '.join(args)}\n")
             fh.flush()
@@ -228,13 +262,129 @@ def start_training(*args: str) -> bool:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 preexec_fn=(lambda: os.nice(10)) if hasattr(os, "nice") else None,  # noqa: PLW1509
+                # Its own process group, so stopping it also ends its data-loading processes.
+                start_new_session=hasattr(os, "killpg"),
             )
         print(f"Training started (pid {_train_proc.pid}); log in {log}", flush=True)
         return True
 
 
+def stop_training() -> bool:
+    """Ask the running round to stop (train.py records it as stopped and never promotes);
+    it is killed if it hasn't ended after STOP_GRACE seconds. False if none is running."""
+    global _train_stopping  # noqa: PLW0603
+    with _train_lock:
+        proc = _train_proc
+        if proc is None or proc.poll() is not None:
+            return False
+        if _train_stopping:
+            return True
+        _train_stopping = True
+        try:
+            proc.terminate()  # SIGTERM to train.py only: its data loaders end with it
+        except OSError:
+            pass
+    threading.Thread(target=_finish_stop, args=(proc,), daemon=True).start()
+    print(f"Stopping training (pid {proc.pid})", flush=True)
+    return True
+
+
+def _finish_stop(proc: subprocess.Popen) -> None:
+    global _train_stopping  # noqa: PLW0603
+    try:
+        proc.wait(STOP_GRACE)
+    except subprocess.TimeoutExpired:
+        print("Training didn't stop in time; killing it", flush=True)
+    if hasattr(os, "killpg"):  # whatever is left of its process group
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    elif proc.poll() is None:
+        proc.kill()
+    proc.wait()
+    try:
+        status = _read_json(TRAIN_DIR / "status.json", {})
+        if isinstance(status, dict) and status.get("state") == "running":
+            # Killed before train.py could record it: record the stopped round here.
+            history = _read_json(TRAIN_DIR / "history.json", [])
+            history = history if isinstance(history, list) else []
+            started = status.get("started")
+            minutes = None
+            try:
+                minutes = round((datetime.now() - datetime.fromisoformat(started)).total_seconds() / 60, 1)
+            except (TypeError, ValueError):
+                pass
+            history.append({"round": len(history) + 1, "time": started, "promoted": False, "stopped": True, "minutes": minutes})
+            _write_json(TRAIN_DIR / "history.json", history)
+            _write_json(
+                TRAIN_DIR / "status.json",
+                {**status, "state": "stopped", "stage": "stopped", "finished": datetime.now().isoformat(timespec="seconds")},
+            )
+    finally:
+        with _train_lock:
+            _train_stopping = False
+    print("Training stopped", flush=True)
+
+
+def _served_name() -> str:
+    """The folder name in current.txt ("" when MegaDetector is served)."""
+    try:
+        return Path(CURRENT.read_text(encoding="utf-8").strip()).name
+    except OSError:
+        return ""
+
+
+def _has_model(folder: Path) -> bool:
+    return folder.is_dir() and any(folder.glob("*.xml"))
+
+
+def undo_target(history) -> dict | None:
+    """What Undo the last round would do: {"round": the promoted round being served, "to": the
+    model folder before it ("" for MegaDetector)}, or None when there is nothing to undo."""
+    promoted = [
+        h for h in (history if isinstance(history, list) else [])
+        if isinstance(h, dict) and h.get("promoted") and not h.get("undone") and h.get("model_dir")
+    ]
+    if not promoted or Path(promoted[-1]["model_dir"]).name != _served_name():
+        return None
+    models = CURRENT.parent
+    back = next(
+        (Path(h["model_dir"]).name for h in reversed(promoted[:-1]) if _has_model(models / Path(h["model_dir"]).name)),
+        "",
+    )
+    return {"round": promoted[-1].get("round"), "to": back}
+
+
+def undo_round() -> dict:
+    """Serve the model from before the last promoted round again, and mark that round undone
+    in the history. ValueError when it can't (a round is running, or nothing to undo)."""
+    global _model_seen  # noqa: PLW0603
+    with _train_lock:
+        if training_running() or _train_stopping:
+            raise ValueError("a training round is running")
+        history = _read_json(TRAIN_DIR / "history.json", [])
+        target = undo_target(history)
+        if target is None:
+            raise ValueError("there is no promoted round to undo")
+        tmp = CURRENT.with_suffix(".tmp")
+        tmp.write_text(target["to"], encoding="utf-8")  # empty: MegaDetector
+        tmp.replace(CURRENT)
+        for h in history:
+            if isinstance(h, dict) and h.get("round") == target["round"] and h.get("promoted"):
+                h["undone"] = datetime.now().isoformat(timespec="seconds")
+        _write_json(TRAIN_DIR / "history.json", history)
+    print(f"Undid round {target['round']}; back to {target['to'] or 'MegaDetector'}", flush=True)
+    try:
+        _det.refresh()
+        _model_seen = _current_stamp()
+    except Exception as err:  # noqa: BLE001 - the model watcher tries again
+        print(f"Model switch failed: {err}", flush=True)
+    return target
+
+
 def settings() -> dict:
-    """The training settings: the environment's defaults with the saved changes on top."""
+    """The detector and training settings: the environment's defaults with the saved changes on top."""
     saved = _read_json(SETTINGS_FILE, {})
     saved = saved if isinstance(saved, dict) else {}
     return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
@@ -252,15 +402,23 @@ def _clean_settings(changes: dict) -> dict:
             if str(value).lower() not in _DAYS:
                 raise ValueError(f"train_day must be one of {', '.join(_DAYS)}")
             out[key] = str(value).lower()
-        elif key in ("train_hour", "min_new"):
-            low, high = (0, 23) if key == "train_hour" else (1, 10000)
+        elif key in ("train_hour", "min_new", "min_first"):
+            low, high = {"train_hour": (0, 23), "min_new": (1, 10000), "min_first": (10, 1000)}[key]
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
-                raise ValueError(f"{key} must be {low} to {high}")
+                raise ValueError(f"{key} must be a whole number from {low} to {high}")
             out[key] = value
-        elif key == "train_device":
+        elif key in ("train_device", "detect_device"):
             if value not in _DEVICES:
-                raise ValueError(f"train_device must be one of {', '.join(_DEVICES)}")
+                raise ValueError(f"{key} must be one of {', '.join(_DEVICES)}")
             out[key] = value
+        elif key == "train_length":
+            if value not in _LENGTHS:
+                raise ValueError(f"train_length must be one of {', '.join(_LENGTHS)}")
+            out[key] = value
+        elif key == "train_imgsz":
+            if isinstance(value, bool) or value not in _SIZES:
+                raise ValueError(f"train_imgsz must be one of {', '.join(map(str, _SIZES))}")
+            out[key] = int(value)
         else:
             raise ValueError(f"unknown setting {key}")
     return out
@@ -273,17 +431,24 @@ def save_settings(changes: dict) -> dict:
     clean = _clean_settings(changes)
     with _settings_lock:
         saved = _read_json(SETTINGS_FILE, {})
-        saved = {**(saved if isinstance(saved, dict) else {}), **clean}
-        WORK.mkdir(parents=True, exist_ok=True)
-        tmp = SETTINGS_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(saved, indent=1), encoding="utf-8")
-        tmp.replace(SETTINGS_FILE)
-    return settings()
+        saved = saved if isinstance(saved, dict) else {}
+        device_before = {**DEFAULTS, **saved}.get("detect_device")
+        saved = {**saved, **clean}
+        _write_json(SETTINGS_FILE, saved)
+    conf = settings()
+    if conf["detect_device"] != device_before:
+        # Reload the detector on the chosen device now, so /health shows what it really uses.
+        try:
+            _det.refresh()
+            print(f"Detector now on {_det.info.get('device')}", flush=True)
+        except Exception as err:  # noqa: BLE001 - the next request starts it again
+            print(f"Detector reload failed: {err}", flush=True)
+    return conf
 
 
 def _schedule_training() -> None:
-    """Once on the training day from the training hour (local time; set TZ): train.py
-    --if-needed, which only trains when enough new confirmed photos arrived since the last
+    """Once on the training day from the training hour (the host's local time): train.py
+    --if-needed, which only trains when enough new answered photos arrived since the last
     round. The settings are read every minute, so changes apply without a restart."""
     done_on = None
     while True:
@@ -307,6 +472,13 @@ def _read_json(path: Path, default):
         return default
 
 
+def _write_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
 def _restart_on_new_code() -> None:
     """The code can live in a folder on the host (./app) so updates are a file copy: when a
     .py file changes, exit between requests and let Docker's restart policy start the new
@@ -327,6 +499,10 @@ def _restart_on_new_code() -> None:
             print("New code found; restarting", flush=True)
             os._exit(0)
 
+
+_det = DetectorProcess()
+_det.refresh()  # fail fast at start if no model can load
+print(f"Serving {_det.info['name']} ({_det.info['size']} px, labels {_det.info['labels']}) on {_det.info['device']}", flush=True)
 
 threading.Thread(target=_stop_when_idle, daemon=True).start()
 threading.Thread(target=_restart_on_new_code, daemon=True).start()
@@ -364,7 +540,7 @@ async def health(_request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            "device": info.get("device"),
+            "device": info.get("device"),  # what the detector really runs on (Detects with)
             "model": info.get("name"),
             "trained": info.get("dir") != str(MODEL_DIR),
             "size": info.get("size"),
@@ -385,12 +561,30 @@ async def train_start(_request: web.Request) -> web.Response:
     return web.json_response({"started": True})
 
 
+async def train_stop(_request: web.Request) -> web.Response:
+    if not await asyncio.get_running_loop().run_in_executor(None, stop_training):
+        return web.json_response({"error": "no training round is running"}, status=409)
+    return web.json_response({"stopping": True})
+
+
+async def train_undo(_request: web.Request) -> web.Response:
+    try:
+        target = await asyncio.get_running_loop().run_in_executor(None, undo_round)
+    except ValueError as err:
+        return web.json_response({"error": str(err)}, status=409)
+    return web.json_response({"undone": target["round"], "serving": _det.info.get("name")})
+
+
 async def train_status(_request: web.Request) -> web.Response:
     history = _read_json(TRAIN_DIR / "history.json", [])
     conf = settings()
+    running = training_running()
     return web.json_response(
         {
-            "running": training_running(),
+            "running": running,
+            "stopping": running and _train_stopping,
+            # The round Undo the last round would undo, and the model it goes back to.
+            "undo": None if running or _train_stopping else undo_target(history),
             "enabled": conf["train_enabled"],
             "schedule": f"{conf['train_day']} from {conf['train_hour']}:00",
             "settings": conf,
@@ -418,7 +612,9 @@ async def train_history(_request: web.Request) -> web.Response:
 
 
 async def settings_get(_request: web.Request) -> web.Response:
-    return web.json_response({"settings": settings(), "days": _DAYS, "devices": _DEVICES})
+    return web.json_response(
+        {"settings": settings(), "days": _DAYS, "devices": _DEVICES, "lengths": list(_LENGTHS), "sizes": _SIZES}
+    )
 
 
 async def settings_set(request: web.Request) -> web.Response:
@@ -568,6 +764,8 @@ def make_app() -> web.Application:
             web.post("/scan/{id}/report", scan_report),
             web.post("/train", train_start),
             web.get("/train", train_status),
+            web.post("/train/stop", train_stop),
+            web.post("/train/undo", train_undo),
             web.get("/train/history", train_history),
             web.get("/settings", settings_get),
             web.post("/settings", settings_set),

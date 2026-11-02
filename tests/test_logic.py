@@ -422,7 +422,7 @@ def test_missing_mode_any_model_any_confidence_any_camera():
     v = verdict("Ziggy", "low", named=["luna", "ziggy"])
     alerts = plan(v, YARD, missing={"luna"})
     assert alerts[0].kind == "missing" and alerts[0].urgency == "critical" and alerts[0].volume == 1.0
-    assert alerts[0].audience == "missing" and alerts[0].title == "Possible Luna — Yard"
+    assert alerts[0].audience == "missing" and alerts[0].title == "Missing: possible Luna — Yard"
     # Even where Luna is allowed and her own alerts are off.
     garage = logic.CameraRule("garage", "Garage", critical=True, allowed=frozenset({"luna"}))
     rules = switched("Luna", alerts_on=False, alert_at=frozenset())
@@ -436,7 +436,7 @@ def test_missing_mode_high_also_tells_everyone_else():
 
 def test_missing_mode_for_any_named_animal():
     a, b = plan(verdict("Milo", "medium"), YARD, missing={"milo"})
-    assert a.kind == "missing" and a.title == "Possible Milo — Yard"
+    assert a.kind == "missing" and a.title == "Missing: possible Milo — Yard"
     assert b.audience == "not_missing"
     (a,) = plan(verdict("Milo", "low"), YARD, missing={"milo"})
     assert a.kind == "missing"
@@ -458,7 +458,7 @@ def test_builtins():
     assert plan(verdict("Rabbit"), YARD) == []
     assert plan(verdict("Rabbit", "low"), GARAGE)[0].title == "Possible Rabbit — Garage"
     (a,) = plan(verdict("Nothing", "low"), GARAGE)
-    assert (a.title, a.kind) == ("Motion — Garage", "motion")
+    assert (a.title, a.kind) == ("Unsure motion — Garage", "motion")
     assert plan(verdict("Nothing", "medium"), YARD) == []
 
 
@@ -478,7 +478,7 @@ def test_pest_alert_says_pest_and_mentions_lights_only_when_they_ran():
     (a,) = pest(deterred=True)
     assert a.message == "9:05 PM · ●●● · Lights on"
     (a,) = plan(verdict("Nothing", "low"), GARAGE)
-    assert a.message == "9:05 PM · Unidentified"
+    assert a.message == "9:05 PM · Couldn't tell what"
 
 
 def test_verdict_remembers_both_names():

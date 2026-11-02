@@ -17,7 +17,7 @@ It is all set up in the UI. A dashboard card comes with it.
 1. **A camera sees motion or an animal** during the watch window: between set times, or whenever it's dark, whichever is wider. Person and vehicle sensors skip the check; each camera has its own cooldown.
 2. **A snapshot is taken.** If it fails, the check stops, so the AI never judges an old photo.
 3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models always go last.
-4. **A second model double-checks** (the **Second opinion** list, in order) when the first answer named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered. It also checks when a backup gave the first answer and named an animal; that check uses free models only.
+4. **A second model double-checks** (the **Second opinion** list, in order) when the first answer named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered. It also checks when a backup gave the first answer and named an animal, and when the first answer names wildlife that can alert (a raccoon or a fox; not a bird or a deer); those two checks use free models only.
 5. **The two answers become one verdict:**
    - Models that disagree give low confidence.
    - A priority animal is high only when both models name it and both see its coat pattern and main colour. Without a second opinion it is capped at medium.
@@ -53,19 +53,19 @@ Copy `custom_components/neighborhood_watch` into your `config/custom_components`
 Onboarding walks through:
 
 1. **AI models.** The first look and the second opinion, each in order. Only one model is needed (for the first look); the rest is optional. Paid models and the first model's busy hours are set later under **Configure → AI models**.
-2. **When to watch.** Start and end times, whether darkness also counts, and when the night summary is built.
+2. **When to watch.** Start and end times, whether darkness also counts, or **Watch all day**. Under **More**: when the night summary is built, and how long an animal shows as on camera. While any animal's missing mode is on, cameras are checked all day.
 3. **Pests.** Pick (or type) the animals that are pests, e.g. raccoon, opossum, skunk. Nothing else about wildlife needs setting up: every animal the AI names is recognised and tracked.
 4. **Cameras.** Pick them, then confirm each one. Its name and sensors are filled in from the camera's own device: motion and animal sensors start a check, person and vehicle sensors skip it.
 5. **Who gets alerts.** Pick from the phones with the Home Assistant app. iPhone and Android critical alerts are both supported.
 6. **Animals.** Named animals, one at a time: name, what it looks like, identification tips, coat pattern and main tone at night (infrared shows tones, not colours), and whether it is a priority or always-strict animal. A reference photo is optional. Leave the name empty when you're done, or straight away if you only care about pests. This last page also says if no cameras were picked, no phones were found or no second opinion model was picked, so nothing is missed.
 
-Afterwards, the integration page lists your animals (**Add animal** adds one); cameras and people are under **Configure → Cameras** and **Configure → People**, where you pick one to change it or add a new one. On the camera, person and animal forms, the less-used settings sit in sections you can open (for a camera: **Timing**, **Critical alerts** and **Scaring pests off**; for a person: **Missing mode and critical sound**, **Mutes** and **Quiet zones and hours**; for an animal: **Card picture and tips**, **Alerts and strictness** and **Last seen**):
+Afterwards, change anything on the [Neighborhood Watch page](#the-neighborhood-watch-page) in the sidebar, or on the integration page: **Add animal**, each animal's ⋮ → **Edit animal**, and **Configure** for the rest. Less-used settings sit in sections you can open. What each has:
 
 - **Cameras**. Besides its sensors and cooldowns, a camera has:
   - **Never ring through silent mode here for**: while its **Critical alerts for anything here** switch is on, anything seen here rings through silent mode, except the animals listed (a pet that's allowed in the garage);
   - **What the AI should know about this view**: notes only this camera's checks see ("the bins are at the left"; "a cat behind the window on the right is an indoor pet");
   - **lights and a sound** that scare pests off.
-- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Ring through silent mode at** (see [Alerts](#alerts)).
+- **Add animal**: animals told apart by name, like your cats. Each has **Alert at** and **Critical alerts at** (see [Alerts](#alerts)).
 - **People**: someone who gets alerts. Each has these settings:
   - their phone, and their critical sound and volume;
   - **Never alert them about**: animals this person never hears about;
@@ -74,25 +74,39 @@ Afterwards, the integration page lists your animals (**Add animal** adds one); c
 
   Each person also has a **"<name> gets critical alerts"** switch, shown on their phone's device (or the Neighborhood Watch device if no phone is found). Off: their critical alerts arrive as normal notifications.
 
+### The Neighborhood Watch page
+
+After setup, a **Neighborhood Watch** page appears in Home Assistant's sidebar (admins only). It has everything in one place, by topic:
+
+- **Review:** the sightings waiting for your answer, the same list as the card's To review section.
+- **Cameras:** every camera (open one to change it, add one, or **Remove camera**), and **When to watch**. A camera's page starts with its **Critical alerts for anything here** switch.
+- **Animals:** every animal (open, add, **Remove animal**). An animal's page starts with its switches and draws its card picture as you pick a look. The tab also has the critical alerts switches for pests, unknown animals, other wildlife and unsure motion, and the **Pests** and **Other animals and motion** settings.
+- **People:** everyone who gets alerts (open, add, **Remove person**); a person's page starts with their critical alerts switch.
+- **Alerts:** the alert settings and **Pictures in alerts**.
+- **AI:** AI models and AI instructions.
+- **Detector:** **Local detector**, the detector's status, its training and past rounds, a **This week** line (how often it agreed with the AI, and how many animals it missed), and **Saved photos**.
+
+Removing asks first. These are the same settings as **Configure** and **Add animal** on the integration page, with the same checks and explanations. A change in one shows in the other.
+
 **Configure** holds:
 
 | Page | Settings (defaults) |
 |---|---|
 | Cameras / People | Pick one to change or remove, or add one |
 | When to watch | 20:00–08:00, also when dark, or all day; summary at 08:05; on camera for 10 min |
-| Pests | The pest list; where pests alert (Alert at / Ring through silent mode at; default every camera) |
-| Other animals and motion | Alert at / Ring through silent mode at for Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
+| Pests | The pest list; where pests alert (Alert at / Critical alerts at; default every camera) |
+| Other animals and motion | Alert at / Critical alerts at for Other wildlife, Unknown animals and Unsure motion (all every camera, except unsure motion: none) |
 | Alerts | Send alerts (on); lowest confidence that alerts (medium); Right / Not sure / Other buttons on alerts (on); page that opens when you tap an alert (empty) |
 | Pictures in alerts | Public address for picture links (defaults to the external URL) |
 | AI models | First look, second opinion, paid models; optional busy hours for the first model (see [AI models](#ai-models)) |
 | Advanced → AI instructions | Notes for the AI (all cameras), common visitors (hints, not a limit), reference photos (on), recently absent after 14 days, the AI instructions (with placeholders; empty follows the built-in default) |
-| Advanced → Saved photos | Save checked photos (on; needed for Review); folder (media folder, or a NAS share); keep at most 5 GB |
+| Advanced → Saved photos | Save checked photos (on; needed for Review); folder (empty: the media folder's `neighborhood_watch/dataset`, or a NAS share); keep at most 5 GB |
 | Advanced → Local detector | Address (empty: off; checked when you save); mode (Test only); how sure the detector must be (0.2). See [Local detector](#local-detector-optional) |
 
 ### AI models
 
 - **First look** runs on every sighting. Its models are tried in order until one answers.
-- **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, or came from a backup and names an animal. Its models are tried in order too, and must differ from the First look ones (a model rarely disagrees with itself).
+- **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, names wildlife that can alert (a raccoon or a fox; not a bird or a deer), or came from a backup and names an animal. Its models are tried in order too, and must differ from the First look ones (a model rarely disagrees with itself).
 - **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer.
 - **Save the first model for busy hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
 
@@ -106,16 +120,6 @@ Each camera has a cooldown (3 min by default). Two optional overrides:
 - **In missing mode**: while any missing mode is on, e.g. 2 min so nothing is missed.
 
 **A check on these cameras ends the cooldown** reopens a camera when an animal is seen on its way there, e.g. the driveway reopens the garage.
-
-## The Neighborhood Watch page
-
-After setup, a **Neighborhood Watch** page appears in Home Assistant's sidebar (admins only). It has everything in one place, by topic:
-
-- **Review:** the sightings waiting for your answer, the same list as the card's To review section.
-- **Cameras, Animals, People:** a list of each. Open one to change it, add a new one, or remove it (**Remove camera**, **Remove person**, **Remove animal**; each asks first). A camera's or animal's page starts with its **Critical alerts** switch, and the Animals tab has the ones for pests, unknown animals, other wildlife and unsure motion, so they're next to the cameras they ring at. An animal's page also draws its card picture as you pick a look.
-- **Alerts, AI, Detector:** all the other settings, plus the local detector's status, training and past rounds, and how often it agreed with the AI this week.
-
-These are the same settings as **Configure** and **Add animal** on the integration page, with the same checks and explanations. A change in one shows in the other.
 
 ## Entities
 
@@ -161,6 +165,9 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 | Night summary | Each animal's sightings last night, with places; low-confidence wildlife counts as possible, e.g. "Raccoon — 3 sightings (1 confirmed, 2 possible)"; full detail in attributes |
 | Last sighting | The latest result from any camera |
 | AI calls today | Calls per model today (quota day, midnight Pacific), answers, errors and the last error |
+| To review | How many sightings wait for an answer; attributes list them, the last answer (which can be undone) and what a sighting can be corrected to |
+| Detector agreement | How often the local detector agreed with the AI over 7 days, in %; attributes `misses` (animals it missed), `extras`, the recent misses and the last error |
+| Last scan | The latest [bulk scan](#bulk-scanning-photos-and-videos): its progress, then how many visits it found; attributes hold the folder, totals and report |
 
 ## The sighting event
 
@@ -181,19 +188,19 @@ These join the camera's own device (from its integration, e.g. UniFi Protect), s
 The integration sends the alerts itself, to every person you add. Every alert is about something: one of your animals, or one of four catch-alls under **Configure → Pests** and **Configure → Other animals and motion**: **pests**, **other wildlife** (every other wild animal), **unknown animals** (a cat or dog that isn't one of yours) and **unsure motion**. The catch-alls are set per group, not per kind. Each animal and catch-all has two settings:
 
 - **Alert at:** all cameras, chosen cameras, or none.
-- **Ring through silent mode at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: every camera in Alert at. Picking a camera here also alerts there.
+- **Critical alerts at:** where its **Critical alerts switch** makes it ring through silent mode. Empty: every camera in Alert at. Picking a camera here also alerts there.
 
-Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera and animal, and one per catch-all on the Neighborhood Watch device. These all start off. Each person's **"<name> gets critical alerts"** switch starts on.
+Every critical setting is a switch, so you can put it on a dashboard and flip it at short notice: one per camera and animal, and one per catch-all on the Neighborhood Watch device (also on the sidebar page's Animals tab). These all start off. On an iPhone, allow Critical Alerts for the Home Assistant app in iOS Settings → Notifications. Each person's **"<name> gets critical alerts"** switch starts on.
 
 Then:
 
-- **Confidence.** Answers below the **Alert from** level (medium by default) don't alert; they wait in the review queue. Priority animals are always worded "Possible Luna".
+- **Confidence.** Answers below **Lowest confidence that alerts** (medium by default) don't alert; they wait in To review. Critical alerts, unsure motion and missing mode ignore it. Priority animals are always worded "Possible Luna".
 - **A camera's critical switch** makes anything seen there ring, except the animals listed on its page. Critical overrides "don't alert", so you hear about anything in the garage even if its own alerts are off. Harmless things (squirrels, birds, bugs, leaves) and a confident empty frame never alert.
 - **Visits.** The same animal seen again on the same camera within the camera's cooldown plus 10 minutes updates the earlier alert silently. Pests alert every time, so you know when one you scared off comes back.
-- **Missing mode** (any named animal) beats everything: any possible sighting, from either model at any confidence on any camera, sends a critical alert at full volume to the people who get missing-mode alerts. The AI always takes a second look.
+- **Missing mode** (any named animal) beats everything: any possible sighting, from either model at any confidence on any camera, sends a critical alert at full volume to the people who get missing-mode alerts. The AI always takes a second look, and cameras are checked all day, not only in watch hours. Turn it on with the animal's **Missing mode** switch: on its page (sidebar page → Animals) or on its device.
 - **Per person.** Muted animals are skipped. In a quiet zone or quiet hours, critical alerts arrive as normal ones, or not at all; missing-mode alerts always arrive.
 
-Each alert carries the frame the AI judged and three buttons: **✓ Right**, **? Not sure** and **… Other** (it was something else: it comes off that animal's tracking and waits in To review so you can pick what it was). They all work from a watch. Tapping the alert itself opens the page set under Configure → Alerts, e.g. `/lovelace/pets#review` (`#review` opens the To review section).
+Each alert carries the frame the AI judged and three buttons: **✓ Right**, **? Not sure** and **… Other** (it was something else: it comes off that animal's tracking and waits in To review so you can pick what it was). They all work from a watch. Tapping the alert itself opens the page set under Configure → Alerts, e.g. `/neighborhood-watch#review` (the sidebar page, admins only) or a dashboard with the card, e.g. `/lovelace/pets#review`.
 
 You can turn the alerts off and use the event in your own automations instead:
 
@@ -222,13 +229,13 @@ When a pest is seen at a camera with deterrent lights or a sound:
 
 For your own automations, the Neighborhood Watch device has **Pest on camera** (pests only) and **Wildlife on camera** (any wildlife) sensors.
 
-## Corrections and training data
+## Corrections and saved photos
 
-**Nothing has to be answered at night.** Every sighting with an animal in it waits in a **review queue** for up to 7 days. Confidently empty frames are left out. The card's **To review** section shows each photo with ✓ Right, ? Not sure and "It was…" (every animal and wildlife kind, or **Something else (type it)** for anything not listed). An answered photo leaves the list at once. The section disappears when there is nothing to review. The **To review** sensor counts them. The buttons on an alert also still work when tapped the next morning. "Not sure" takes a sighting off the queue without labelling it. After "It was…", the card offers **Add a note so it doesn't happen again**, which saves it to that camera's view notes or that animal's tips, where the AI will see it (also the `add_note` action). "It was…" accepts any animal: your own animals and wildlife kinds move tracking; anything else (a groundhog, a heron) is labelled for training, just not tracked.
+**Nothing has to be answered at night.** Every sighting with an animal in it waits in **To review** (on the card, and the sidebar page's Review tab) for up to 7 days. Answer ✓ Right, ? Not sure (off the list, no label) or It was… (your animals, wildlife kinds, or **Something else (type it)**). An answered photo leaves the list at once; **Undo** takes the last answer back (also the `undo_last_answer` action). Your animals and wildlife kinds move tracking; anything else is only labelled. After It was…, **Add a note so it doesn't happen again** gives the AI a note for that camera or animal (also the `add_note` action). Alert buttons still work the next morning.
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
-- **Training data.** Every checked frame is saved, downscaled to 1280 px, beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`.
+- **Saved photos.** Every checked frame is saved, downscaled to 1280 px, beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`; the folder is the media folder's `neighborhood_watch/dataset` unless you set another under **Saved photos**.
 - **Corrections.** A button on an alert, the `correct` action, or the card's ✓ / ? / It was… labels that frame. It also fixes tracking: the sighting, its photo and the last-seen time move to the right animal.
 - **Pruning.** When the folder reaches its size limit, the oldest unlabelled frames go first.
 
@@ -244,31 +251,28 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 - **Test only:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
-The address is checked when you save it: if the service doesn't answer at `<address>/health`, the form says so.
+**Running it:** copy [`vision/compose.yaml`](../vision/compose.yaml) to the machine and follow its comments: put the MegaDetector model folder next to it as `./models/megadetector` (its `.xml` and `.bin` files), point the `/dataset` line at your saved-photos folder, and either copy this repo's `vision` folder to `./app` or remove the `./app` line to use the image's own code. Start it with `docker compose up -d`, then enter its address under **Detector → Local detector**.
+
+A new or changed address is checked when you save it: if the service doesn't answer at `<address>/health`, the form says so.
 
 **Where to see it:** the **Detector** tab of the [Neighborhood Watch page](#the-neighborhood-watch-page) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
 
 ### Training the detector on your photos
 
-MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [training data](#corrections-and-training-data)) and gets better every week:
+MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [saved photos](#corrections-and-saved-photos)) and gets better every week:
 
 1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo. Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
 2. **Fair test.** The confirmed photos from the most recent ~20% of days are held back as the test set and never trained on. So are confirmed animal photos that no teacher could box, which are exactly the misses that matter. Confidently empty frames from those days are the empty side of the test.
 3. **Training.** A one-class ("animal") YOLO11 model is trained on everything else: from YOLO11s the first time, then from the last promoted model.
 4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it only if it **misses fewer animals** and makes **at least 10% fewer mistakes in all** (misses plus false alarms). It's then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
 
-Set it up by mounting the training-data folder into the container (see [`vision/compose.yaml`](../vision/compose.yaml); adjust the path on the left to where that folder lives, read-only is enough):
+It needs the saved-photos folder mounted at `/dataset` (read-only is enough), and `shm_size`, both already in [`vision/compose.yaml`](../vision/compose.yaml).
 
-```yaml
-    volumes:
-      - /volume1/your-share/neighborhood-watch/dataset:/dataset:ro
-    shm_size: 1gb           # room for training's data loaders
-    environment:
-      TZ: Europe/Berlin     # your time zone; the schedule uses local time
-```
-
-- **Schedule:** every Sunday from 13:00 local time, when at least 100 new confirmed photos arrived since the last round, or for the first round once 40 animal photos are confirmed. Change the day, hour, photo count, GPU or CPU, or turn it off on either page. The page's settings are kept in `work/settings.json`; `NW_TRAIN`, `NW_TRAIN_DAY`, `NW_TRAIN_HOUR`, `NW_TRAIN_MIN_NEW` and `NW_TRAIN_DEVICE` only set the defaults. Training runs in a separate low-priority process, so detection stays responsive. It trains on the Intel GPU when the container can see one (`/dev/dri`), and on the CPU otherwise or if the GPU fails. A round takes from tens of minutes to a few hours, depending on how many photos there are and which of the two it runs on. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
-- **Now:** **Train now** on either page, or `POST /train`, starts a round (409 if one is running). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. `GET /train/history` lists every round, `GET`/`POST /settings` read and change the settings. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
+- **Settings** (Detector tab, or the service's own page; they save straight away and are kept in `work/settings.json`, the `NW_*` environment variables only set the defaults):
+  - **Detects with:** GPU or CPU for checking photos (GPU when the container can see one through `/dev/dri`).
+  - **Weekly training**, its day and hour (the NAS's local time), **Photos for the first round** (40), **New answered photos** needed for later rounds (100), **Trains with** GPU or CPU, **Training length** (Quick, Normal, Thorough) and **Picture size** (Faster, Normal, Sharper: finds small animals better, trains slower and checks photos about 25% slower).
+- **Schedule:** every Sunday from 13:00 by default. Training runs in a separate low-priority process, so detection stays responsive, and falls back to the CPU if the GPU fails. A round takes from tens of minutes to a few hours. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
+- **Now:** **Train now** (`POST /train`) starts a round (409 if one is running); **Stop training** (`POST /train/stop`) ends it without changing the model; **Undo the last round** (`POST /train/undo`) goes back to the model from before it (the last 3 trained models are kept). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. `GET /train/history` lists every round, `GET`/`POST /settings` read and change the settings. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
 - **Which model is in use:** `GET /health` shows `model` and `trained`. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
 
 ## Bulk scanning (photos and videos)
@@ -278,13 +282,13 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 1. The detector checks every photo, and a frame every second of every video. It keeps the moments with an animal, grouped into **visits** (one per photo, or a stretch of a video), each with its best frame. Hours of footage become a short list.
 2. Each visit is named by the same AI as the cameras (one or two calls per visit, up to the limit you set).
 3. A report, `neighborhood-watch-report/index.html` plus `report.csv`, is written into the scanned folder, with every visit's frame. The **Last scan** sensor and the card show the totals, and the people who get alerts get a summary.
-4. Every visit joins the **review queue** and the training data. Scanned footage can be old, so it never changes anyone's last-seen tracking.
+4. Every visit appears in **To review** and joins the saved photos. Scanned footage can be old, so it never changes anyone's last-seen tracking.
 
 ## Dashboard card
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-training-data));
+- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos));
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ? / It was… buttons;
 - the critical-alert switches;
@@ -313,7 +317,7 @@ columns: 3
 
 ### Pixel sprites
 
-Each animal can have an animated pixel sprite instead of the drawn face. On the animal's page, pick a **Picture on the card** (right under the reference photo): calico with a collar and bell, grey with a white chest spot, long-haired tuxedo, dark brown tabby, charcoal with a white chest, all black, smoky tabby with a banded tail, or black and white with a lopsided mask; or a common breed or coat: orange, cream, grey or silver tabby, all white, Russian Blue, Bombay, British Shorthair, black-and-white or grey-and-white bicolour, Maine Coon, Siamese, Ragdoll, Birman, Himalayan, Sphynx, tortoiseshell, Bengal, Abyssinian, Scottish Fold or Persian. To change one, or draw your own, use **Advanced: custom card picture** (in *Card picture and tips*): a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal the AI couldn't name (an Unknown Cat) shows under **Also seen**, drawn as the ready-made look nearest to the coat it described. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
+A cat can be drawn as an animated pixel sprite instead of the drawn face: pick a **Picture on the card** on its page (cats only), a ready-made coat or a common breed. To change one, or draw your own, use **Advanced: custom card picture** (in *Card picture and tips*): a small object such as `fur: "#7c7e84"` plus options like `tabby`, `tuxedo`, `fluffy`, `whitePaws`, `whiteChest`, `chestPatch`, `collar: "#3f9a55"` with `bell: true`. Extra markings go in `marks`, as runs of pixels per colour. The sprite idles (tail, breathing, blinks, ear flicks, a yawn, a paw lick) and switches to an alert pose while the animal is on camera. An animal the AI couldn't name (an Unknown Cat) shows under **Also seen**, drawn as the ready-made look nearest to the coat it described. An animal that is away lately dozes with its tail down and Zs drifting up, waking now and then: asleep half the time at first, three quarters after a month away, almost always after two months. A collar shows grey when the animal's latest photo is infrared. Wildlife rows show each kind's sprite, walking in when it was just seen. Sprites hold still when the device asks for reduced motion.
 
 A single sprite can go anywhere, e.g. for an indoor pet:
 
@@ -329,14 +333,15 @@ size: 96
 | Action | What it does |
 |---|---|
 | `neighborhood_watch.identify` | Checks a camera now (ignoring its cooldown) and returns the result |
-| `neighborhood_watch.test_sighting` | Fires a fake event marked `test: yes` to try your alerts; tracking is never changed |
+| `neighborhood_watch.test_sighting` | Fires a fake sighting event marked `test: yes` and sends the alerts a real one would, titled `TEST · …`; tracking is never changed |
 | `neighborhood_watch.correct` | Right, wrong, or what it really was, for a sighting (by id, by camera, or the latest) |
-| `neighborhood_watch.mark_wrong` | "That wasn't Pepper": removes the latest counted sighting of an animal from tracking |
+| `neighborhood_watch.undo_last_answer` | Takes back the last Right / Not sure / Other / It was… answer: the sighting goes back to To review, and tracking and the photo follow |
+| `neighborhood_watch.mark_wrong` | Removes an animal's latest counted sighting from tracking, e.g. when it was really another animal |
 | `neighborhood_watch.set_reference_photo` | Uses an animal's last photo, or a fresh snapshot, as its reference photo |
 | `neighborhood_watch.build_summary` | Builds the night summary now and starts a new night |
 | `neighborhood_watch.scan` | Bulk-scans a folder of photos and videos on the detector's machine (see [Bulk scanning](#bulk-scanning-photos-and-videos)) |
 | `neighborhood_watch.add_note` | Adds a note for the AI to a camera's view notes or an animal's tips |
-| `neighborhood_watch.move_training_data` | Moves saved training photos into the current training folder, e.g. after pointing it at a NAS |
+| `neighborhood_watch.move_training_data` | Move saved photos: moves them into the folder set under Saved photos, e.g. after pointing it at a NAS |
 
 ## Privacy
 
@@ -346,7 +351,7 @@ Frames go only to the AI models you choose. Everything else stays local:
 - Photos are in `config/neighborhood_watch`.
 - Frames and reference photos are in the media folder.
 - Notification pictures are in a random-named folder inside `config/www/neighborhood_watch`, so their links can't be guessed. Like everything in `www`, though, anyone who has a link can open it without logging in.
-- Training data is in the folder you choose.
+- Saved photos are in the folder set under Saved photos (by default the media folder's `neighborhood_watch/dataset`).
 
 ## License
 

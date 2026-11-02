@@ -4,8 +4,10 @@ Home Assistant is https, or the user may be away from home)."""
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import BUILTIN_KEYS, CONF_SECOND_OPINION, DOMAIN, NAME
+from .const import BUILTIN_KEYS, CONF_DATASET, CONF_SECOND_OPINION, DOMAIN, NAME
 from .engine import WatchEngine
 
 PANEL_URL = f"/{DOMAIN}/neighborhood-watch-panel.js"
@@ -29,6 +31,10 @@ FONT_URL = f"/{DOMAIN}/GoogleSans.woff2"
 PANEL_PATH = "neighborhood-watch"
 
 _LOGGER = logging.getLogger(__name__)
+
+# One number per running engine, so the page can tell a reload (after a save) has happened.
+_LOADS: weakref.WeakKeyDictionary[WatchEngine, int] = weakref.WeakKeyDictionary()
+_COUNTER = itertools.count(1)
 
 
 def _engine(hass: HomeAssistant) -> WatchEngine | None:
@@ -114,15 +120,19 @@ def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
     entities = er.async_get(hass)
 
     def critical(owner: str, key: str = "critical_alerts") -> str | None:
-        """The entity id of a critical-alerts switch (switch.py's unique ids)."""
+        """The entity id of one of its switches (switch.py's unique ids)."""
         return entities.async_get_entity_id("switch", DOMAIN, f"{entry_id}_{owner}_{key}")
 
     strict = watch.strict_keys()
+    if watch not in _LOADS:
+        _LOADS[watch] = next(_COUNTER)
     connection.send_result(
         msg["id"],
         {
             "loaded": True,
             "entry_id": entry_id,
+            "loaded_at": _LOADS[watch],  # changes when the integration reloads
+            "dataset": bool(watch.options.get(CONF_DATASET, True)),
             "second_opinion": bool(watch.options.get(CONF_SECOND_OPINION)),
             "catch_all_critical": {key: critical("hub", f"{key}_critical") for key in BUILTIN_KEYS.values()},
             "cameras": [
@@ -130,7 +140,12 @@ def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
                 for c in sorted(watch.cameras.values(), key=lambda c: c.name.lower())
             ],
             "people": [
-                {"id": r.subentry_id, "name": r.name, "person": r.person}
+                {
+                    "id": r.subentry_id,
+                    "name": r.name,
+                    "person": r.person,
+                    "critical": critical(r.subentry_id, "person_critical"),
+                }
                 for r in sorted(watch.recipients, key=lambda r: r.name.lower())
             ],
             "animals": [
@@ -140,6 +155,8 @@ def ws_roster(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
                     "species": a.species,
                     "appearance": ({"preset": a.sprite} if a.sprite else {}) | (a.appearance or {}) or None,
                     "critical": critical(a.subentry_id),
+                    "alerts": critical(a.subentry_id, "alerts"),
+                    "missing": critical(a.subentry_id, "missing_mode"),
                     # Priority, Always strict, new or not seen lately: only a second model confirms it.
                     "needs_second_opinion": a.priority or a.key in strict,
                 }
@@ -167,8 +184,28 @@ async def ws_vision_settings(hass: HomeAssistant, connection: websocket_api.Acti
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_vision_train(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    await _vision_post(hass, connection, msg, "/train")
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/vision/train_stop"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_vision_train_stop(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Stop the training round that is running (it is never promoted)."""
+    await _vision_post(hass, connection, msg, "/train/stop")
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/vision/train_undo"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_vision_train_undo(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Serve the model from before the last promoted round again."""
+    await _vision_post(hass, connection, msg, "/train/undo")
+
+
+async def _vision_post(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict, path: str) -> None:
     try:
-        answer = await _vision(hass, "POST", "/train", {})
+        answer = await _vision(hass, "POST", path, {})
     except VisionError as err:
         connection.send_error(msg["id"], err.code, str(err))
         return
@@ -176,7 +213,9 @@ async def ws_vision_train(hass: HomeAssistant, connection: websocket_api.ActiveC
 
 
 async def async_register_panel(hass: HomeAssistant, version: str) -> None:
-    for command in (ws_roster, ws_vision, ws_vision_settings, ws_vision_train):
+    for command in (
+        ws_roster, ws_vision, ws_vision_settings, ws_vision_train, ws_vision_train_stop, ws_vision_train_undo
+    ):
         websocket_api.async_register_command(hass, command)
     if getattr(hass, "http", None) is None or "frontend" not in hass.config.components:
         return

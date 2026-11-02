@@ -20,7 +20,7 @@ A Home Assistant integration. When a camera sees motion, an AI model looks at th
 - **Tracks your own animals:** last seen, where, and the exact photo.
 - **Missing mode:** any possible sighting of a lost pet sends a critical alert.
 - **Scares pests off** with lights or a sound.
-- **Gets better:** ✓ Right, ? Not sure or Other on every alert fixes tracking and builds training data.
+- **Gets better:** ✓ Right, ? Not sure or Other on every alert fixes tracking and labels the saved photo.
 
 ## Installation
 
@@ -46,13 +46,19 @@ Setup walks you through it, all in the UI:
 
 Add the **Neighborhood Watch** card to a dashboard. It installs itself.
 
+A **Neighborhood Watch** page also appears in the sidebar (admins only): **Review** for the sightings waiting for an answer, then a tab per topic (Cameras, Animals, People, Alerts, AI, Detector) with every setting.
+
+## Check it works
+
+**Developer tools → Actions → Neighborhood Watch: Test sighting**: pick a camera and an animal. It sends the alerts a real sighting would, titled TEST, and never changes tracking. Real checks only run in watch hours: by default 20:00 to 08:00, and whenever it's dark (change it under **When to watch**).
+
 ## Tips
 
 - Put the cheapest model with the biggest free allowance (e.g. Gemini Flash-Lite) first in **First look**, and a smarter one first in **Second opinion**.
 - Mark a pet as **priority** to have two models double-check it. Use **Confirmed on camera** to drive a feeder or trap.
 - Nothing needs answering at night: sightings wait in **To review** for 7 days.
 - After "It was…", use **Add a note** so the AI learns that camera's quirks.
-- Run the optional [local detector](vision) to skip empty frames and save quota.
+- Run the optional [local detector](docs/reference.md#local-detector-optional) to skip empty frames and save quota.
 
 ## More
 
@@ -62,6 +68,6 @@ Add the **Neighborhood Watch** card to a dashboard. It installs itself.
 
 <p align="center">
   <a href="LICENSE">MIT</a> · <a href="https://ko-fi.com/goobis2dmx">Support on Ko-fi</a><br><br>
-  Neighborhood Watch v0.22.1 by Goobis<br>
+  Neighborhood Watch v0.23.0 by Goobis<br>
   AI was used to help develop this application
 </p>

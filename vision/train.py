@@ -8,7 +8,7 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    evaluation set and are never trained on. So are confirmed animal photos that no teacher
    could box (they can't be trained on, but they're the misses that matter most).
 3. Train a one-class YOLO ("animal"), from yolo11s (COCO) the first time, then from the
-   last promoted model.
+   trained model being served (so after an undo, from the model it went back to).
 4. Score the model being served and the new one on the evaluation set, the way the service
    runs them (OpenVINO, tiles) at the integration's threshold. The new model is promoted
    only if it misses fewer animals and makes at least 10% fewer mistakes in all (misses
@@ -17,6 +17,7 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    WORK/models/current.txt; the service switches to it within a minute.
 
 Every round is recorded in WORK/train/history.json; WORK/train/status.json shows progress.
+SIGTERM (Stop training) ends a round early: it is recorded as stopped and never promoted.
 
     python train.py [--if-needed] [--epochs 40] [--imgsz 960] [--baseline service|stored]
 """
@@ -31,6 +32,7 @@ from pathlib import Path
 import random
 import re
 import shutil
+import signal
 import sys
 import time
 import traceback
@@ -43,6 +45,20 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def env(name: str, default: str) -> str:
     return os.environ.get(name, default)
+
+
+class Stopped(BaseException):
+    """Stop training was pressed (SIGTERM). A BaseException, so nothing on the way catches it
+    (the GPU-failed retry on the CPU included)."""
+
+
+_stop = {"asked": False, "hold": False}  # hold: past the point of no return (promoting)
+
+
+def _on_term(_signum, _frame) -> None:
+    _stop["asked"] = True
+    if not _stop["hold"]:
+        raise Stopped
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -60,7 +76,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--min-new", type=int, default=int(env("NW_TRAIN_MIN_NEW", "100")))
     p.add_argument("--min-first", type=int, default=int(env("NW_TRAIN_MIN_FIRST", "40")))
     p.add_argument("--if-needed", action="store_true",
-                   help="only train with enough new confirmed photos since the last round")
+                   help="only train with enough new answered photos since the last round")
     p.add_argument("--baseline", choices=["service", "stored"], default="service",
                    help="score the current model by running it (service) or from the scores stored with each photo")
     p.add_argument("--device", default=env("NW_TRAIN_DEVICE", ""), help="torch device (default: xpu if available, else cpu)")
@@ -358,6 +374,8 @@ def run(args: argparse.Namespace) -> int:
     history_path = tdir / "history.json"
     started = time.time()
     state = {"state": "running", "pid": os.getpid(), "started": datetime.now().isoformat(timespec="seconds")}
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _on_term)
 
     def status(**kw) -> None:
         if "done" not in kw:  # progress counts belong to the stage that set them
@@ -366,18 +384,25 @@ def run(args: argparse.Namespace) -> int:
         state.update(kw)
         write_json(status_path, state)
 
-    status(stage="reading the dataset")
-    history = read_json(history_path, [])
-    samples = load_samples(args.dataset)
+    try:
+        status(stage="reading the dataset")
+        history = read_json(history_path, [])
+        samples = load_samples(args.dataset)
+    except Stopped:
+        status(state="stopped", stage="stopped", finished=datetime.now().isoformat(timespec="seconds"))
+        return 0
     confirmed = [s for s in samples if s.trust == "confirmed"]
     confirmed_animals = sum(s.animal for s in confirmed)
     if args.if_needed:
-        last = next((h for h in reversed(history) if "confirmed" in h and not h.get("error")), None)
+        # A stopped or failed round doesn't count: new photos are counted from the last real one.
+        last = next(
+            (h for h in reversed(history) if "confirmed" in h and not h.get("error") and not h.get("stopped")), None
+        )
         if last is None and confirmed_animals < args.min_first:
-            status(state="skipped", stage=f"only {confirmed_animals} confirmed animal photos (need {args.min_first})")
+            status(state="skipped", stage=f"only {confirmed_animals} answered animal photos (need {args.min_first})")
             return 0
         if last is not None and len(confirmed) - last["confirmed"] < args.min_new:
-            status(state="skipped", stage=f"only {len(confirmed) - last['confirmed']} new confirmed photos (need {args.min_new})")
+            status(state="skipped", stage=f"only {len(confirmed) - last['confirmed']} new answered photos (need {args.min_new})")
             return 0
 
     n = len(history) + 1
@@ -421,11 +446,9 @@ def run(args: argparse.Namespace) -> int:
         # Train.
         from ultralytics import YOLO  # noqa: PLC0415
 
-        previous = next(
-            (Path(h["model_dir"]) / "best.pt" for h in reversed(history)
-             if h.get("promoted") and (Path(h["model_dir"]) / "best.pt").exists()),
-            None,
-        )
+        # From the trained model being served (not simply the last promoted one: that may have
+        # been undone), else from COCO.
+        previous = current_dir / "best.pt" if (current_dir / "best.pt").exists() else None
         start = str(previous) if previous else weights(work, "yolo11s.pt")
         entry["start_from"] = Path(start).parent.name if previous else "yolo11s.pt"
         data_yaml, val_animals = build_yolo_dataset(train, tdir / "data")
@@ -475,6 +498,9 @@ def run(args: argparse.Namespace) -> int:
         entry["after"] = {"model": f"trained-{n}", **metrics(after_scores, evals, args.threshold)}
         print("After:", entry["after"], flush=True)
 
+        _stop["hold"] = True  # from here a stop waits: the round finishes and is recorded as it is
+        if _stop["asked"]:
+            raise Stopped
         if better(entry["before"], entry["after"]) and not args.no_promote:
             final = work / "models" / f"trained-{n}"
             shutil.rmtree(final, ignore_errors=True)
@@ -493,6 +519,16 @@ def run(args: argparse.Namespace) -> int:
         write_json(history_path, history)
         status(state="done", stage="promoted" if entry["promoted"] else "kept the current model", finished=datetime.now().isoformat(timespec="seconds"))
         print("Round", n, "promoted" if entry["promoted"] else "not promoted", flush=True)
+        return 0
+    except Stopped:
+        _stop["hold"] = True  # a second stop request can't cut the tidying short
+        print("Round", n, "stopped", flush=True)
+        for leftover in (work / "models" / f"candidate-{n}", tdir / "data", tdir / "runs" / f"round-{n}"):
+            shutil.rmtree(leftover, ignore_errors=True)
+        entry.update(stopped=True, promoted=False, minutes=round((time.time() - started) / 60, 1))
+        history.append(entry)
+        write_json(history_path, history)
+        status(state="stopped", stage="stopped", finished=datetime.now().isoformat(timespec="seconds"))
         return 0
     except Exception as err:  # noqa: BLE001
         traceback.print_exc()

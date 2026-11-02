@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "AI models",
-        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones: pick a different model there, or priority animals, look-alikes and new animals can never be confirmed. If a model is busy, failing or has used up its free daily allowance (quota), the next one in its list is tried.",
+        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones; without it, priority animals, look-alikes and new animals are never confirmed. To get a second model, add another AI Task with a different model in your AI integration (its page → Add AI task). If a model is busy, failing or out of its free daily allowance (quota), the next one in its list is tried.",
         "data": {
           "first_look": "First look",
           "second_opinion": "Second opinion"
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
-          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, names a wild animal like a raccoon or a fox (not a bird or a deer), or came from a backup and names an animal. Tip: a smarter model first, and different models from First look."
+          "second_opinion": "Looks again at unsure answers, unknown animals, priority and Always strict animals, wild animals like raccoons or foxes, and any animal a backup model named. Tip: put a smarter model first, and don't reuse First look's models."
         }
       },
       "schedule": {
@@ -98,7 +98,7 @@
       },
       "animal": {
         "title": "Animals",
-        "description": "Describe each animal the AI should recognise, one per page. {count} added so far.\n\n**Done? Leave Name empty and press Submit.** You can add more later with Add animal. Everything can be changed later on the Neighborhood Watch page in the sidebar (admins), or under Configure.\n\n{notes}",
+        "description": "Describe each animal the AI should recognise, one per page. {count} added so far.\n\n**Done? Leave Name empty and press Submit.** You can add more later with Add animal. Everything can be changed later on the Neighborhood Watch page in the sidebar (admins), or on the integration page (each animal's ⋮ menu → Edit animal).\n\n{notes}",
         "data": {
           "name": "Name",
           "species": "Species",
@@ -134,7 +134,7 @@
               "base": "Main tone at night (infrared)",
               "always_strict": "Always strict",
               "alert_at": "Alert at",
-              "critical_at": "Ring through silent mode at"
+              "critical_at": "Critical alerts at"
             },
             "data_description": {
               "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
@@ -142,7 +142,7 @@
               "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
               "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
               "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
-              "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
+              "critical_at": "Critical alerts ring through silent mode. Only while this animal's Critical alerts switch (at the top of its page on the Neighborhood Watch sidebar page, or on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there. iPhone: allow Critical Alerts for the Home Assistant app in iOS Settings → Notifications."
             }
           },
           "last_seen": {
@@ -153,7 +153,7 @@
               "known_location": "Where it was last seen"
             },
             "data_description": {
-              "known_last_seen": "Roughly. Leave empty for an animal that has never visited.",
+              "known_last_seen": "Roughly. Clear this for an animal that has never visited.",
               "known_location": "Optional, e.g. Back garden."
             }
           }
@@ -171,7 +171,7 @@
       },
       "people": {
         "title": "Who gets alerts",
-        "description": "These phones get Neighborhood Watch alerts, including missing-mode alerts. Each person's mutes, quiet zones and hours, and critical sound can be changed later under Configure → People.",
+        "description": "These phones get Neighborhood Watch alerts, including missing-mode alerts (when you mark a lost pet as missing, every possible sighting rings). Each person's mutes, quiet zones and hours, and critical sound can be changed later under Configure → People.",
         "data": {
           "phones": "Phones"
         },
@@ -213,7 +213,7 @@
           "models": "AI models",
           "advanced": "Advanced"
         },
-        "description": "Animals are on the integration page: Add animal adds one, and each animal's ⋮ menu has Edit animal."
+        "description": "Animals are on the integration page: Add animal adds one, and each animal's ⋮ menu has Edit animal. Each animal's switches (Alerts, Critical alerts, Missing mode) are on its device page and on the Neighborhood Watch sidebar page."
       },
       "advanced": {
         "title": "Advanced",
@@ -226,7 +226,7 @@
       },
       "models": {
         "title": "AI models",
-        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones: pick a different model there, or priority animals, look-alikes and new animals can never be confirmed. If a model is busy, failing or has used up its free daily allowance (quota), the next one in its list is tried.",
+        "description": "First look checks every sighting. Second opinion double-checks the unsure and important ones; without it, priority animals, look-alikes and new animals are never confirmed. To get a second model, add another AI Task with a different model in your AI integration (its page → Add AI task). If a model is busy, failing or out of its free daily allowance (quota), the next one in its list is tried.",
         "data": {
           "first_look": "First look",
           "second_opinion": "Second opinion",
@@ -234,7 +234,7 @@
         },
         "data_description": {
           "first_look": "Runs on every sighting, tried in order. Tip: put the cheapest model with the biggest free allowance first (e.g. Flash-Lite), backups after it.",
-          "second_opinion": "Looks again when the first answer is unsure, names an unknown, priority or strict animal, names a wild animal like a raccoon or a fox (not a bird or a deer), or came from a backup and names an animal. Tip: a smarter model first, and different models from First look.",
+          "second_opinion": "Looks again at unsure answers, unknown animals, priority and Always strict animals, wild animals like raccoons or foxes, and any animal a backup model named. Tip: put a smarter model first, and don't reuse First look's models.",
           "paid_models": "Tick the models from First look or Second opinion that cost money. They always go last in their list, and are never used to double-check a backup's answer. A model ticked only here is never used."
         },
         "sections": {
@@ -309,7 +309,7 @@
       },
       "alerts": {
         "title": "Alerts",
-        "description": "Where each of your animals alerts is set on the animal; for everything else, under Pests and Other animals and motion. Who gets alerts, and their quiet times, is set per person under People.",
+        "description": "Where alerts go is set on each animal, and for everything else under Pests and Other animals and motion. Who gets them, and their quiet times, is set under People.",
         "data": {
           "alerts": "Send alerts",
           "correction_buttons": "Right / Not sure / Other buttons on alerts",
@@ -318,27 +318,27 @@
         },
         "data_description": {
           "alerts": "Turn off if your own automations send the alerts (they can use the sighting event).",
-          "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and label the training data.",
-          "review_page": "The dashboard page with this card, e.g. /lovelace/pets#review (#review opens the To review section). Empty = the app opens as usual.",
-          "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in the review queue. Critical alerts, unsure motion and missing mode ignore this."
+          "correction_buttons": "Tap to confirm or correct a sighting. Corrections fix tracking and are saved with the photo.",
+          "review_page": "e.g. /neighborhood-watch#review (the sidebar page, admins only) or a dashboard with the card, e.g. /lovelace/pets#review. Empty = the app opens as usual.",
+          "min_confidence": "Medium is a good start. Less sure answers don't alert; they wait in To review. Critical alerts, unsure motion and missing mode ignore this."
         }
       },
       "training": {
         "title": "Saved photos",
-        "description": "Every checked frame is saved, downscaled, with what the AI said and what you answered. These photos are shown in the Review list, used when you correct a sighting, and are what the local detector trains on.",
+        "description": "Every checked frame is saved, downscaled, with what the AI said and what you answered. These photos are shown in To review, used when you correct a sighting, and are what the local detector trains on.",
         "data": {
           "dataset": "Save checked photos (needed for Review)",
           "dataset_dir": "Folder",
           "dataset_gb": "Keep at most"
         },
         "data_description": {
-          "dataset_dir": "Leave empty for the media folder. For a network share added under Settings → System → Storage, enter its path, e.g. /media/your_share/neighborhood_watch. Existing photos stay where they are; use the Move training data action to bring them over. The local detector trains on this folder: mount it into the vision service at /dataset.",
+          "dataset_dir": "Leave empty for the media folder. For a network share added under Settings → System → Storage, enter its path, e.g. /media/your_share/neighborhood_watch. Existing photos stay where they are; use the Move saved photos action to bring them over. The local detector trains on this folder: mount it into the vision service at /dataset.",
           "dataset_gb": "When full, the oldest unanswered photos go first; ones you answered are kept longest."
         }
       },
       "detector": {
         "title": "Local detector",
-        "description": "Optional. A free animal detector that runs on your own NAS or PC and looks at every photo before the AI, so empty frames (wind, cobwebs, shadows) don't use up your AI allowance. Start in Test only. After a week, open the Detector agreement sensor: when its misses attribute is 0, switch to Skip empty frames.",
+        "description": "Optional. A free animal detector that runs on your own NAS or PC and looks at every photo before the AI, so empty frames (wind, cobwebs, shadows) don't use up your AI allowance. Start in Test only. After a week, check the Detector tab in the sidebar (or the Detector agreement sensor): once it shows 0 missed animals, switch to Skip empty frames.",
         "data": {
           "detector_url": "Address",
           "detector_mode": "Mode",
@@ -351,30 +351,30 @@
       },
       "catch_alls": {
         "title": "Other animals and motion",
-        "description": "Every animal is recognised and tracked without adding it. Here you set where the rest alert: unknown animals (a cat or dog that isn't one of yours), other wildlife (anything that isn't one of yours or a pest) and unsure motion (the AI saw movement but couldn't say what). Each group's Critical alerts switch is on the Neighborhood Watch device.",
+        "description": "Every animal is recognised and tracked without adding it. Here you set where the rest alert. Each group's critical alerts switch is on the sidebar page's Animals tab, or on the Neighborhood Watch device.",
         "sections": {
           "unknown": {
             "name": "Unknown animals",
             "description": "A cat or dog that isn't one of yours.",
             "data": {
               "unknown_alert_at": "Alert at",
-              "unknown_critical_at": "Ring through silent mode at"
+              "unknown_critical_at": "Critical alerts at"
             },
             "data_description": {
-              "unknown_alert_at": "Empty: never.",
-              "unknown_critical_at": "Only while the Unknown animals critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
+              "unknown_alert_at": "All cameras includes cameras added later. To leave one out, remove All cameras and pick the others. Empty: never.",
+              "unknown_critical_at": "Critical alerts ring through silent mode. Only while the Unknown animals critical alerts switch (on the sidebar page's Animals tab, or on the Neighborhood Watch device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           },
           "other": {
             "name": "Other wildlife",
-            "description": "Any wild animal that isn't a pest.",
+            "description": "Any wild animal that isn't a pest. Birds, chickens, chipmunks, deer, groundhogs and squirrels never alert; they're still tracked.",
             "data": {
               "other_alert_at": "Alert at",
-              "other_critical_at": "Ring through silent mode at"
+              "other_critical_at": "Critical alerts at"
             },
             "data_description": {
-              "other_alert_at": "Empty: never.",
-              "other_critical_at": "Only while the Other wildlife critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
+              "other_alert_at": "All cameras includes cameras added later. To leave one out, remove All cameras and pick the others. Empty: never.",
+              "other_critical_at": "Critical alerts ring through silent mode. Only while the Other wildlife critical alerts switch (on the sidebar page's Animals tab, or on the Neighborhood Watch device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           },
           "motion": {
@@ -382,11 +382,11 @@
             "description": "The AI saw movement but couldn't say what.",
             "data": {
               "motion_alert_at": "Alert at",
-              "motion_critical_at": "Ring through silent mode at"
+              "motion_critical_at": "Critical alerts at"
             },
             "data_description": {
-              "motion_alert_at": "Empty: never.",
-              "motion_critical_at": "Only while the Unsure motion critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
+              "motion_alert_at": "All cameras includes cameras added later. To leave one out, remove All cameras and pick the others. Empty: never.",
+              "motion_critical_at": "Critical alerts ring through silent mode. Only while the Unsure motion critical alerts switch (on the sidebar page's Animals tab, or on the Neighborhood Watch device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
             }
           }
         }
@@ -435,7 +435,7 @@
               "critical_except": "Never ring through silent mode here for"
             },
             "data_description": {
-              "critical_except": "While this camera's Critical alerts switch is on (on the camera's device; it starts off), everything seen here rings through silent mode: any confidence, unsure motion too, even animals whose alerts are off. List what's allowed here, e.g. a pet that sleeps in the garage. People's mutes still apply."
+              "critical_except": "While this camera's Critical alerts for anything here switch is on (on the camera's device, or at the top of its page in the sidebar; it starts off), everything seen here rings through silent mode, even unsure motion and animals whose alerts are off. List what should never ring here, e.g. a pet that sleeps in the garage. People's mutes still apply."
             }
           },
           "deterrent": {
@@ -470,7 +470,7 @@
         "sections": {
           "critical_alerts": {
             "name": "Missing mode and critical sound",
-            "description": "Missing-mode alerts, and how critical alerts sound. To make all of this person's alerts normal ones, turn off their 'gets critical alerts' switch.",
+            "description": "Missing-mode alerts, and how critical alerts sound. To make all of this person's alerts normal ones, turn off their '… gets critical alerts' switch (on their phone's device, or at the top of their page in the sidebar).",
             "data": {
               "missing_alerts": "Gets missing-mode alerts",
               "critical_sound": "Critical sound (iPhone)",
@@ -478,7 +478,7 @@
             },
             "data_description": {
               "missing_alerts": "They get the critical alert for any possible sighting of an animal in Missing mode, instead of the normal one.",
-              "critical_sound": "A sound file name from the iPhone Companion app, or default. Android ignores this.",
+              "critical_sound": "A sound file name from the iPhone Companion app, or default. Android ignores this. iPhone: allow Critical Alerts for the Home Assistant app in iOS Settings → Notifications.",
               "critical_volume": "From 0.1 to 1 (full volume). Missing-mode alerts always ring at full volume."
             }
           },
@@ -536,16 +536,16 @@
       },
       "pests": {
         "title": "Pests",
-        "description": "Pests are animals you want gone, like a raccoon at the bins. They alert every time they come back, and a camera's lights and sound (under Cameras → Scaring pests off) go on when one is seen there. Any animal not listed here is other wildlife. By default pests alert at every camera. Their Pests critical alerts switch is on the Neighborhood Watch device.",
+        "description": "Pests are animals you want gone, like a raccoon at the bins. By default they alert at every camera, every time they come back, and set off a camera's lights and sound (Cameras → Scaring pests off). Any animal not listed is other wildlife. These settings apply to all pests together. The Pests critical alerts switch is on the sidebar page's Animals tab, or on the Neighborhood Watch device.",
         "data": {
           "pests": "Pests",
           "pest_alert_at": "Alert at",
-          "pest_critical_at": "Ring through silent mode at"
+          "pest_critical_at": "Critical alerts at"
         },
         "data_description": {
           "pests": "Pick from the list or type any animal.",
-          "pest_alert_at": "Empty: never.",
-          "pest_critical_at": "Only while the Pests critical alerts switch on the Neighborhood Watch device is on (it starts off). Empty: every camera in Alert at. Picking a camera here also alerts there."
+          "pest_alert_at": "All cameras includes cameras added later. To leave one out, remove All cameras and pick the others. Empty: never.",
+          "pest_critical_at": "Critical alerts ring through silent mode. Only while the Pests critical alerts switch (on the sidebar page's Animals tab, or on the Neighborhood Watch device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
         }
       }
     },
@@ -554,7 +554,7 @@
       "missing_animals": "The instructions must contain {animals}.",
       "name_required": "Enter a name.",
       "name_taken": "Another camera already has this name (names differing only in capitals or punctuation count as the same). Pick another.",
-      "person_needed": "Pick their Person to use quiet zones.",
+      "person_needed": "Pick Their Home Assistant person to use quiet zones.",
       "folder_not_absolute": "Enter the full path, starting with /, e.g. /media/your_share/neighborhood_watch.",
       "folder_unwritable": "That folder can't be created or written to. Check the path and that the share is connected.",
       "camera_taken": "That camera is already set up. Pick it from the Cameras list to change it.",
@@ -609,7 +609,7 @@
                 "base": "Main tone at night (infrared)",
                 "always_strict": "Always strict",
                 "alert_at": "Alert at",
-                "critical_at": "Ring through silent mode at"
+                "critical_at": "Critical alerts at"
               },
               "data_description": {
                 "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
@@ -617,7 +617,7 @@
                 "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
                 "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
                 "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
-                "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
+                "critical_at": "Critical alerts ring through silent mode. Only while this animal's Critical alerts switch (at the top of its page on the Neighborhood Watch sidebar page, or on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there. iPhone: allow Critical Alerts for the Home Assistant app in iOS Settings → Notifications."
               }
             },
             "last_seen": {
@@ -673,7 +673,7 @@
                 "base": "Main tone at night (infrared)",
                 "always_strict": "Always strict",
                 "alert_at": "Alert at",
-                "critical_at": "Ring through silent mode at"
+                "critical_at": "Critical alerts at"
               },
               "data_description": {
                 "priority": "The animal you'd hate to miss, e.g. a pet that goes outside. It always gets a second look, it's only confirmed when both AI models agree and see its coat, and it gets a Confirmed on camera sensor. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
@@ -681,7 +681,7 @@
                 "base": "Priority animals only. The tone covering more than half the body; small white paws, a chest or a bib don't make it White. Infrared shows tones, not colours (a ginger cat often looks grey). Leave Don't check if unsure.",
                 "always_strict": "For an animal that's easy to mix up with another (e.g. a neighbour's look-alike): it only counts when both AI models are sure it's this one. Animals not seen for a while, and new ones until they're first confirmed, get this automatically. Ignored for a priority animal, which is already checked more strictly. Needs a Second opinion model (Configure → AI models); without one it is never confirmed.",
                 "alert_at": "Cameras where it alerts phones. Empty: no alerts (it's still tracked).",
-                "critical_at": "Only while this animal's Critical alerts switch (on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there."
+                "critical_at": "Critical alerts ring through silent mode. Only while this animal's Critical alerts switch (at the top of its page on the Neighborhood Watch sidebar page, or on its device; it starts off) is on. Empty: every camera in Alert at. Picking a camera here also alerts there. iPhone: allow Critical Alerts for the Home Assistant app in iOS Settings → Notifications."
               }
             },
             "last_seen": {
@@ -970,7 +970,7 @@
     },
     "mark_wrong": {
       "name": "Mark wrong",
-      "description": "Removes the latest counted sighting of an animal from tracking, e.g. that wasn't Pepper.",
+      "description": "Removes an animal's latest counted sighting from tracking, e.g. when it was really another animal.",
       "fields": {
         "animal": {
           "name": "Animal",
@@ -1006,7 +1006,7 @@
     },
     "correct": {
       "name": "Correct a sighting",
-      "description": "Confirms or corrects what a camera saw. Tracking and the photo move to the right animal, and the training frame is labelled.",
+      "description": "Confirms or corrects what a camera saw. Tracking and the photo move to the right animal, and the saved photo is labelled.",
       "fields": {
         "answer": {
           "name": "Answer",
@@ -1024,7 +1024,7 @@
     },
     "scan": {
       "name": "Scan a folder",
-      "description": "Bulk-scans photos and videos in a folder on the local detector's machine. The detector finds each animal visit, the AI names it, and a report is written into the folder. Visits also join the review queue.",
+      "description": "Bulk-scans photos and videos in a folder on the local detector's machine. The detector finds each animal visit, the AI names it, and a report is written into the folder. Visits also appear in To review.",
       "fields": {
         "folder": {
           "name": "Folder",
@@ -1059,8 +1059,8 @@
       }
     },
     "move_training_data": {
-      "name": "Move training data",
-      "description": "Moves saved training photos into the current training folder, e.g. after pointing it at a NAS.",
+      "name": "Move saved photos",
+      "description": "Moves saved photos into the folder set under Saved photos, e.g. after pointing it at a NAS.",
       "fields": {
         "from": {
           "name": "From",

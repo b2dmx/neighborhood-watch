@@ -30,7 +30,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
     SubentryFlowResult,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -143,6 +143,7 @@ from .const import (
     SUBENTRY_ANIMAL,
 )
 from .engine import remove_file, reference_file, save_reference
+from .entity import phone_device
 
 # --- selectors ------------------------------------------------------------------------
 
@@ -342,8 +343,7 @@ def _validate_models(user_input: Mapping[str, Any]) -> dict[str, str]:
 async def _detector_answers(hass: HomeAssistant, url: str) -> bool:
     """The vision service at `url` answers its health check."""
     try:
-        async with asyncio.timeout(10):
-            response = await async_get_clientsession(hass).get(f"{url}/health")
+        async with asyncio.timeout(10), async_get_clientsession(hass).get(f"{url}/health") as response:
             return response.status < 400
     except (TimeoutError, aiohttp.ClientError, ValueError):
         return False
@@ -483,6 +483,9 @@ def _animal_schema(
     """Name, kind, look and photo up top; the finer points in sections. In onboarding the
     name may be left empty, which finishes the step."""
     kind = (values.get(CONF_SPECIES) or "cat").strip().lower()
+    last_seen = values.get(CONF_KNOWN_LAST_SEEN)
+    if onboarding and not values:  # a fresh form: most animals set up have been seen lately
+        last_seen = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
     fields: dict[Any, Any] = {
         (vol.Optional if onboarding else vol.Required)(
             CONF_NAME, description={"suggested_value": values.get(CONF_NAME)}
@@ -505,20 +508,21 @@ def _animal_schema(
             ): ObjectSelector(),
         }
     )
-    # The coat checks only apply to a priority animal, so they sit right under it.
+    # Where it alerts first; the coat checks only apply to a priority animal, so they sit
+    # right under it.
     fields[vol.Required("rules", default={})] = _section(
         {
+            **_alert_fields(values, cameras),
             vol.Required(CONF_PRIORITY, default=values.get(CONF_PRIORITY, False)): BOOL,
             vol.Required(CONF_PATTERN, default=values.get(CONF_PATTERN, "na")): PATTERN,
             vol.Required(CONF_BASE, default=values.get(CONF_BASE, "na")): BASE,
             vol.Required(CONF_ALWAYS_STRICT, default=values.get(CONF_ALWAYS_STRICT, False)): BOOL,
-            **_alert_fields(values, cameras),
         }
     )
     fields[vol.Required("last_seen", default={})] = _section(
         {
             vol.Optional(
-                CONF_KNOWN_LAST_SEEN, description={"suggested_value": values.get(CONF_KNOWN_LAST_SEEN)}
+                CONF_KNOWN_LAST_SEEN, description={"suggested_value": last_seen}
             ): DateTimeSelector(),
             vol.Optional(
                 CONF_KNOWN_LOCATION, description={"suggested_value": values.get(CONF_KNOWN_LOCATION)}
@@ -579,10 +583,22 @@ def _writable(folder: str) -> bool:
     return True
 
 
+def _strict(values: Mapping[str, Any]) -> set[str]:
+    """Which of Priority / Always strict are on (Always strict is ignored for a priority animal)."""
+    if values.get(CONF_PRIORITY):
+        return {CONF_PRIORITY}
+    return {CONF_ALWAYS_STRICT} if values.get(CONF_ALWAYS_STRICT) else set()
+
+
 def _validate_animal(
-    user_input: Mapping[str, Any], taken: set[str], second_opinion: bool
+    user_input: Mapping[str, Any],
+    taken: set[str],
+    second_opinion: bool,
+    stored: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
-    """`second_opinion` = a Second opinion model is set (priority and strict need one)."""
+    """`second_opinion` = a Second opinion model is set (priority and strict need one).
+    `stored` = the animal's saved settings when editing: only switching one of those on is
+    stopped, so an existing priority animal can still be edited."""
     name = (user_input.get(CONF_NAME) or "").strip()
     if not name:
         return {CONF_NAME: "name_required"}
@@ -604,7 +620,7 @@ def _validate_animal(
     if (sprite or appearance) and species != "cat":
         # The sprites are all cats; the error goes on whichever field was filled in.
         return {(CONF_APPEARANCE if appearance and not sprite else CONF_SPRITE): "sprite_cats_only"}
-    if (user_input.get(CONF_PRIORITY) or user_input.get(CONF_ALWAYS_STRICT)) and not second_opinion:
+    if _strict(user_input) - _strict(stored or {}) and not second_opinion:
         return {"base": "needs_second_opinion"}  # its fields sit in a folded section, so the form says it
     return {}
 
@@ -614,7 +630,7 @@ def _validate_animal(
 
 class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
-    MINOR_VERSION = 3
+    MINOR_VERSION = 4
 
     def __init__(self) -> None:
         self._options: dict[str, Any] = dict(DEFAULT_OPTIONS)
@@ -725,9 +741,20 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
         names = _phone_names(self.hass)
         if user_input is not None or not phones:
             for service in (user_input or {}).get("phones", []):
-                name = names.get(service) or service.removeprefix("mobile_app_").replace("_", " ").title()
+                # Named after the Home Assistant person the phone belongs to, else the phone.
+                person = _phone_person(self.hass, service)
+                name = (
+                    (person.name if person else None)
+                    or names.get(service)
+                    or service.removeprefix("mobile_app_").replace("_", " ").title()
+                )
                 self._people[uuid4().hex] = _recipient_data(
-                    {CONF_NAME: name, CONF_NOTIFY: service, CONF_MISSING_ALERTS: True}
+                    {
+                        CONF_NAME: name,
+                        CONF_PERSON: person.entity_id if person else None,
+                        CONF_NOTIFY: service,
+                        CONF_MISSING_ALERTS: True,
+                    }
                 )
             return await self.async_step_animal()
         return self.async_show_form(
@@ -753,7 +780,7 @@ class NeighborhoodWatchConfigFlow(ConfigFlow, domain=DOMAIN):
                 user_input.get(k)
                 for k in (
                     CONF_DESCRIPTION, CONF_REFERENCE_UPLOAD, CONF_SPRITE, CONF_TIPS, CONF_APPEARANCE,
-                    CONF_PRIORITY, CONF_ALWAYS_STRICT, CONF_KNOWN_LAST_SEEN, CONF_KNOWN_LOCATION,
+                    CONF_PRIORITY, CONF_ALWAYS_STRICT, CONF_KNOWN_LOCATION,  # last seen starts filled in
                 )
             ) or (
                 (user_input.get(CONF_SPECIES) or "cat").strip().lower() != "cat"
@@ -918,21 +945,29 @@ class WatchOptionsFlow(OptionsFlow):
                 }
                 return self._save({CONF_CAMERAS: cams})
             # A renamed camera keeps its slug, but its new name must not read as another's.
-            name_slug = slugify(user_input.get(CONF_NAME) or "")
+            name = (user_input.get(CONF_NAME) or "").strip()
+            name_slug = slugify(name)
             slug = current[CONF_SLUG] if editing else name_slug
             taken = {d[CONF_SLUG] for cid, d in cams.items() if cid != editing}
-            if not slug:
+            renamed = not editing or name != current.get(CONF_NAME)
+            moved = user_input.get(CONF_CAMERA)
+            moved = moved if editing and moved and moved != current[CONF_CAMERA] else None
+            if not name_slug:
                 errors[CONF_NAME] = "name_required"
-            elif slug in taken or name_slug in taken:
+            elif slug in taken or (renamed and name_slug in taken):
                 errors[CONF_NAME] = "name_taken"
+            elif moved and any(d.get(CONF_CAMERA) == moved for cid, d in cams.items() if cid != editing):
+                errors[CONF_CAMERA] = "camera_taken"
             else:
-                moved = user_input.get(CONF_CAMERA)
-                if editing and moved and moved != current[CONF_CAMERA]:
-                    # Another camera: its own device's sensors, unless they were picked by hand.
-                    suggested = suggest_camera(self.hass, moved)
+                if moved:
+                    # Another camera: its own device's sensors replace the old device's;
+                    # sensors picked by hand stay, and a list changed in this save is kept.
+                    old, new = suggest_camera(self.hass, current[CONF_CAMERA]), suggest_camera(self.hass, moved)
                     for key in (CONF_TRIGGERS, CONF_SKIP_WHEN):
-                        if list(user_input.get(key) or []) == list(current.get(key) or []):
-                            user_input[key] = suggested[key]
+                        picked = list(user_input.get(key) or [])
+                        if picked == list(current.get(key) or []):
+                            kept = [e for e in picked if e not in old[key]]
+                            user_input[key] = kept + [e for e in new[key] if e not in kept]
                 cams[editing or uuid4().hex] = _camera_data(
                     user_input, slug, user_input.get(CONF_CAMERA) or current[CONF_CAMERA]
                 )
@@ -990,11 +1025,18 @@ class WatchOptionsFlow(OptionsFlow):
                 return self._save({CONF_PEOPLE: people})
             data = _recipient_data(user_input)
             start, end = data[CONF_QUIET_START], data[CONF_QUIET_END]
+            # Saved settings are only re-checked where they changed: a phone that is gone
+            # for now doesn't block editing someone's mutes.
+            stored = people.get(editing) if editing else None
+            notify_changed = stored is None or data[CONF_NOTIFY] != stored.get(CONF_NOTIFY)
+            quiet_changed = stored is None or (start, end) != (
+                stored.get(CONF_QUIET_START), stored.get(CONF_QUIET_END)
+            )
             if not data[CONF_NAME]:
                 errors[CONF_NAME] = "name_required"
-            elif data[CONF_NOTIFY] and data[CONF_NOTIFY] not in _notify_services(self.hass):
+            elif notify_changed and data[CONF_NOTIFY] and data[CONF_NOTIFY] not in _notify_services(self.hass):
                 errors[CONF_NOTIFY] = "notify_unknown"
-            elif bool(start) != bool(end) or (start and start == end):
+            elif quiet_changed and (bool(start) != bool(end) or (start and start == end)):
                 errors["base"] = "quiet_hours_both"  # its fields sit in a folded section
             elif data[CONF_QUIET_ZONES] and not data[CONF_PERSON]:
                 errors[CONF_PERSON] = "person_needed"  # quiet zones go by where their Person is
@@ -1038,7 +1080,7 @@ class WatchOptionsFlow(OptionsFlow):
             if user_input.pop("reset_instructions", False):
                 user_input[CONF_INSTRUCTIONS] = ""
             text = (user_input.get(CONF_INSTRUCTIONS) or "").strip()
-            if text == logic.DEFAULT_INSTRUCTIONS:
+            if logic.is_default_instructions(text):
                 text = ""
             user_input[CONF_INSTRUCTIONS] = text
             if text and any(p not in text for p in logic.REQUIRED_PLACEHOLDERS):
@@ -1152,7 +1194,8 @@ class WatchOptionsFlow(OptionsFlow):
         if user_input is not None:
             url = (user_input.get(CONF_DETECTOR_URL) or "").strip().rstrip("/")
             user_input[CONF_DETECTOR_URL] = url
-            if url and not await _detector_answers(self.hass, url):
+            # Only a changed address is checked: saving the mode alone works while it's down.
+            if url and url != self._values[CONF_DETECTOR_URL] and not await _detector_answers(self.hass, url):
                 errors[CONF_DETECTOR_URL] = "detector_unreachable"
             else:
                 return self._save(user_input)
@@ -1258,7 +1301,9 @@ class AnimalSubentryFlow(ConfigSubentryFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             user_input = _flatten(user_input, ANIMAL_SECTIONS)
-            errors = _validate_animal(user_input, self._taken(subentry.subentry_id), self._second_opinion())
+            errors = _validate_animal(
+                user_input, self._taken(subentry.subentry_id), self._second_opinion(), subentry.data
+            )
             if not errors:
                 slug = subentry.data[CONF_SLUG]
                 if upload := user_input.get(CONF_REFERENCE_UPLOAD):
@@ -1313,6 +1358,20 @@ def _phone_names(hass: HomeAssistant) -> dict[str, str]:
             device and (device.name_by_user or device.name)
         ) or device_name
     return names
+
+
+def _phone_person(hass: HomeAssistant, notify_service: str) -> State | None:
+    """The person whose device trackers belong to the phone behind this notify service."""
+    phone = phone_device(hass, notify_service, None)
+    if phone is None:
+        return None
+    ent_reg = er.async_get(hass)
+    for person in hass.states.async_all("person"):
+        for tracker in person.attributes.get("device_trackers") or []:
+            entry = ent_reg.async_get(tracker)
+            if entry is not None and entry.device_id == phone.id:
+                return person
+    return None
 
 
 def _recipient_schema(hass: HomeAssistant, values: Mapping[str, Any], subjects: list[str]) -> vol.Schema:

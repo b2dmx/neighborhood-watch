@@ -19,7 +19,8 @@ from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
-from .const import CONF_CAMERA, CONF_CAMERAS, CONF_SECOND_OPINION, DOMAIN, NAME
+from . import logic
+from .const import CONF_CAMERA, CONF_CAMERAS, CONF_INSTRUCTIONS, CONF_SECOND_OPINION, DOMAIN, NAME
 from .engine import AnimalConfig, CameraConfig, WatchEngine
 
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.IMAGE, Platform.SENSOR, Platform.SWITCH]
@@ -296,6 +297,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: WatchConfigEntry) -> b
         for sid in gone:
             hass.config_entries.async_remove_subentry(entry, sid)
         _drop_duplicate_camera_devices(hass, entry)
+    if entry.minor_version < 4:
+        # A stored copy of the built-in instructions (saved before only edits were kept)
+        # is cleared, so it follows updates.
+        options = dict(entry.options)
+        if options.get(CONF_INSTRUCTIONS) and logic.is_default_instructions(options[CONF_INSTRUCTIONS]):
+            options[CONF_INSTRUCTIONS] = ""
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=4)
     return True
 
 

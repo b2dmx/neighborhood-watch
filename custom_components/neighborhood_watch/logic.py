@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
+from hashlib import sha256
 import re
 
 HIGH = "high"
@@ -443,6 +444,21 @@ DEFAULT_INSTRUCTIONS = (
 
 REQUIRED_PLACEHOLDERS = ("{animals}",)
 
+# sha256 of every DEFAULT_INSTRUCTIONS ever shipped (stripped): a stored copy of one of
+# them is no edit, so it is cleared and follows updates. Add the old text's hash here
+# whenever DEFAULT_INSTRUCTIONS changes.
+SHIPPED_INSTRUCTIONS = frozenset(
+    {
+        "fb11d22f87f563ad50325b46749df1086ae175079aed08ff974f3ca093387b30",  # 0.6.1 onwards
+    }
+)
+
+
+def is_default_instructions(text: str) -> bool:
+    """The text is the built-in instructions, today's or a shipped earlier version."""
+    text = (text or "").strip()
+    return text == DEFAULT_INSTRUCTIONS.strip() or sha256(text.encode()).hexdigest() in SHIPPED_INSTRUCTIONS
+
 
 @dataclass(frozen=True)
 class AnimalProfile:
@@ -692,7 +708,7 @@ def plan_alerts(
         (rules[n].name for n in v.named if n in missing and n in rules), ""
     )
     if missing_name:
-        title, message = tentative(missing_name)
+        title, message = f"{prefix}Missing: possible {missing_name} — {where}", line
         alerts.append(
             Alert(
                 "missing", title, message, f"missing_{camera.slug}", CRITICAL,
@@ -713,8 +729,8 @@ def plan_alerts(
         return alerts
 
     if is_motion:
-        title = f"{prefix}Motion — {where}"
-        message = f"{when} · Unidentified"
+        title = f"{prefix}Unsure motion — {where}"
+        message = f"{when} · Couldn't tell what"
     elif rule.priority:
         title, message = tentative(v.animal)
     else:
