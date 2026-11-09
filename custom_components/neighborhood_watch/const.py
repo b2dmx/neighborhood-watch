@@ -56,6 +56,13 @@ CONF_DETECTOR_MIN = "detector_min"
 DETECTOR_SHADOW = "shadow"  # ask it, record the answer, change nothing
 DETECTOR_SKIP = "skip_empty"  # no animal found: no AI call
 DETECTOR_MODES = [DETECTOR_SHADOW, DETECTOR_SKIP]
+# The detector trained on your answers also names the animals it finds.
+CONF_LOCAL_NAMING = "local_naming"
+LOCAL_OFF = "off"  # never use its names
+LOCAL_FILL = "fill_in"  # only when no AI model answers
+LOCAL_FIRST = "first"  # a name it has proved it gets right is used without asking the AI
+LOCAL_NAMING_MODES = [LOCAL_FIRST, LOCAL_FILL, LOCAL_OFF]
+LOCAL_INFO_SECONDS = 600  # how long what the detector can name is remembered
 
 # --- alert rules (animal, wildlife and built-in) ---
 CONF_ALERT_AT = "alert_at"  # camera slugs; "*" = every camera; empty = never
@@ -108,6 +115,7 @@ DEFAULT_OPTIONS: dict = {
     CONF_DETECTOR_URL: "",
     CONF_DETECTOR_MODE: DETECTOR_SHADOW,
     CONF_DETECTOR_MIN: 0.2,
+    CONF_LOCAL_NAMING: LOCAL_FIRST,
     **{f"{k}_{CONF_ALERT_AT}": a for k, (a, _) in BUILTIN_DEFAULTS.items()},
     **{f"{k}_{CONF_CRITICAL_AT}": c for k, (_, c) in BUILTIN_DEFAULTS.items()},
 }

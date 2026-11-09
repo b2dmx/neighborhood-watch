@@ -2,7 +2,11 @@
 train.py), with letterboxing, overlapping tiles for wide frames, and NMS.
 
 Input size and class names come from the export itself (metadata.yaml, else the model's
-input shape and output width), never from constants. Used by the web app and by the trainer
+input shape and output width), never from constants. A model trained with the owner's
+animals as classes (each named animal, Raccoon, ... plus "animal" for the rest) both finds and names:
+every box is an "animal" with the name it most likely is (`name`, and the best few in
+`names`), and how sure the trainer found each name can be on the held-back photos
+(id.json beside the export). Used by the web app and by the trainer
 (which scores the served model and a candidate the same way).
 """
 from __future__ import annotations
@@ -47,6 +51,18 @@ def read_metadata(model_dir: Path) -> dict:
         if m := re.search(r"^names:\s*\n((?:[ \t]+\d+:.*\n?)+)", text, re.M):
             meta["names"] = {int(k): v.strip().strip("'\"") for k, v in re.findall(r"(\d+):\s*(.+)", m.group(1))}
         return meta
+
+
+def read_id_info(model_dir: Path) -> dict:
+    """What the trainer measured about naming (id.json): {"names": [...], "sure": {name:
+    confidence at which that name was right often enough on the held-back photos}, ...}."""
+    try:
+        import json  # noqa: PLC0415
+
+        data = json.loads((model_dir / "id.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def production_dir(work: Path, fallback: Path) -> Path:
@@ -102,6 +118,9 @@ class Detector:
             self.labels = {i: MEGADETECTOR_LABELS.get(i, str(i)) for i in range(nc)}
         if len(self.labels) == 1:  # a one-class model is the trained animal detector, whatever it calls it
             self.labels = {0: "animal"}
+        # Classes other than MegaDetector's: a model that names the animals it finds.
+        self.named = not set(self.labels.values()) <= set(MEGADETECTOR_LABELS.values())
+        self.id_info = read_id_info(self.dir) if self.named else {}
         global _gpu_failed  # noqa: PLW0603
         self.wanted = device if device != "AUTO" else ("GPU" if "GPU" in core.available_devices else "CPU")
         if self.wanted == "GPU" and _gpu_failed:
@@ -177,9 +196,9 @@ class Detector:
         ]
 
     def candidates(self, img: Image.Image, dx: int = 0, dy: int = 0) -> tuple[np.ndarray, ...]:
-        """Boxes (in the full image, offset by dx/dy), confidences and classes above min_conf.
-        The output is YOLO's [1, 4 + classes, anchors]: cx, cy, w, h in input pixels, then
-        one (already sigmoid) score per class."""
+        """Boxes (in the full image, offset by dx/dy), confidences, classes and every class's
+        score, above min_conf. The output is YOLO's [1, 4 + classes, anchors]: cx, cy, w, h in
+        input pixels, then one (already sigmoid) score per class."""
         tensor, scale, left, top = self.letterbox(img)
         with self.lock:
             compiled, output = self.load()
@@ -194,7 +213,7 @@ class Detector:
         boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
         boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / scale + dx
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / scale + dy
-        return boxes, conf, cls
+        return boxes, conf, cls, raw[:, 4:]
 
     def detect(self, img: Image.Image) -> list[dict]:
         found = [self.candidates(img)]
@@ -203,11 +222,27 @@ class Detector:
         boxes = np.concatenate([f[0] for f in found])
         conf = np.concatenate([f[1] for f in found])
         cls = np.concatenate([f[2] for f in found])
+        every = np.concatenate([f[3] for f in found])
         if not len(conf):
             return []
         w, h = img.size
         boxes[:, [0, 2]] = boxes[:, [0, 2]].clip(0, w)
         boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, h)
+        if self.named:
+            # One box per animal whatever it's named (two names for one cat are one cat).
+            out = []
+            for i in nms(boxes, conf):
+                ranked = every[i].argsort()[::-1][:3]
+                out.append(
+                    {
+                        "label": "animal",
+                        "name": self.labels.get(int(cls[i]), str(int(cls[i]))),
+                        "names": {self.labels.get(int(c), str(int(c))): round(float(every[i][c]), 3) for c in ranked},
+                        "confidence": round(float(conf[i]), 3),
+                        "box": [round(float(v)) for v in boxes[i]],
+                    }
+                )
+            return sorted(out, key=lambda d: -d["confidence"])
         out = []
         for c in np.unique(cls):
             idx = np.where(cls == c)[0]

@@ -73,6 +73,8 @@ from .const import (
     CONF_DATASET_GB,
     CONF_DETECTOR_MIN,
     CONF_DETECTOR_MODE,
+    CONF_LOCAL_NAMING,
+    LOCAL_NAMING_MODES,
     CONF_DETECTOR_URL,
     DETECTOR_MODES,
     CONF_DETER_LIGHTS,
@@ -1214,6 +1216,9 @@ class WatchOptionsFlow(OptionsFlow):
                     ),
                     vol.Required(CONF_DETECTOR_MIN, default=values[CONF_DETECTOR_MIN]): NumberSelector(
                         NumberSelectorConfig(min=0.05, max=0.9, step=0.05, mode=NumberSelectorMode.BOX)
+                    ),
+                    vol.Required(CONF_LOCAL_NAMING, default=values[CONF_LOCAL_NAMING]): SelectSelector(
+                        SelectSelectorConfig(options=LOCAL_NAMING_MODES, translation_key="local_naming")
                     ),
                 }
             ),

@@ -92,6 +92,16 @@ async def ws_vision(hass: HomeAssistant, connection: websocket_api.ActiveConnect
             "percent": round(100 * sum(r["kind"] == "agree" for r in rows) / len(rows)),
             "misses": sum(r["kind"] == "miss" for r in rows),
         }
+    named = watch.local_week() if watch else []  # the trained model's names this week
+    if named:
+        answered = [r for r in named if not r["used"] and r["answer"] not in ("No answer", "")]
+        result["naming"] = {
+            "named": len(named),
+            "saved": sum(r["used"] for r in named),  # sightings named without an AI call
+            "agree": round(100 * sum(r["local"] == r["answer"] for r in answered) / len(answered))
+            if answered
+            else None,
+        }
     try:
         result["health"], result["train"] = await asyncio.gather(
             _vision(hass, "GET", "/health"), _vision(hass, "GET", "/train")

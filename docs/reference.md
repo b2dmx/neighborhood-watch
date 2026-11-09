@@ -252,6 +252,14 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 - **Test only:** it's asked about every frame, and the **Detector agreement** sensor shows how often it agrees with the AI. A *miss* means the AI saw an animal and the detector didn't.
 - **Skip empty frames:** when it finds no animal, the frame never reaches the AI. That saves quota on wind, cobwebs and shadows. In missing mode the AI always looks, and if the detector is down every frame goes to the AI as usual.
 
+Once it's [trained on your photos](#training-the-detector-on-your-photos), the same model also **names** what it finds (each of your animals, Raccoon, Deer, ...), and the aim is to need the AI less and less, until not at all. **Use the detector's names** (same page) decides how its names are used:
+
+- **Trust it first** (default): a name it has proved it gets right is used straight away, with no AI call. "Proved" means right at least 95% of the time on the held-back photos, from a confidence line measured for each name separately. Priority, always-strict, long-absent and missing animals still go to the AI. Below the line, the AI looks as usual.
+- **Only when no AI model answers:** its name (sure or not) instead of **No answer**.
+- **Never.**
+
+The Detector tab shows which names it's trusted with, which it's still learning, and how many sightings this week were named without an AI call.
+
 **Running it:** copy [`vision/compose.yaml`](../vision/compose.yaml) to the machine and follow its comments: put the MegaDetector model folder next to it as `./models/megadetector` (its `.xml` and `.bin` files), point the `/dataset` line at your saved-photos folder, and either copy this repo's `vision` folder to `./app` or remove the `./app` line to use the image's own code. Start it with `docker compose up -d`, then enter its address under **Detector → Local detector**.
 
 A new or changed address is checked when you save it: if the service doesn't answer at `<address>/health`, the form says so.
@@ -262,10 +270,10 @@ A new or changed address is checked when you save it: if the service doesn't ans
 
 MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [saved photos](#corrections-and-saved-photos)) and gets better every week:
 
-1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo. Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
+1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo (and, for a confirmed photo neither could box, where the AI said the animal was). The animal's box is named after what it was: your answer, or the AI's when it was sure and nobody answered. Each animal with at least 12 confirmed photos gets a name of its own; the rest are just "animal". Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
 2. **Fair test.** The confirmed photos from the most recent ~20% of days are held back as the test set and never trained on. So are confirmed animal photos that no teacher could box, which are exactly the misses that matter. Confidently empty frames from those days are the empty side of the test.
-3. **Training.** A one-class ("animal") YOLO11 model is trained on everything else: from YOLO11s the first time, then from the last promoted model.
-4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it only if it **misses fewer animals** and makes **at least 10% fewer mistakes in all** (misses plus false alarms). It's then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
+3. **Training.** One YOLO11 model that both finds and names is trained on everything else: from YOLO11s the first time, then from the model being served.
+4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it if it **names more of the test animals right without missing more**, or if it **misses fewer animals** and makes **at least 10% fewer mistakes in all** (misses plus false alarms) while naming no fewer right. For each name it also measures the confidence from which that name was right at least 95% of the time (kept in `id.json` with the model): that's the line **Trust it first** uses. The model is then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
 
 It needs the saved-photos folder mounted at `/dataset` (read-only is enough), and `shm_size`, both already in [`vision/compose.yaml`](../vision/compose.yaml).
 
@@ -274,7 +282,7 @@ It needs the saved-photos folder mounted at `/dataset` (read-only is enough), an
   - **Weekly training**, its day and hour (the NAS's local time), **Photos for the first round** (40), **New answered photos** needed for later rounds (100), **Trains with** GPU or CPU, **Training length** (Quick, Normal, Thorough) and **Picture size** (Faster, Normal, Sharper: finds small animals better, trains slower and checks photos about 25% slower).
 - **Schedule:** every Sunday from 13:00 by default. Training runs in a separate low-priority process, so detection stays responsive, and falls back to the CPU if the GPU fails. A round takes from tens of minutes to a few hours. The first round downloads the YOLO11 weights (about 60 MB) into `work/train/weights`.
 - **Now:** **Train now** (`POST /train`) starts a round (409 if one is running); **Stop training** (`POST /train/stop`) ends it without changing the model; **Undo the last round** (`POST /train/undo`) goes back to the model from before it (the last 3 trained models are kept). `GET /train` shows progress and the last round's results: misses, false alarms and agreement before and after, and whether it was promoted. `GET /train/history` lists every round, `GET`/`POST /settings` read and change the settings. Every round is kept in `work/train/history.json`, the log in `work/train/train.log`.
-- **Which model is in use:** `GET /health` shows `model` and `trained`. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
+- **Which model is in use:** `GET /health` shows `model`, `trained`, the `names` it can give and the line each is `sure` from. `work/models/current.txt` names the trained model being served (the last 3 are kept). Delete that file to go back to MegaDetector.
 
 ## Bulk scanning (photos and videos)
 

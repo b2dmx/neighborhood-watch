@@ -4,7 +4,7 @@ one (OpenVINO and the GPU driver stay resident for as long as a process has used
 
 Protocol on stdin/stdout: pickled (op, payload) requests, each answered by a pickled reply.
     ("info", None)                     -> {"name", "dir", "size", "labels", "device", "available"}
-    ("detect", (width, height, rgb))   -> [{"label", "confidence", "box"}, ...]
+    ("detect", (width, height, rgb))   -> [{"label", "confidence", "box"[, "name", "names"]}, ...]
 A failed request answers {"error": "<message>"}. The worker exits when stdin closes.
 """
 from __future__ import annotations
@@ -58,6 +58,8 @@ def main() -> None:
                     "dir": str(model.dir),
                     "size": model.size,
                     "labels": sorted(set(model.labels.values())),
+                    "names": sorted(set(model.labels.values()) - {"animal"}) if model.named else [],
+                    "sure": model.id_info.get("sure", {}),
                     "device": model.device,
                     "available": core.available_devices,
                 }

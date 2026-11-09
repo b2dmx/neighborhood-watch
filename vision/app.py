@@ -545,6 +545,9 @@ async def health(_request: web.Request) -> web.Response:
             "trained": info.get("dir") != str(MODEL_DIR),
             "size": info.get("size"),
             "labels": info.get("labels", []),
+            # The animals it can name, and the confidence from which each name can be trusted.
+            "names": info.get("names", []),
+            "sure": info.get("sure", {}),
             "loaded": _det.loaded,  # the detector process is running (it stops when idle)
             "training": training_running(),
             "available": info.get("available", []),  # what OpenVINO can use here (CPU, GPU, NPU)

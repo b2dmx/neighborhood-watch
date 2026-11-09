@@ -1189,6 +1189,24 @@ class NeighborhoodWatchPanel extends HTMLElement {
     return `<div class="hint" style="margin-top: 14px">This week: ${esc(a.percent)}% agree with the AI · ${esc(a.misses)} missed animal${a.misses === 1 ? "" : "s"}${none}</div>`;
   }
 
+  // What the detector can name: the names it's trusted with (no AI call), and its week.
+  _naming(h, n) {
+    const names = h.names || [];
+    if (!names.length) return "";
+    const sure = h.sure || {};
+    const trusted = names.filter((x) => x in sure);
+    const learning = names.filter((x) => !(x in sure));
+    const parts = [
+      trusted.length ? `Trusted without the AI: ${esc(trusted.join(", "))}` : "Not trusted with any name yet",
+      learning.length ? `still learning: ${esc(learning.join(", "))}` : "",
+    ].filter(Boolean);
+    const week = n
+      ? ` · This week: ${esc(n.saved)} of ${esc(n.named)} sightings named without an AI call` +
+        (n.agree != null ? `, ${esc(n.agree)}% agree with the AI on the rest` : "")
+      : "";
+    return `<div class="hint" style="margin-top: 14px">Names it can give: ${parts.join(" · ")}${week}</div>`;
+  }
+
   _renderVision() {
     const box = this._visionBox;
     if (!box) return;
@@ -1205,12 +1223,13 @@ class NeighborhoodWatchPanel extends HTMLElement {
         <section class="card">
           <div class="head"><h3>Detector</h3><span class="chip"><span class="dot ${chip[1]}"></span>${chip[0]}</span></div>
           <div class="grid">
-            <div><div class="label">Model</div><div class="value">${h.trained ? `Trained on your photos (${esc(h.model)})` : `MegaDetector (${esc(h.model)})`}</div></div>
+            <div><div class="label">Model</div><div class="value">${h.trained ? `Trained on your photos (${esc(h.model)})${(h.names || []).length ? ", finds and names" : ", finds only"}` : `MegaDetector (${esc(h.model)}), finds only`}</div></div>
             <div><div class="label">Detects with</div><div class="value">${esc(devName(h.device))}</div></div>
             <div><div class="label">Hardware found</div><div class="value">${esc((h.available || []).map(devName).join(", ") || "—")}</div></div>
             <div><div class="label">Right now</div><div class="value">${h.loaded ? "Awake" : "Asleep until the next photo"}</div></div>
           </div>
           ${this._agreement(d.agreement)}
+          ${this._naming(h, d.naming)}
           <div class="actions" style="margin-top: 14px">
             <a class="btn quiet" href="${esc(d.url)}/" target="_blank" rel="noreferrer">Open the vision page</a>
           </div>

@@ -1135,3 +1135,62 @@ async def test_panel_stops_and_undoes_training_rounds(hass, watch, aioclient_moc
     assert not answer["success"] and answer["error"]["code"] == "refused"
     assert "no promoted round" in answer["error"]["message"]
     assert [str(c[1]).rsplit("/", 2)[-1] for c in aioclient_mock.mock_calls if c[0] == "POST"][-2:] == ["stop", "undo"]
+
+
+async def _with_naming_detector(hass, watch, aioclient_mock, name, conf, sure, mode=None):
+    entry = watch["entry"]
+    options = {**entry.options, "detector_url": "http://vision:8765", "detector_mode": "shadow"}
+    if mode:
+        options["local_naming"] = mode
+    hass.config_entries.async_update_entry(entry, options=options)
+    await hass.async_block_till_done()
+    box = {"label": "animal", "name": name, "names": {name: conf}, "confidence": conf, "box": [8, 6, 32, 24]}
+    aioclient_mock.post(
+        "http://vision:8765/detect",
+        json={"width": 64, "height": 48, "ms": 5, "device": "GPU", "detections": [box]},
+    )
+    aioclient_mock.get(
+        "http://vision:8765/health", json={"ok": True, "model": "trained-5", "names": [name], "sure": sure}
+    )
+
+
+async def test_a_name_the_model_has_proved_skips_the_ai(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.9, {"Milo": 0.6})
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == []
+    (event,) = watch["events"]
+    assert (event.data["animal"], event.data["confidence"]) == ("Milo", "high")
+    assert event.data["models_used"] == "Local model (trained-5)"
+    assert watch["entry"].runtime_data.local_week()[-1]["used"] is True
+
+
+async def test_below_its_line_the_ai_still_looks(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.4, {"Milo": 0.6})
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == [FIRST]
+    (row,) = watch["entry"].runtime_data.local_week()
+    assert (row["used"], row["answer"]) == (False, "Milo")
+
+
+async def test_priority_animals_always_go_to_the_ai(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Luna", 0.95, {"Luna": 0.5})
+    watch["ai"].say(FIRST, "Luna|high|blotchy|white|")
+    watch["ai"].say(SECOND, "Luna|high|blotchy|white|")
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == [FIRST, SECOND]
+
+
+async def test_the_model_fills_in_when_no_ai_answers(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.4, {}, mode="fill_in")
+    await trigger(hass, "yard")  # every model fails
+    (event,) = watch["events"]
+    assert (event.data["animal"], event.data["confidence"]) == ("Milo", "low")
+    assert "no AI answered" in event.data["models_used"]
+
+
+async def test_names_are_never_used_when_turned_off(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.9, {"Milo": 0.6}, mode="off")
+    await trigger(hass, "yard")
+    (event,) = watch["events"]
+    assert event.data["animal"] == "No answer"

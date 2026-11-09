@@ -60,6 +60,11 @@ from .const import (
     CONF_DATASET_GB,
     CONF_DETECTOR_MIN,
     CONF_DETECTOR_MODE,
+    CONF_LOCAL_NAMING,
+    LOCAL_FILL,
+    LOCAL_FIRST,
+    LOCAL_INFO_SECONDS,
+    LOCAL_OFF,
     CONF_DETECTOR_URL,
     DETECTOR_SKIP,
     CONF_DETER_LIGHTS,
@@ -1020,11 +1025,22 @@ class WatchEngine:
                 and detector["animal"] < float(self.options.get(CONF_DETECTOR_MIN, 0.2))
                 and not self.any_missing_mode()  # in missing mode the AI always looks
             )
+            naming = self.options.get(CONF_LOCAL_NAMING, LOCAL_FIRST)
+            local = self._local_verdict(detector, sure_only=True) if naming == LOCAL_FIRST else None
             if skip:
                 verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
                 models = "Local detector (no animal)"
+            elif local is not None:
+                # It has proved it gets this name right: no AI call.
+                verdict, models = local, f"Local model ({detector.get('model') or 'trained'})"
             else:
                 verdict, models = await self._identify_capped(cam)
+                fill = self._local_verdict(detector, sure_only=False) if naming != LOCAL_OFF else None
+                if verdict.animal == logic.NO_ANSWER and fill is not None:
+                    verdict = fill
+                    models = f"Local model ({detector.get('model') or 'trained'}), no AI answered"
+            if detector is not None:
+                self._log_local(detector, verdict, used=models.startswith("Local model"), now=now)
             check = Check(cam, verdict, models, content, now, detector=detector)
             async with self._lock:
                 sends = await self._record(check)
@@ -1061,12 +1077,103 @@ class WatchEngine:
                 "device": body.get("device"),
                 "size": [body.get("width"), body.get("height")],
             }
+            top = result["boxes"][0] if result["boxes"] else {}
+            if top.get("name"):  # a model trained on your animals: it names what it found
+                info = await self._local_info(url)
+                result.update(
+                    name=top["name"],
+                    name_confidence=top.get("confidence", 0.0),
+                    sure_from=(info.get("sure") or {}).get(top["name"]),
+                    model=info.get("model"),
+                )
         except Exception as err:  # noqa: BLE001 - a bad reply counts as no answer
             _LOGGER.info("Local detector gave no answer: %s", err)
             stats["last_error"] = str(err)[:200] or type(err).__name__
             return None
         stats.pop("last_error", None)
         return result
+
+    async def _local_info(self, url: str) -> dict[str, Any]:
+        """What the served model can name and from which confidence each name is trusted
+        (the vision service's /health), remembered for a few minutes."""
+        cached = getattr(self, "_local_cache", None)
+        if cached and time.monotonic() - cached[0] < LOCAL_INFO_SECONDS and cached[2] == url:
+            return cached[1]
+        info: dict[str, Any] = {}
+        try:
+            async with asyncio.timeout(5):
+                response = await async_get_clientsession(self.hass).get(f"{url}/health")
+                body = await response.json()
+            if isinstance(body, dict):
+                info = {"model": body.get("model"), "names": body.get("names") or [], "sure": body.get("sure") or {}}
+        except Exception:  # noqa: BLE001 - nothing trusted until it answers
+            info = {}
+        self._local_cache = (time.monotonic(), info, url)
+        return info
+
+    def _local_verdict(self, det: dict[str, Any] | None, *, sure_only: bool) -> logic.Verdict | None:
+        """The trained model's answer as a verdict. sure_only: only a name it has proved it
+        gets right (at or above that name's line) and that needs no double-check: never a
+        priority, always-strict, long-absent or missing animal. Otherwise any name it gave
+        (for when no AI answered), sure or not."""
+        if not det or not det.get("name"):
+            return None
+        name = str(det["name"])
+        conf = float(det.get("name_confidence") or 0.0)
+        if name.lower() == "animal" or det["animal"] < float(self.options.get(CONF_DETECTOR_MIN, 0.2)):
+            return None
+        line = det.get("sure_from")
+        sure = line is not None and conf >= float(line)
+        animal = self.animal_by_name(name)
+        if sure_only:
+            if not sure:
+                return None
+            if animal and (animal.priority or animal.always_strict or self.missing_mode(animal)):
+                return None
+            if name.lower() in self.strict_keys():
+                return None
+        display = animal.name if animal else name
+        level = logic.HIGH if sure else logic.MEDIUM if conf >= 0.5 else logic.LOW
+        box = None
+        size = det.get("size") or [None, None]
+        top = (det.get("boxes") or [{}])[0].get("box")
+        if top and size[0] and size[1]:
+            box = (top[0] / size[0], top[1] / size[1], top[2] / size[0], top[3] / size[1])
+        return logic.Verdict(
+            animal=display,
+            confidence=level,
+            pattern="na",
+            description="",
+            priority_candidate=animal.name if animal and animal.priority else "",
+            first_look_said=f"local:{name.lower()}|{round(conf, 3)}",
+            second_opinion_said="",
+            named=(name.lower(),),
+            box=box,
+        )
+
+    def _log_local(self, det: dict[str, Any], v: logic.Verdict, *, used: bool, now: datetime) -> None:
+        """What the trained model named next to the final answer, for the Detector tab."""
+        if not det.get("name"):
+            return
+        rows = self.data.setdefault("local", {}).setdefault("log", [])
+        rows.append(
+            {
+                "time": _iso(now),
+                "local": det["name"],
+                "confidence": round(float(det.get("name_confidence") or 0.0), 3),
+                "sure": det.get("sure_from") is not None
+                and float(det.get("name_confidence") or 0.0) >= float(det["sure_from"]),
+                "used": used,
+                "answer": v.animal,
+            }
+        )
+        del rows[:-1000]
+
+    def local_week(self) -> list[dict[str, Any]]:
+        """The trained model's names over the last 7 days."""
+        since = dt_util.utcnow() - timedelta(days=7)
+        rows = self.data.get("local", {}).get("log", [])
+        return [r for r in rows if (_dt(r.get("time")) or since) >= since]
 
     def _score_detector(self, v: logic.Verdict, det: dict[str, Any], now: datetime) -> None:
         """Shadow statistics: does the detector agree with the AI about whether an animal

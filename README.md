@@ -68,6 +68,6 @@ A **Neighborhood Watch** page also appears in the sidebar (admins only): **Revie
 
 <p align="center">
   <a href="LICENSE">MIT</a> · <a href="https://ko-fi.com/goobis2dmx">Support on Ko-fi</a><br><br>
-  Neighborhood Watch v0.24.0 by Goobis<br>
+  Neighborhood Watch v0.25.0 by Goobis<br>
   AI was used to help develop this application
 </p>

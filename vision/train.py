@@ -5,6 +5,9 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    (its animal classes as one class) and the boxes the detector stored with the photo. A
    confirmed animal photo neither could box uses the box the AI gave, if any.
    Photos marked empty become background images (no boxes).
+   Each animal photo's main box is named after what it was (your answer, or the AI's when it
+   was sure and nobody has answered): the animals with at least MIN_PER_NAME answered photos
+   are classes of their own, everything else is "animal". So one model finds and names.
 2. Split by time: the confirmed photos from the most recent ~20% of dates are the
    evaluation set and are never trained on. So are confirmed animal photos that no teacher
    could box (they can't be trained on, but they're the misses that matter most).
@@ -12,8 +15,11 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    trained model being served (so after an undo, from the model it went back to).
 4. Score the model being served and the new one on the evaluation set, the way the service
    runs them (OpenVINO, tiles) at the integration's threshold. The new model is promoted
-   only if it misses fewer animals and makes at least 10% fewer mistakes in all (misses
-   plus false alarms).
+   if it names more of the held-back animals right without missing more of them, or misses
+   fewer and makes at least 10% fewer mistakes in all (misses plus false alarms) while naming
+   no fewer right. For each name it also finds the confidence from which that name was right
+   at least SURE_PRECISION of the time (id.json beside the export): from there the
+   integration can trust it without asking the AI.
 5. A promoted model is exported to OpenVINO in WORK/models/trained-<n>/ and named in
    WORK/models/current.txt; the service switches to it within a minute.
 
@@ -40,6 +46,10 @@ import traceback
 
 NOT_ANIMAL = {"nothing", "none", "no answer", "", "person", "bug", "spider", "leaf", "shadow", "vehicle", "car"}
 CONFIRMED = {"right", "corrected"}
+GENERIC = "animal"  # the class for animals without enough answered photos to have their own
+MIN_PER_NAME = int(os.environ.get("NW_TRAIN_MIN_PER_NAME", "12"))
+SURE_PRECISION = float(os.environ.get("NW_TRAIN_SURE_PRECISION", "0.95"))
+SURE_MIN_COUNT = 5  # a name is trusted only after this many right answers above the line
 COCO_ANIMALS = list(range(14, 24))  # bird cat dog horse sheep cow elephant bear zebra giraffe
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -96,6 +106,8 @@ class Sample:
     animal: bool
     trust: str  # confirmed | ai | skip
     boxes: list = field(default_factory=list)  # [x1, y1, x2, y2, conf] in jpg pixels
+    name: str = ""  # what the animal is (your answer, else the AI's), title case
+    main: int = -1  # which box is that animal (the others are just "animal")
 
     @property
     def empty_ok(self) -> bool:
@@ -127,7 +139,9 @@ def load_samples(dataset: Path) -> list[Sample]:
         animal = str(name or "").strip().lower() not in NOT_ANIMAL
         stamp = str(meta.get("time") or "")
         date = js.parent.name if DATE.match(js.parent.name) else stamp[:10]
-        out.append(Sample(str(meta.get("id") or js.stem), jpg, meta, stamp, date, animal, trust))
+        named = str(name or "").strip()
+        out.append(Sample(str(meta.get("id") or js.stem), jpg, meta, stamp, date, animal, trust,
+                          name=named[:1].upper() + named[1:] if animal else ""))
     return [s for s in out if s.trust != "skip"]
 
 
@@ -189,6 +203,39 @@ def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, st
             s.boxes = merge((cache.get(s.id) or {}).get("boxes", []) + stored_boxes(s, w, h))
             if not s.boxes and s.trust == "confirmed":
                 s.boxes = ai_box(s, w, h)
+            s.main = main_box(s, w, h)
+
+
+def main_box(s: Sample, w: int, h: int) -> int:
+    """The box of the animal the photo is labelled as: the one overlapping where the AI said
+    it was most, else the most confident."""
+    if not s.boxes:
+        return -1
+    said = ai_box(s, w, h)
+    if said:
+        overlaps = [_iou(b, said[0]) for b in s.boxes]
+        if max(overlaps) > 0:
+            return overlaps.index(max(overlaps))
+    return max(range(len(s.boxes)), key=lambda i: s.boxes[i][4])
+
+
+def pick_names(samples: list[Sample]) -> list[str]:
+    """The classes: animals with at least MIN_PER_NAME answered, boxed photos (most first),
+    then "animal" for everything else."""
+    counts: dict[str, int] = {}
+    for s in samples:
+        if s.animal and s.trust == "confirmed" and s.boxes and s.name.lower() != GENERIC:
+            counts[s.name] = counts.get(s.name, 0) + 1
+    return [n for n, c in sorted(counts.items(), key=lambda kv: -kv[1]) if c >= MIN_PER_NAME] + [GENERIC]
+
+
+def class_of(s: Sample, names: list[str]) -> int | None:
+    """The class of the photo's main box; None when it shouldn't be trained on (the AI named
+    one of the classes without being sure, and nobody has answered)."""
+    if s.name in names:
+        sure = s.trust == "confirmed" or str(s.meta.get("ai_confidence") or "").lower() == "high"
+        return names.index(s.name) if sure else None
+    return names.index(GENERIC)
 
 
 def ai_box(s: Sample, w: int, h: int) -> list[list[float]]:
@@ -227,7 +274,7 @@ def split(samples: list[Sample]) -> tuple[list[Sample], list[Sample]]:
     return train, evals
 
 
-def build_yolo_dataset(train: list[Sample], root: Path, seed: int = 0) -> tuple[Path, int]:
+def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], seed: int = 0) -> tuple[Path, int]:
     """images/{train,val} + labels/{train,val} + data.yaml. val (20% of the animal and of the
     empty photos) only picks the best epoch and stops early; it is not the evaluation set."""
     from PIL import Image  # noqa: PLC0415
@@ -253,35 +300,77 @@ def build_yolo_dataset(train: list[Sample], root: Path, seed: int = 0) -> tuple[
             if s.animal:
                 with Image.open(s.jpg) as im:
                     w, h = im.size
-                for x1, y1, x2, y2, _c in s.boxes:
+                main = class_of(s, names)
+                generic = names.index(GENERIC)
+                for i, (x1, y1, x2, y2, _c) in enumerate(s.boxes):
                     x1, x2 = max(0.0, x1), min(float(w), x2)
                     y1, y2 = max(0.0, y1), min(float(h), y2)
+                    k = main if i == s.main else generic
                     if x2 - x1 >= 2 and y2 - y1 >= 2:
-                        lines.append(f"0 {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}")
+                        lines.append(f"{k} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}")
             (root / "labels" / part / f"{s.id}.txt").write_text("\n".join(lines), encoding="utf-8")
     yaml_path = root / "data.yaml"
+    listed = "".join(f"  {i}: {json.dumps(n)}\n" for i, n in enumerate(names))
     yaml_path.write_text(
-        f"path: {root.resolve().as_posix()}\ntrain: images/train\nval: images/val\nnames:\n  0: animal\n",
+        f"path: {root.resolve().as_posix()}\ntrain: images/train\nval: images/val\nnames:\n{listed}",
         encoding="utf-8",
     )
     return yaml_path, sum(s.animal for s in parts["val"])
 
 
 # ---- evaluation -------------------------------------------------------------------------
-def score_with(model_dir: Path, evals: list[Sample], work: Path) -> list[float]:
-    """Best animal confidence per photo, run exactly as the service runs the model."""
+def run_model(model_dir: Path, evals: list[Sample], work: Path) -> list[list[dict]]:
+    """Every animal detection per photo, run exactly as the service runs the model."""
     from PIL import Image  # noqa: PLC0415
 
     import detector as det  # noqa: PLC0415
 
     model = det.env_detector(model_dir, det.make_core(work))
     model.min_conf = min(model.min_conf, 0.05)
-    scores = []
+    out = []
     for s in evals:
         with Image.open(s.jpg) as im:
-            found = model.detect(im.convert("RGB"))
-        scores.append(max((d["confidence"] for d in found if d["label"] == "animal"), default=0.0))
-    return scores
+            out.append([d for d in model.detect(im.convert("RGB")) if d["label"] == "animal"])
+    return out
+
+
+def best_scores(found: list[list[dict]]) -> list[float]:
+    return [max((d["confidence"] for d in f), default=0.0) for f in found]
+
+
+def naming(found: list[list[dict]], evals: list[Sample], names: list[str], threshold: float) -> dict:
+    """How well the model names the held-back photos. A photo's answer is its most confident
+    box's name (at or above the detector threshold). Per name: right/total, and `sure`, the
+    lowest confidence from which that name was right at least SURE_PRECISION of the time
+    (photos of other animals and empty photos count against it)."""
+    guesses: dict[str, list[tuple[float, bool]]] = {}
+    right = total = 0
+    per: dict[str, dict] = {n: {"photos": 0, "right": 0} for n in names if n != GENERIC}
+    for f, s in zip(found, evals):
+        top = max(f, key=lambda d: d["confidence"], default=None)
+        said = top.get("name") if top and top["confidence"] >= threshold else None
+        truth = s.name if s.animal and s.trust == "confirmed" and s.name in per else None
+        if truth:
+            total += 1
+            per[truth]["photos"] += 1
+            if said == truth:
+                right += 1
+                per[truth]["right"] += 1
+        if said in per and (truth or not s.animal):
+            guesses.setdefault(said, []).append((top["confidence"], said == truth))
+    sure: dict[str, float] = {}
+    for name, rows in guesses.items():
+        rows.sort(key=lambda r: -r[0])
+        hits = 0
+        for i, (conf, ok) in enumerate(rows, 1):
+            hits += ok
+            if hits / i >= SURE_PRECISION and hits >= SURE_MIN_COUNT:
+                sure[name] = conf  # from here up, right often enough
+    for name, line in sure.items():
+        rows = guesses[name]
+        per[name]["sure_from"] = round(line, 3)
+        per[name]["sure_right"] = sum(ok for c, ok in rows if c >= line)
+    return {"named": total, "named_right": right, "names": per, "sure": {k: round(v, 3) for k, v in sure.items()}}
 
 
 def stored_scores(evals: list[Sample]) -> list[float]:
@@ -306,11 +395,20 @@ def metrics(scores: list[float], evals: list[Sample], threshold: float) -> dict:
 
 
 def better(before: dict, after: dict) -> bool:
-    """Fewer misses, and at least 10% fewer mistakes in all (misses plus false alarms)."""
+    """Names more held-back animals right without missing more of them; or misses fewer and
+    makes at least 10% fewer mistakes in all (misses plus false alarms), naming no fewer
+    right. (A false alarm only costs an AI call; a miss loses a sighting.)"""
     if not after["animals"]:
         return False
     mistakes = lambda m: m["misses"] + m["false_alarms"]  # noqa: E731
-    return after["misses"] < before["misses"] and mistakes(after) <= 0.9 * mistakes(before)
+    named, named_before = after.get("named_right", 0), before.get("named_right", 0)
+    if named > named_before and after["misses"] <= before["misses"]:
+        return True
+    return (
+        named >= named_before
+        and after["misses"] < before["misses"]
+        and mistakes(after) <= 0.9 * mistakes(before)
+    )
 
 
 # ---- helpers ----------------------------------------------------------------------------
@@ -433,7 +531,10 @@ def run(args: argparse.Namespace) -> int:
         settings.update({"sync": False, "weights_dir": str(tdir / "weights"), "runs_dir": str(tdir / "runs")})
 
         teacher_boxes(samples, work, args.teacher_imgsz, device, status)
+        names = pick_names(samples)
+        entry["names"] = names
         train, evals = split(samples)
+        train = [s for s in train if not s.animal or class_of(s, names) is not None]
         boxed = [s for s in train if s.animal]
         unboxed = [s for s in evals if s.animal and s.trust == "confirmed" and not s.boxes]
         entry["samples"] = {
@@ -444,6 +545,7 @@ def run(args: argparse.Namespace) -> int:
             "unboxed_confirmed_animals": len(unboxed),
             "eval_animals": sum(s.animal for s in evals),
             "eval_empty": sum(not s.animal for s in evals),
+            "per_name": {n: sum(1 for s in boxed if class_of(s, names) == i) for i, n in enumerate(names)},
         }
         print("Samples:", entry["samples"], flush=True)
         if len(boxed) < 10 or not any(s.animal for s in evals):
@@ -455,10 +557,13 @@ def run(args: argparse.Namespace) -> int:
 
         current_dir = det.production_dir(work, args.megadetector)
         if args.baseline == "stored":
-            before_scores, before_name = stored_scores(evals), "stored detector scores"
+            before_scores, before_name, before_found = stored_scores(evals), "stored detector scores", None
         else:
-            before_scores, before_name = score_with(current_dir, evals, work), current_dir.name
+            before_found = run_model(current_dir, evals, work)
+            before_scores, before_name = best_scores(before_found), current_dir.name
         entry["before"] = {"model": before_name, **metrics(before_scores, evals, args.threshold)}
+        if before_found is not None:
+            entry["before"].update(naming(before_found, evals, names, args.threshold))
         print("Before:", entry["before"], flush=True)
 
         # Train.
@@ -469,7 +574,7 @@ def run(args: argparse.Namespace) -> int:
         previous = current_dir / "best.pt" if (current_dir / "best.pt").exists() else None
         start = str(previous) if previous else weights(work, "yolo11s.pt")
         entry["start_from"] = Path(start).parent.name if previous else "yolo11s.pt"
-        data_yaml, val_animals = build_yolo_dataset(train, tdir / "data")
+        data_yaml, val_animals = build_yolo_dataset(train, tdir / "data", names)
         # With only a few animals to validate on, the "best" epoch is noise (often an early,
         # barely trained one): then train every epoch and keep the last.
         small = val_animals < 30
@@ -512,8 +617,14 @@ def run(args: argparse.Namespace) -> int:
         status(stage="exporting")
         candidate = export_openvino(best, args.imgsz, work / "models" / f"candidate-{n}")
         status(stage="scoring the new model")
-        after_scores = score_with(candidate, evals, work)
-        entry["after"] = {"model": f"trained-{n}", **metrics(after_scores, evals, args.threshold)}
+        after_found = run_model(candidate, evals, work)
+        entry["after"] = {
+            "model": f"trained-{n}",
+            **metrics(best_scores(after_found), evals, args.threshold),
+            **naming(after_found, evals, names, args.threshold),
+        }
+        write_json(candidate / "id.json", {"names": names[:-1], "sure": entry["after"]["sure"],
+                                           "per_name": entry["after"]["names"], "round": n})
         print("After:", entry["after"], flush=True)
 
         _stop["hold"] = True  # from here a stop waits: the round finishes and is recorded as it is

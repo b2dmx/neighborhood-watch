@@ -338,15 +338,17 @@
       },
       "detector": {
         "title": "Local detector",
-        "description": "Optional. A free animal detector that runs on your own NAS or PC and looks at every photo before the AI, so empty frames (wind, cobwebs, shadows) don't use up your AI allowance. Start in Test only. After a week, check the Detector tab in the sidebar (or the Detector agreement sensor): once it shows 0 missed animals, switch to Skip empty frames.",
+        "description": "Optional. A free detector on your own NAS or PC that looks at every photo before the AI. It trains every week on your answers in To review, and learns to name each animal you've answered often enough, so the AI is needed less and less. Start in Test only. Once the Detector tab shows 0 missed animals, switch to Skip empty frames.",
         "data": {
           "detector_url": "Address",
           "detector_mode": "Mode",
-          "detector_min": "How sure the detector must be (0 to 1)"
+          "detector_min": "How sure the detector must be (0 to 1)",
+          "local_naming": "Use the detector's names"
         },
         "data_description": {
           "detector_url": "e.g. {example}. Leave empty to turn it off.",
-          "detector_min": "Below this the photo counts as empty. Lower catches more animals but skips fewer empty frames. 0.2 is a good start; lower it if the Detector agreement sensor shows misses."
+          "detector_min": "Below this the photo counts as empty. Lower catches more animals but skips fewer empty frames. 0.2 is a good start; lower it if the Detector agreement sensor shows misses.",
+          "local_naming": "Trust it first: a name it has proved it gets right (95% of the time on photos it didn't train on) is used without asking the AI. Priority, always-strict, long-absent and missing animals still go to the AI. The Detector tab shows which names it can be trusted with."
         }
       },
       "catch_alls": {
@@ -800,6 +802,13 @@
         "abyssinian": "Abyssinian (ticked)",
         "scottish_fold": "Scottish Fold",
         "persian": "Persian (white)"
+      }
+    },
+    "local_naming": {
+      "options": {
+        "first": "Trust it first: no AI call for names it has proved it gets right",
+        "fill_in": "Only when no AI model answers",
+        "off": "Never"
       }
     }
   },
