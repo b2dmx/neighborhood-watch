@@ -764,7 +764,7 @@ async def test_the_ai_chain_has_a_total_time_cap(hass, watch):
     hass.services.async_register("ai_task", "generate_data", never, supports_response=SupportsResponse.ONLY)
     with patch.object(engine, "IDENTIFY_CAP_SECONDS", 0):  # the test clock is frozen
         result = await hass.services.async_call(DOMAIN, "identify", {"camera": "yard"}, blocking=True, return_response=True)
-    assert result["models_used"] == "none answered" and result["animal"] == "Nothing"
+    assert result["models_used"] == "none answered" and result["animal"] == "No answer"
     assert watch["watch"].camera_state("yard")["last"]["models_used"] == "none answered"
 
 

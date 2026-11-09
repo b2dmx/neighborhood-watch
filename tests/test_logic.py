@@ -161,9 +161,29 @@ def test_people_and_none_become_nothing():
     assert decide("Human|high|na|na|").animal == "Nothing"
 
 
-def test_all_models_failed_is_unsure_nothing():
+def test_all_models_failed_is_no_answer():
     v = decide("", "")
-    assert (v.animal, v.confidence) == ("Nothing", "low")
+    assert (v.animal, v.confidence) == ("No answer", "low")
+    assert not logic.is_wildlife(v.animal, set())
+    # A reply with no pipe is still an unsure "nothing": someone did answer.
+    assert decide("I can't tell").animal == "Nothing"
+
+
+def test_box_line_is_read_and_kept_out_of_the_answer():
+    raw = "Ziggy|high|uniform|grey|\nBOX 100,200,400,600"
+    assert logic.tidy(raw) == "Ziggy|high|uniform|grey|"
+    assert logic.parse_box(raw) == (0.2, 0.1, 0.6, 0.4)
+    same_line = "Ziggy|high|uniform|grey| BOX: [100, 200, 400, 600]"
+    assert logic.tidy(same_line) == "Ziggy|high|uniform|grey|"
+    assert logic.parse_box(same_line) == (0.2, 0.1, 0.6, 0.4)
+    for bad in ("BOX none", "BOX 500,500,400,600", "BOX 0,0,1000,1000", "BOX 1,2,3,4000", ""):
+        assert logic.parse_box(bad) is None
+
+
+def test_no_answer_alerts_like_unsure_motion():
+    builtins = {logic.BUILTIN_MOTION: "motion"}
+    v = decide("", "")
+    assert logic.subject_of(v, {}, builtins) == "motion"
 
 
 def test_unknown_cat_description_kept_and_trimmed():

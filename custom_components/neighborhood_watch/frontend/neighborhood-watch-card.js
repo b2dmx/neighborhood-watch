@@ -71,7 +71,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!this._onKey) {
       this._onKey = (ev) => {
         if (ev.key !== "Escape" || !this._zoom) return;
-        this._zoom = null;
+        this._zoom = this._lb = null;
         this._render(true);
       };
       window.addEventListener("keydown", this._onKey);
@@ -618,11 +618,13 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _lightbox() {
-    // The full frame, over everything. Tap the picture to zoom in where you tapped.
+    // The full frame, over everything. Tap the picture to zoom in where you tapped; scroll or
+    // pinch to zoom, drag to move around.
     if (!this._zoom) return "";
     return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
-        <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}">
+        <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}" draggable="false">
+        <div class="lbhint">Tap to zoom in · scroll or pinch to zoom · drag to move</div>
       </div>`;
   }
 
@@ -633,17 +635,98 @@ class NeighborhoodWatchCard extends HTMLElement {
       el.addEventListener("click", () => {
         this._zoom = el.dataset.zoom;
         this._zoomAlt = el.alt;
+        this._lb = null;
         this._render(true);
       });
     });
     const box = this.shadowRoot.querySelector(".lightbox");
     if (!box) return;
     box.querySelector(".lbclose").focus();
-    // The picture is already enlarged: a tap anywhere, on it or around it, closes it.
-    box.addEventListener("click", () => {
-      this._zoom = null;
+    // Tapping around the picture (or ✕) closes it; the picture itself zooms and moves.
+    box.addEventListener("click", (ev) => {
+      if (ev.target !== box && !ev.target.closest(".lbclose")) return;
+      this._zoom = this._lb = null;
       this._render(true);
     });
+    const img = box.querySelector(".lbimg");
+    // Kept on the card, so a redraw while it's open (a new sighting) keeps the zoom.
+    const v = (this._lb = this._lb || { s: 1, x: 0, y: 0 });
+    const apply = () => {
+      if (v.s <= 1) Object.assign(v, { s: 1, x: 0, y: 0 });
+      // Never further than the picture's own edge.
+      const mx = (img.offsetWidth * (v.s - 1)) / 2;
+      const my = (img.offsetHeight * (v.s - 1)) / 2;
+      v.x = Math.max(-mx, Math.min(mx, v.x));
+      v.y = Math.max(-my, Math.min(my, v.y));
+      img.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`;
+      img.style.cursor = v.s > 1 ? "grab" : "zoom-in";
+    };
+    const zoomAt = (px, py, scale) => {
+      const next = Math.max(1, Math.min(8, scale));
+      const r = img.getBoundingClientRect();
+      v.x += (px - (r.left + r.width / 2)) * (1 - next / v.s);
+      v.y += (py - (r.top + r.height / 2)) * (1 - next / v.s);
+      v.s = next;
+      apply();
+    };
+    img.addEventListener("load", apply);
+    apply();
+    box.addEventListener(
+      "wheel",
+      (ev) => {
+        ev.preventDefault();
+        zoomAt(ev.clientX, ev.clientY, v.s * Math.exp(-ev.deltaY * 0.0015));
+      },
+      { passive: false }
+    );
+    const down = new Map();
+    let moved = false;
+    let pinch = 0;
+    img.addEventListener("pointerdown", (ev) => {
+      try {
+        img.setPointerCapture(ev.pointerId);
+      } catch {
+        // already gone (a very quick tap): it still counts
+      }
+      down.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (down.size === 1) moved = false;
+      if (down.size === 2) {
+        const [a, b] = [...down.values()];
+        pinch = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+    });
+    img.addEventListener("pointermove", (ev) => {
+      const was = down.get(ev.pointerId);
+      if (!was) return;
+      const now = { x: ev.clientX, y: ev.clientY };
+      down.set(ev.pointerId, now);
+      if (down.size === 2) {
+        const [a, b] = [...down.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, (v.s * dist) / pinch);
+        pinch = dist;
+        moved = true;
+        return;
+      }
+      if (Math.abs(now.x - was.x) + Math.abs(now.y - was.y) > 0) {
+        if (Math.hypot(now.x - was.x, now.y - was.y) > 3) moved = true;
+        v.x += now.x - was.x;
+        v.y += now.y - was.y;
+        apply();
+      }
+    });
+    const up = (ev) => {
+      if (!down.delete(ev.pointerId)) return;
+      pinch = 0;
+      if (down.size || moved || ev.type === "pointercancel") return;
+      // A tap: zoom in where it landed, or back out.
+      if (v.s > 1) {
+        v.s = 1;
+        apply();
+      } else zoomAt(ev.clientX, ev.clientY, 3);
+    };
+    img.addEventListener("pointerup", up);
+    img.addEventListener("pointercancel", up);
   }
 
   _review(d) {
@@ -682,7 +765,8 @@ class NeighborhoodWatchCard extends HTMLElement {
           ? `<input class="typed" data-type-sid="${sid}" list="nw-names" placeholder="What was it?" aria-label="What was it?">` +
             `<button class="mini" data-type-ok title="Save" aria-label="Save">✓</button>` +
             `<button class="mini" data-type-cancel title="Cancel" aria-label="Cancel">✕</button>`
-          : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>
+          : // "No answer" (no AI could look): nothing to agree with, only what it was.
+            `${it.animal === "No answer" ? "" : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>`}
             <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure">?</button>
             <select data-sid="${sid}" aria-label="It was"><option value="">It was…</option>${options}</select>`;
       return `<div class="rev">
@@ -1098,7 +1182,8 @@ const STYLE = `
   .rev input.typed { flex: 1; min-width: 0; font: inherit; font-size: .85em; padding: 4px 10px; min-height: 32px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-out; }
+  .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: center; }
+  .lbhint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; font-size: .8em; pointer-events: none; white-space: nowrap; }
   .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
   .thumb.broken { opacity: .3; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }

@@ -16,7 +16,7 @@ It is all set up in the UI. A dashboard card comes with it.
 
 1. **A camera sees motion or an animal** during the watch window: between set times, or whenever it's dark, whichever is wider. Person and vehicle sensors skip the check; each camera has its own cooldown.
 2. **A snapshot is taken.** If it fails, the check stops, so the AI never judges an old photo.
-3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models always go last.
+3. **The first AI model looks.** The **First look** list is tried in order: if a model is busy, errors or is out of quota, the next one tries, then the next. Paid models always go last. If none of them answers, the paid models from either list try, then (if there's time) the first look once more after 45 seconds. Every model is also asked where the animal is in the picture, so the photo can be cropped to it and the detector can learn from it.
 4. **A second model double-checks** (the **Second opinion** list, in order) when the first answer named a priority animal, a strict animal or an unknown animal, was unsure, or nobody answered. It also checks when a backup gave the first answer and named an animal, and when the first answer names wildlife that can alert (a raccoon or a fox; not a bird or a deer); those two checks use free models only.
 5. **The two answers become one verdict:**
    - Models that disagree give low confidence.
@@ -107,7 +107,8 @@ Removing asks first. These are the same settings as **Configure** and **Add anim
 
 - **First look** runs on every sighting. Its models are tried in order until one answers.
 - **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, names wildlife that can alert (a raccoon or a fox; not a bird or a deer), or came from a backup and names an animal. Its models are tried in order too, and must differ from the First look ones (a model rarely disagrees with itself).
-- **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer.
+- **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer. When no free model answers the first look, they're its last resort.
+- **No answer**: when no model answers at all, the sighting says **No answer**, not Nothing. It waits in To review for you to say what it was.
 - **Save the first model for busy hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
 
 **Free-tier tip:** put the cheapest model with the biggest free allowance (for example Gemini Flash-Lite) first in First look, and a smarter model first in Second opinion.

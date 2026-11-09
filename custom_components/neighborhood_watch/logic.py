@@ -22,6 +22,17 @@ BASES = ("white", "grey", "black", "na")
 
 NOTHING = "Nothing"
 UNSURE_NOTHING = "None|low|na|na|"
+NO_ANSWER = "No answer"  # every model failed: unknown, not "nothing"; waits in To review
+
+# Asked of every model after its answer line, so a photo can be cropped to the animal (and
+# the detector can learn from it) even when the local detector finds nothing.
+BOX_REQUEST = (
+    "AFTER that answer line, add ONE more line: BOX ymin,xmin,ymax,xmax - where the animal you "
+    "named is in the FIRST image, as whole numbers from 0 to 1000 of its height and width. "
+    "Write BOX none if you named no animal."
+)
+_BOX = re.compile(r"\bBOX\b\s*:?\s*\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", re.IGNORECASE)
+_BOX_LINE = re.compile(r"\bBOX\b\s*:?[^|\n]*", re.IGNORECASE)
 
 DEFAULT_WILDLIFE = (
     "Squirrel",
@@ -44,6 +55,7 @@ NOT_VISITORS = frozenset(
     {
         "nothing",
         "none",
+        "no answer",
         "bug",
         "spider",
         "insect",
@@ -94,6 +106,18 @@ def is_unknown(name: str) -> bool:
     return n.startswith("unknown ") and len(n) > len("unknown ")
 
 
+def parse_box(raw: str | None) -> tuple[float, float, float, float] | None:
+    """The BOX line of a reply as (x1, y1, x2, y2), each 0-1 of the image; None if missing
+    or nonsense."""
+    found = _BOX.search(str(raw or ""))
+    if not found:
+        return None
+    y1, x1, y2, x2 = (int(v) for v in found.groups())
+    if not (0 <= x1 < x2 <= 1000 and 0 <= y1 < y2 <= 1000) or (x2 - x1) * (y2 - y1) >= 990000:
+        return None  # out of range, empty, or the whole frame (no help to a crop)
+    return (x1 / 1000, y1 / 1000, x2 / 1000, y2 / 1000)
+
+
 def tidy(raw: str | None) -> str:
     """Clean a model reply into `Name|confidence|pattern|base|description`.
 
@@ -101,7 +125,7 @@ def tidy(raw: str | None) -> str:
     holding a pipe wins. A reply with no pipe at all is an unsure "nothing". An empty
     reply stays empty (no answer).
     """
-    text = str(raw or "")
+    text = _BOX_LINE.sub("", str(raw or ""))  # the BOX line is read by parse_box
     for junk in ("```", "**", "`", '"'):
         text = text.replace(junk, "")
     text = text.strip()
@@ -183,6 +207,7 @@ class Verdict:
     named: tuple[str, ...] = ()  # lower-case names either model said
     unchecked: bool = False  # a priority animal nobody could double-check: alerts, but not counted
     base: str = "na"  # the coat's main tone the deciding model saw (for drawing an unknown animal)
+    box: tuple[float, float, float, float] | None = None  # where the AI saw it (0-1 x1,y1,x2,y2)
 
 
 def _level(value: str) -> str:
@@ -287,7 +312,9 @@ def decide(
         display = candidate
         pattern = look.pattern if look and look.name == candidate.lower() else pattern
     lowered = display.lower()
-    if not display or "person" in lowered or "human" in lowered or "none" in lowered:
+    if not first and not second:
+        display, confidence = NO_ANSWER, LOW  # nobody answered: not the same as "nothing"
+    elif not display or "person" in lowered or "human" in lowered or "none" in lowered:
         display = NOTHING
 
     description = ""
@@ -668,7 +695,7 @@ def subject_of(
         return builtins.get(BUILTIN_PEST)
     if is_unknown(v.animal):
         return builtins.get(BUILTIN_UNKNOWN)
-    if v.animal == NOTHING:
+    if v.animal in (NOTHING, NO_ANSWER):
         return builtins.get(BUILTIN_MOTION) if v.confidence != HIGH else None
     if key in NOT_VISITORS:
         return None

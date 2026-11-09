@@ -42,6 +42,7 @@ class FakeAI:
     def __init__(self) -> None:
         self.script: dict[str, list[Any]] = defaultdict(list)
         self.calls: list[str] = []
+        self.prompts: list[str] = []
 
     def say(self, model: str, *answers: Any) -> None:
         self.script[model].extend(answers)
@@ -49,6 +50,7 @@ class FakeAI:
     async def handle(self, call: ServiceCall) -> dict[str, Any]:
         model = call.data["entity_id"]
         self.calls.append(model)
+        self.prompts.append(call.data.get("instructions", ""))
         answer = self.script[model].pop(0) if self.script[model] else None
         if isinstance(answer, TimeoutError):  # as the per-call time limit raises it
             raise answer
@@ -152,7 +154,7 @@ async def setup(hass: HomeAssistant, tmp_path: Path, freezer):
     with patch(
         "custom_components.neighborhood_watch.engine.camera_component.async_get_image",
         side_effect=fake_image,
-    ):
+    ), patch("custom_components.neighborhood_watch.engine.NO_ANSWER_RETRY_SECONDS", 0):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         hass.services.async_register(
@@ -314,13 +316,38 @@ async def test_all_gemini_503_falls_through_to_claude(hass, setup):
     assert event.data["models_used"] == "Claude (last resort)"
 
 
-async def test_all_models_fail_is_unsure_nothing(hass, setup):
+async def test_all_models_fail_is_no_answer(hass, setup):
     await trigger(hass, "garage")
-    # First look: all three fail. Second opinion: only the main second model tries.
-    assert setup["ai"].calls == [FIRST, BACKUP, PAID, SECOND]
+    # First look: all three fail, then once more. Second opinion: only the main second model.
+    assert setup["ai"].calls == [FIRST, BACKUP, PAID, FIRST, BACKUP, PAID, SECOND]
     (event,) = setup["events"]
-    assert (event.data["animal"], event.data["confidence"]) == ("Nothing", "low")
+    assert (event.data["animal"], event.data["confidence"]) == ("No answer", "low")
     assert event.data["models_used"] == "none answered"
+    # It waits in To review; Right means nothing for it, so it keeps waiting.
+    watch = setup["watch"]
+    (row,) = watch.review_queue()
+    await watch.async_correct(row["id"], None, "right")
+    assert [r["id"] for r in watch.review_queue()] == [row["id"]]
+
+
+async def test_paid_second_opinion_model_is_the_first_looks_last_resort(hass, setup):
+    entry = setup["entry"]
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "first_look": [FIRST, BACKUP]})
+    await hass.async_block_till_done()
+    setup["ai"].say(FIRST, HomeAssistantError("429 quota"))
+    setup["ai"].say(BACKUP, HomeAssistantError("429 quota"))
+    setup["ai"].say(PAID, "Milo|high|uniform|black|\nBOX 100,200,300,400")
+    await trigger(hass, "yard")
+    assert setup["ai"].calls[:3] == [FIRST, BACKUP, PAID]
+    (event,) = setup["events"]
+    assert event.data["animal"] == "Milo"
+    assert setup["watch"]._decide({"first": "milo|high|uniform|black|", "first_box": (0.2, 0.1, 0.4, 0.3)})[0].box == (0.2, 0.1, 0.4, 0.3)
+
+
+async def test_every_model_is_asked_where_the_animal_is(hass, setup):
+    setup["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    assert "BOX ymin,xmin,ymax,xmax" in setup["ai"].prompts[-1]
 
 
 async def test_markdown_answer_parses_as_luna(hass, setup):

@@ -2,7 +2,8 @@
 the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
 
 1. Auto-label: every animal photo gets boxes from two teachers, a COCO YOLO11m at 1280 px
-   (its animal classes as one class) and the boxes the detector stored with the photo.
+   (its animal classes as one class) and the boxes the detector stored with the photo. A
+   confirmed animal photo neither could box uses the box the AI gave, if any.
    Photos marked empty become background images (no boxes).
 2. Split by time: the confirmed photos from the most recent ~20% of dates are the
    evaluation set and are never trained on. So are confirmed animal photos that no teacher
@@ -37,7 +38,7 @@ import sys
 import time
 import traceback
 
-NOT_ANIMAL = {"nothing", "none", "", "person", "bug", "spider", "leaf", "shadow", "vehicle", "car"}
+NOT_ANIMAL = {"nothing", "none", "no answer", "", "person", "bug", "spider", "leaf", "shadow", "vehicle", "car"}
 CONFIRMED = {"right", "corrected"}
 COCO_ANIMALS = list(range(14, 24))  # bird cat dog horse sheep cow elephant bear zebra giraffe
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -121,6 +122,8 @@ def load_samples(dataset: Path) -> list[Sample]:
         by = (meta.get("labelled_by") or "").lower()
         trust = "confirmed" if by in CONFIRMED else "skip" if by == "unsure" else "ai"
         name = meta.get("label") if meta.get("label") is not None else meta.get("ai_animal")
+        if str(name or "").strip().lower() == "no answer":
+            trust = "skip"  # no AI looked and nobody said: unknown either way
         animal = str(name or "").strip().lower() not in NOT_ANIMAL
         stamp = str(meta.get("time") or "")
         date = js.parent.name if DATE.match(js.parent.name) else stamp[:10]
@@ -184,6 +187,21 @@ def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, st
             with Image.open(s.jpg) as im:
                 w, h = im.size
             s.boxes = merge((cache.get(s.id) or {}).get("boxes", []) + stored_boxes(s, w, h))
+            if not s.boxes and s.trust == "confirmed":
+                s.boxes = ai_box(s, w, h)
+
+
+def ai_box(s: Sample, w: int, h: int) -> list[list[float]]:
+    """Where the AI said the animal was (0-1 of the frame), for a confirmed animal photo that
+    neither teacher could box: rougher than a teacher's box, but these are the very photos
+    the detector misses."""
+    b = s.meta.get("ai_box")
+    if not (isinstance(b, list) and len(b) == 4):
+        return []
+    x1, y1, x2, y2 = (float(v) for v in b)
+    if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
+        return []
+    return [[x1 * w, y1 * h, x2 * w, y2 * h, 0.5]]
 
 
 def split(samples: list[Sample]) -> tuple[list[Sample], list[Sample]]:

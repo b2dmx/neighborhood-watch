@@ -140,6 +140,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_RETRY_SECONDS = 3
+NO_ANSWER_RETRY_SECONDS = 45  # every model failed: one more try after this, if time allows
 IDENTIFY_CAP_SECONDS = 150  # all AI calls of one check together
 # A model that was overloaded or timed out sits out this long: under heavy demand every
 # call to it would fail slowly, so the next model in the chain is asked straight away.
@@ -1071,6 +1072,8 @@ class WatchEngine:
         """Shadow statistics: does the detector agree with the AI about whether an animal
         is there? A "miss" (AI found an animal, detector didn't) is what must be ~0 before
         empty frames may skip the AI."""
+        if v.animal == logic.NO_ANSWER:
+            return
         threshold = float(self.options.get(CONF_DETECTOR_MIN, 0.2))
         ai_animal = v.animal != logic.NOTHING and v.animal.lower() not in logic.NOT_VISITORS
         det_animal = det["animal"] >= threshold
@@ -1137,7 +1140,7 @@ class WatchEngine:
             ).strip(),
             references=references,
         )
-        return prompt, attachments
+        return f"{prompt}\n{logic.BOX_REQUEST}", attachments
 
     def _model_label(self, entity_id: str, index: int) -> str:
         state = self.hass.states.get(entity_id)
@@ -1184,6 +1187,9 @@ class WatchEngine:
         )
         if said.get("unchecked"):
             verdict = replace(verdict, unchecked=True)
+        box = said.get("second_box") if said.get("second") else said.get("first_box")
+        if box and verdict.animal.lower() not in logic.NOT_VISITORS:
+            verdict = replace(verdict, box=box)
         models = said.get("first_label") or "none answered"
         if said.get("second_label"):
             models += f" + {said['second_label']}"
@@ -1210,13 +1216,34 @@ class WatchEngine:
             order.insert(at, main)
         awake = set(self._awake([m for _, m in order]))
         order = [(i, m) for i, m in order if m in awake]
-        for pos, (index, model) in enumerate(order):
-            raw = await self._ask(model, prompt, attachments, last=pos == len(order) - 1)
-            if raw.strip():
-                first, first_model, first_label = logic.tidy(raw), model, self._model_label(model, index)
-                from_backup = index > 0
-                said.update(first=first, first_label=first_label)
-                break
+        started = time.monotonic()
+
+        async def first_look(models: list[tuple[int, str]]) -> bool:
+            nonlocal first, first_model, first_label, from_backup
+            for pos, (index, model) in enumerate(models):
+                raw = await self._ask(model, prompt, attachments, last=pos == len(models) - 1)
+                if raw.strip():
+                    first, first_model, first_label = logic.tidy(raw), model, self._model_label(model, index)
+                    from_backup = index > 0
+                    said.update(first=first, first_label=first_label, first_box=logic.parse_box(raw))
+                    return True
+            return False
+
+        if not await first_look(order):
+            # Nobody answered: the paid models (from either list) have a go, then, if there's
+            # still time, the first look once more (a burst of checks can hit free limits).
+            tried = {m for _, m in order}
+            paid = [
+                m
+                for m in dict.fromkeys(self._chain(CONF_FIRST_LOOK) + self._chain(CONF_SECOND_OPINION))
+                if m in set(self.options.get(CONF_PAID) or []) and m not in tried
+            ]
+            last_resort = [(len(order) + i, m) for i, m in enumerate(paid)]
+            if not await first_look(last_resort) and order:
+                left = IDENTIFY_CAP_SECONDS - (time.monotonic() - started)
+                if left > NO_ANSWER_RETRY_SECONDS + 2 * AI_TIMEOUT:
+                    await asyncio.sleep(NO_ANSWER_RETRY_SECONDS)
+                    await first_look(order)
 
         # A backup's answer that names an animal is always double-checked, by free models
         # only (paid models are kept for the cases the rules call for).
@@ -1240,7 +1267,7 @@ class WatchEngine:
                 raw = await self._ask(model, prompt, attachments, last=pos == len(order) - 1)
                 if raw.strip():
                     second, second_label = logic.tidy(raw), self._model_label(model, index)
-                    said.update(second=second, second_label=second_label)
+                    said.update(second=second, second_label=second_label, second_box=logic.parse_box(raw))
                     break
         # A priority animal that no second model could check (all down, out of free
         # uses, no internet) still alerts, but isn't counted until someone confirms it.
@@ -1391,6 +1418,7 @@ class WatchEngine:
                 "second_opinion_said": v.second_opinion_said,
                 "models_used": check.models,
                 "label": None,
+                **({"ai_box": [round(c, 4) for c in v.box]} if v.box else {}),
             }
             try:
                 await self.hass.async_add_executor_job(
@@ -1586,6 +1614,8 @@ class WatchEngine:
         if row is None:
             return {"corrected": None}
         answer = answer.strip()
+        if row.get("animal") == logic.NO_ANSWER and answer.lower() in ("right", "wrong"):
+            answer = "other"
         # Remember how it was, so the last answer can be undone.
         undo = {"id": row.get("id"), "at": _iso(dt_util.utcnow()), "answer": answer,
                 "before": {k: row.get(k) for k in _ANSWER_KEYS}}
@@ -2130,6 +2160,7 @@ class WatchEngine:
                 "second_opinion_said": verdict.second_opinion_said,
                 "models_used": models,
                 "label": None,
+                **({"ai_box": [round(c, 4) for c in verdict.box]} if verdict.box else {}),
             }
             try:
                 await self.hass.async_add_executor_job(

@@ -110,8 +110,9 @@ def move_all(source: Path, target: Path) -> int:
 
 
 def read_crop(root: Path, day: str, sid: str) -> bytes | None:
-    """The frame cropped to the animal the local detector found (padded), or the whole
-    frame when there's no box."""
+    """The frame cropped to the animal (padded), or the whole frame when nobody says where
+    it is. The local detector's box is used when it agrees with where the AI saw the animal
+    (or the AI didn't say); otherwise the AI's."""
     from PIL import Image  # noqa: PLC0415
 
     frame = read_frame(root, day, sid)
@@ -121,15 +122,23 @@ def read_crop(root: Path, day: str, sid: str) -> bytes | None:
         meta = json.loads((root / day / f"{sid}.json").read_text(encoding="utf-8"))
         det = meta.get("detector") or {}
         boxes = det.get("boxes") or []
-        if not boxes:
+        ai_box = meta.get("ai_box")
+        if not boxes and not ai_box:
             return frame
         size = det.get("size") or [None, None]
-        box = max(boxes, key=lambda b: b.get("confidence", 0))["box"]
         with Image.open(BytesIO(frame)) as img:
-            # Boxes are in the camera's own resolution; the saved frame may be smaller.
+            # Detector boxes are in the camera's own resolution; the saved frame may be smaller.
             sx = img.width / (size[0] or img.width)
             sy = img.height / (size[1] or img.height)
-            x1, y1, x2, y2 = box[0] * sx, box[1] * sy, box[2] * sx, box[3] * sy
+            found = [
+                (b["box"][0] * sx, b["box"][1] * sy, b["box"][2] * sx, b["box"][3] * sy, b.get("confidence", 0))
+                for b in boxes
+            ]
+            if ai_box:
+                ai = (ai_box[0] * img.width, ai_box[1] * img.height, ai_box[2] * img.width, ai_box[3] * img.height)
+                overlapping = [b for b in found if _overlap(b, ai) > 0]
+                found = overlapping or [(*ai, 0)]
+            x1, y1, x2, y2, _ = max(found, key=lambda b: b[4])
             side = max(x2 - x1, y2 - y1) * 1.8
             side = max(side, min(img.width, img.height) * 0.25)
             cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
@@ -142,3 +151,8 @@ def read_crop(root: Path, day: str, sid: str) -> bytes | None:
     except Exception:  # noqa: BLE001 - no metadata, an odd box or a bad image: the whole frame
         return frame
     return buffer.getvalue()
+
+
+def _overlap(a, b) -> float:
+    """The area two boxes (x1, y1, x2, y2, ...) share."""
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))

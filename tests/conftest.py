@@ -24,6 +24,14 @@ if HAS_HA:
     def auto_enable_custom_integrations(enable_custom_integrations):
         yield
 
+    @pytest.fixture(autouse=True)
+    def no_wait_before_retrying():
+        # When no model answers, the engine waits before trying again: not in tests.
+        from unittest.mock import patch  # noqa: PLC0415
+
+        with patch("custom_components.neighborhood_watch.engine.NO_ANSWER_RETRY_SECONDS", 0):
+            yield
+
 
 def pytest_ignore_collect(collection_path, config):
     if not HAS_HA and collection_path.name.startswith("test_ha_"):
