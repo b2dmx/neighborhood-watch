@@ -64,6 +64,10 @@ A **Neighborhood Watch** page also appears in the sidebar (admins only): **Revie
 
 [Full reference →](docs/reference.md) (settings, entities, alerts, events, actions, card options, privacy)
 
+## License
+
+The code is [MIT](LICENSE). The Neighborhood Watch logo and icons (`brand-source/`, `vision/`, the `brand/` folder in the integration, and the logo images in `docs/`) are © Goobis, all rights reserved. They are not covered by the MIT license, so please don't reuse them without permission.
+
 ---
 
 <p align="center">
