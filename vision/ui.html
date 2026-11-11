@@ -13,7 +13,7 @@
     font-display: block;
   }
   :root {
-    --bg: #f6f7f9; --surface: #ffffff; --text: #1b1d21; --muted: #5e646e; --line: #e2e5ea;
+    --bg: #f6f7f9; --surface: #eceff3; --text: #1b1d21; --muted: #5e646e; --line: #e2e5ea;
     --accent: #2f6fdf; --accent-text: #ffffff; --good: #1f8a4c; --warn: #b86e00; --bad: #c62f2f;
     --chip: #eef1f5;
     color-scheme: light;
@@ -33,10 +33,10 @@
   }
   main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0; flex: 1; }
-  h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  h1 { font-size: 32px; font-weight: 500; margin: 0; flex: 1; line-height: 1.2; }
+  h2 { font-size: 16px; font-weight: 500; margin: 0 0 12px; }
   .card {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    background: var(--surface); border-radius: 12px;
     padding: 18px 20px; margin-bottom: 16px;
   }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 20px; }
@@ -58,36 +58,41 @@
   }
   .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
   button {
-    font: inherit; font-weight: 500; border: 0; border-radius: 99px; padding: 8px 18px;
+    font: inherit; font-weight: 500; border: 0; border-radius: 99px; padding: 0 20px; min-height: 40px;
     background: var(--accent); color: var(--accent-text); cursor: pointer;
   }
-  button.quiet { background: none; color: var(--accent); border: 1px solid var(--line); }
-  button.danger { background: none; color: var(--bad); border: 1px solid var(--line); }
+  button.quiet { background: var(--chip); color: var(--accent); }
+  button.danger { background: var(--chip); color: var(--bad); }
   button:disabled { opacity: .45; cursor: default; }
-  h3 { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+  h3 { font-size: 14px; font-weight: 500; color: var(--muted); margin: 0 0 10px; }
   .hint + h3, .error + h3 { margin-top: 20px; }
   button:focus-visible, select:focus-visible, input:focus-visible, .seg label:has(input:focus-visible) {
     outline: 2px solid var(--accent); outline-offset: 2px;
   }
   select, input[type=number] {
     font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line);
-    border-radius: 10px; padding: 6px 10px;
+    border-radius: 4px; padding: 0 12px; min-height: 48px;
   }
   input[type=number] { width: 90px; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
-  .seg label { padding: 6px 16px; cursor: pointer; font-size: 14px; font-weight: 500; }
+  .seg label { padding: 0 16px; min-height: 40px; display: inline-flex; align-items: center; cursor: pointer; font-size: 14px; font-weight: 500; }
   .seg label + label { border-left: 1px solid var(--line); }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
   .seg label:has(input:checked) { background: var(--accent); color: var(--accent-text); }
-  .switch { position: relative; width: 44px; height: 26px; flex: none; }
+  .seg.days { max-width: 100%; }
+  .seg.days label { padding: 0 10px; flex: 1 1 0; justify-content: center; min-width: 0; }
+  .hint + .row { margin-top: 14px; }
+  .seg label:has(input:disabled), .row:has(input:disabled) .label { opacity: .45; cursor: default; }
+  [hidden] { display: none !important; }
+  .switch { position: relative; width: 52px; height: 32px; flex: none; }
   .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; z-index: 1; }
-  .switch span { position: absolute; inset: 0; border-radius: 99px; background: var(--line); transition: background .15s; }
+  .switch span { position: absolute; inset: 0; border-radius: 99px; background: var(--bg); border: 2px solid var(--muted); transition: background .15s, border-color .15s; }
   .switch span::after {
-    content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
-    background: #fff; transition: transform .15s;
+    content: ""; position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--muted); transition: transform .15s, width .15s, height .15s, top .15s, left .15s;
   }
-  .switch input:checked + span { background: var(--accent); }
-  .switch input:checked + span::after { transform: translateX(18px); }
+  .switch input:checked + span { background: var(--accent); border-color: var(--accent); }
+  .switch input:checked + span::after { top: 2px; left: 2px; width: 24px; height: 24px; background: var(--accent-text); transform: translateX(20px); }
   .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
   .bar { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; margin-top: 10px; }
   .bar div { height: 100%; background: var(--accent); width: 0; transition: width .4s; }
@@ -146,23 +151,31 @@
     <div class="hint">GPU uses the Intel GPU when it can, and the CPU if it can't (in Trains with too). Saves straight away, and the detector restarts on it.</div>
     <h3>Training</h3>
     <div class="row inline">
-      <span class="label" id="l-enabled">Weekly training</span>
+      <span class="label" id="l-enabled">Training</span>
       <label class="switch"><input type="checkbox" id="enabled" aria-labelledby="l-enabled"><span></span></label>
     </div>
     <div class="row">
-      <span class="label">When</span>
-      <span class="group">
-        <select id="day" aria-label="Training day"></select>
-        <span>from</span>
-        <select id="hour" aria-label="Training hour"></select>
+      <span class="label" id="l-when">Starts</span>
+      <span class="seg" role="radiogroup" aria-labelledby="l-when">
+        <label><input type="radio" name="train_when" value="schedule">On a schedule</label>
+        <label><input type="radio" name="train_when" value="count">After new answers</label>
       </span>
     </div>
+    <div class="row" data-schedule>
+      <span class="label" id="l-days">Days</span>
+      <span class="seg days" role="group" aria-labelledby="l-days" id="days"></span>
+    </div>
+    <div class="row" data-schedule>
+      <span class="label" id="l-hour">From</span>
+      <select id="hour" aria-labelledby="l-hour" aria-describedby="h-hour"></select>
+    </div>
+    <div class="hint" id="h-hour" data-schedule>The NAS's local time.</div>
     <div class="row">
       <span class="label" id="l-first">Photos for the first round</span>
       <input type="number" id="min_first" min="10" max="1000" aria-labelledby="l-first">
     </div>
     <div class="row">
-      <span class="label" id="l-min">New answered photos needed (after the first round)</span>
+      <span class="label" id="l-min"></span>
       <input type="number" id="min_new" min="1" max="10000" aria-labelledby="l-min">
     </div>
     <div class="row">
@@ -190,16 +203,16 @@
       </span>
     </div>
     <div class="hint">Sharper finds small animals better but trains slower.</div>
-    <div class="hint">Times are the NAS's local time. Changes apply to the next round and save straight away.</div>
+    <div class="hint">Changes apply to the next round and save straight away.</div>
     <div class="error" id="settings-error" hidden></div>
   </section>
 
   <section class="card">
     <h2>Past rounds</h2>
-    <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one only when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
+    <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one when it names more animals right without missing more, or when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
-      <tbody id="history"><tr><td colspan="7" class="empty">—</td></tr></tbody>
+      <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Named right</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
+      <tbody id="history"><tr><td colspan="8" class="empty">—</td></tr></tbody>
     </table></div>
   </section>
 </main>
@@ -212,7 +225,11 @@ const hourName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "
 const devName = (d) => ({ GPU: "Intel GPU", NPU: "NPU", CPU: "CPU", xpu: "GPU", cpu: "CPU" })[d] || d || "—";
 let busy = false;
 
-for (const d of DAYS) $("day").add(new Option(cap(d), d));
+// "Every day", "Weekdays", or the days themselves.
+const dayList = (days) =>
+  days.length === 7 ? "every day"
+  : days.length === 5 && !days.includes("saturday") && !days.includes("sunday") ? "weekdays"
+  : days.map((d) => cap(d).slice(0, 3)).join(", ");
 for (let h = 0; h < 24; h++) $("hour").add(new Option(hourName(h), h));
 
 async function api(path, body) {
@@ -231,18 +248,24 @@ function chip(text, tone) {
 
 function showSettings(s) {
   $("enabled").checked = s.train_enabled;
-  $("day").value = s.train_day;
+  const picked = s.train_days || [s.train_day];
+  for (const b of document.querySelectorAll("input[name=train_days]")) b.checked = picked.includes(b.value);
   $("hour").value = s.train_hour;
+  const counting = s.train_when === "count";
+  for (const row of document.querySelectorAll("[data-schedule]")) row.hidden = counting;
+  $("l-min").textContent = counting ? "Train after this many new answered photos" : "New answered photos needed (after the first round)";
   $("min_new").value = s.min_new;
   $("min_first").value = s.min_first ?? MIN_FIRST;
   const pick = (name, value) => {
     for (const r of document.querySelectorAll(`input[name=${name}]`)) r.checked = r.value === String(value);
   };
+  pick("train_when", s.train_when);
   pick("device", s.train_device);
   pick("detect_device", s.detect_device);
   pick("train_length", s.train_length);
   pick("train_imgsz", s.train_imgsz);
-  for (const el of [$("day"), $("hour"), $("min_new"), $("min_first")]) el.disabled = !s.train_enabled;
+  const training = ["train_days", "train_when", "device", "train_length", "train_imgsz"].flatMap((n) => [...document.querySelectorAll(`input[name=${n}]`)]);
+  for (const el of [$("hour"), $("min_new"), $("min_first"), ...training]) el.disabled = !s.train_enabled;
 }
 
 // Before the first round, training waits for this many answered animal photos (the
@@ -258,13 +281,16 @@ function stageText(t, rounds) {
     if (st.stage === "labelling" && st.total) return `Marking animals in the photos: ${st.done} of ${st.total}`;
     return cap(st.stage || "starting");
   }
-  const when = t.settings.train_enabled
-    ? `Next round: ${cap(t.settings.train_day)} from ${hourName(t.settings.train_hour)}, once ${
-      rounds.some(realRound)
-        ? `${t.settings.min_new} new photos are answered`
-        : `there are ${t.settings.min_first ?? MIN_FIRST} answered animal photos`
-    }.`
-    : "Weekly training is off.";
+  const s = t.settings;
+  const need = rounds.some(realRound)
+    ? `${s.min_new} new photos are answered`
+    : `there are ${s.min_first ?? MIN_FIRST} answered animal photos`;
+  const so = t.answered_new != null && rounds.some(realRound) ? ` (${t.answered_new} so far)` : "";
+  const when = !s.train_enabled
+    ? "Training is off."
+    : s.train_when === "count"
+      ? `Next round: as soon as ${need}${so}.`
+      : `Next round: ${dayList(s.train_days || [s.train_day])} from ${hourName(s.train_hour)}, once ${need}.`;
   if (!st.state) return when;
   const last = {
     skipped: "Last round skipped", done: "Last round finished", error: "Last round failed", stopped: "Last round stopped",
@@ -283,17 +309,18 @@ function progress(t) {
   if (f !== null) $("bar").firstElementChild.style.width = `${Math.round(f * 100)}%`;
 }
 
-function cell(before, after, key) {
+// up: more is better (named right); otherwise fewer is (misses, false alarms).
+function cell(before, after, key, up = false) {
   const b = before?.[key], a = after?.[key];
   if (a === undefined) return b ?? "—";
-  const tone = a < b ? "better" : a > b ? "worse" : "";
+  const tone = (up ? a > b : a < b) ? "better" : (up ? a < b : a > b) ? "worse" : "";
   return `${b} → <span class="${tone}">${a}</span>`;
 }
 
 function showHistory(rounds) {
   const body = $("history");
   if (!rounds.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty">No rounds yet.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="empty">No rounds yet.</td></tr>`;
     return;
   }
   body.innerHTML = rounds.slice().reverse().map((r) => {
@@ -302,7 +329,7 @@ function showHistory(rounds) {
     const date = r.time ? new Date(r.time).toLocaleDateString([], { dateStyle: "medium" }) : "—";
     const mins = r.minutes != null ? `${Math.round(r.minutes)} min` : "—";
     return `<tr><td>${r.round}</td><td>${date}</td><td>${devName(r.device)}</td><td>${mins}</td>` +
-      `<td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
+      `<td>${cell(r.before, r.after, "named_right", true)}</td><td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
   }).join("");
 }
 
@@ -313,7 +340,9 @@ async function refresh() {
   try {
     const [h, t, rounds] = await Promise.all([api("health"), api("train"), api("train/history")]);
     running = t.running;
-    $("model").textContent = h.trained ? `Trained on your photos (${h.model})` : `MegaDetector (${h.model})`;
+    $("model").textContent = h.trained
+      ? `Trained on your photos (${h.model}), ${(h.names || []).length ? "finds and names" : "finds only"}`
+      : `MegaDetector (${h.model}), finds only`;
     $("device").textContent = devName(h.device);
     $("available").textContent = (h.available || []).map(devName).join(", ") || "—";
     $("loaded").textContent = h.loaded ? "Awake" : "Asleep until the next photo";
@@ -339,6 +368,7 @@ async function save(changes, el) {
   $("settings-error").hidden = true;
   try {
     showSettings((await api("settings", changes)).settings);
+    refresh();  // the Next round line
   } catch (err) {
     $("settings-error").textContent = err.message;
     $("settings-error").hidden = false;
@@ -348,11 +378,20 @@ async function save(changes, el) {
 }
 
 $("enabled").addEventListener("change", (e) => save({ train_enabled: e.target.checked }));
-$("day").addEventListener("change", (e) => save({ train_day: e.target.value }));
+$("days").innerHTML = DAYS.map((d) =>
+  `<label><input type="checkbox" name="train_days" value="${d}" aria-label="${cap(d)}">${cap(d).slice(0, 3)}</label>`).join("");
+const dayBoxes = [...document.querySelectorAll("input[name=train_days]")];
+for (const b of dayBoxes) {
+  b.addEventListener("change", () => {
+    const days = dayBoxes.filter((x) => x.checked).map((x) => x.value);
+    if (!days.length) { b.checked = true; return; }  // at least one day
+    save({ train_days: days });
+  });
+}
 $("hour").addEventListener("change", (e) => save({ train_hour: Number(e.target.value) }));
 $("min_new").addEventListener("change", (e) => save({ min_new: Math.round(Number(e.target.value)) }, e.target));
 $("min_first").addEventListener("change", (e) => save({ min_first: Math.round(Number(e.target.value)) }, e.target));
-const radios = { device: "train_device", detect_device: "detect_device", train_length: "train_length", train_imgsz: "train_imgsz" };
+const radios = { train_when: "train_when", device: "train_device", detect_device: "detect_device", train_length: "train_length", train_imgsz: "train_imgsz" };
 for (const [name, key] of Object.entries(radios)) {
   for (const r of document.querySelectorAll(`input[name=${name}]`)) {
     r.addEventListener("change", (e) => save({ [key]: key === "train_imgsz" ? Number(e.target.value) : e.target.value }));

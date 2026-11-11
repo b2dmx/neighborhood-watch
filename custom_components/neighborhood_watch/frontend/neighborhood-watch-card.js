@@ -228,9 +228,17 @@ class NeighborhoodWatchCard extends HTMLElement {
     // Everything a sighting can be: the hub lists your animals and every wildlife kind;
     // older versions fall back to the animals and the wildlife seen so far.
     const choices = d.hub?.keys.to_review ? this._state(d.hub.keys.to_review)?.attributes?.choices : null;
-    if (Array.isArray(choices) && choices.length) return choices;
     const kinds = d.hub?.keys.wildlife ? this._state(d.hub.keys.wildlife)?.attributes?.kinds || {} : {};
-    return [...new Set([...d.animals.map((x) => x.name), ...Object.keys(kinds)])];
+    const names =
+      Array.isArray(choices) && choices.length
+        ? choices
+        : [...new Set([...d.animals.map((x) => x.name), ...Object.keys(kinds)])];
+    // Most recently seen first; never-seen ones keep their order after them.
+    const seen = {};
+    for (const a of d.animals) seen[a.name] = new Date(this._state(a.keys.last_seen)?.state).getTime();
+    for (const [name, k] of Object.entries(kinds)) seen[name] = new Date(k?.last_seen).getTime();
+    const at = (n) => (Number.isNaN(seen[n]) || seen[n] == null ? -Infinity : seen[n]);
+    return names.map((n, i) => [n, i]).sort((a, b) => at(b[0]) - at(a[0]) || a[1] - b[1]).map(([n]) => n);
   }
 
   _signature() {
@@ -1134,18 +1142,18 @@ const STYLE = `
   .face { width: 62%; height: 78%; }
   .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color);
     background: linear-gradient(135deg, var(--secondary-background-color), var(--card-background-color)); }
-  .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: #fff;
-    background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+  .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: var(--primary-text-color);
+    background: linear-gradient(to top, color-mix(in srgb, var(--primary-background-color) 80%, transparent), transparent); }
   .nophoto + .over { color: var(--primary-text-color); background: none; }
   .nophoto canvas.sprite { width: 82%; height: 82%; object-fit: contain; image-rendering: pixelated; margin-bottom: 14%; }
   canvas.wsprite { width: 40px; height: 40px; image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
   .over .name { font-weight: 600; font-size: 1.1em; }
   .over .status { font-size: .85em; opacity: .9; color: inherit; }
-  .over .live { color: var(--success-color, #7CFC9A); }
+  .over .live { color: var(--success-color); }
   .badges { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
-  .badge { font-size: .72em; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; }
-  .badge.dim { opacity: .8; color: #fff; }
-  .badge.alarm { background: var(--error-color, #db4437); font-weight: 600; }
+  .badge { font-size: .72em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--primary-background-color) 75%, transparent); color: var(--primary-text-color); }
+  .badge.dim { opacity: .8; }
+  .badge.alarm { background: var(--error-color, #db4437); color: var(--text-primary-color, #fff); font-weight: 600; }
   .toggles { display: flex; gap: 4px; padding: 6px; }
   .tog { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; border: none; border-radius: 12px;
     background: transparent; color: var(--secondary-text-color); font: inherit; font-size: .7em; cursor: pointer; --mdc-icon-size: 20px; }
@@ -1181,15 +1189,15 @@ const STYLE = `
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .rev input.typed { flex: 1; min-width: 0; font: inherit; font-size: .85em; padding: 4px 10px; min-height: 32px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
-  .lightbox { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.85); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .lightbox { position: fixed; inset: 0; z-index: 10; background: color-mix(in srgb, var(--primary-background-color) 92%, transparent); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: center; }
-  .lbhint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; font-size: .8em; pointer-events: none; white-space: nowrap; }
-  .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: rgba(255,255,255,.15); color: #fff; cursor: pointer; }
+  .lbhint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: var(--secondary-background-color); color: var(--primary-text-color); font-size: .8em; pointer-events: none; white-space: nowrap; }
+  .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--secondary-background-color); color: var(--primary-text-color); cursor: pointer; }
   .thumb.broken { opacity: .3; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   input[data-folder] { flex: 1; min-width: 180px; font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
   select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; min-height: 32px; }
-  select option { background: var(--card-background-color, #1c1c1f); color: var(--primary-text-color); }
+  select option { background-color: var(--primary-background-color, #111); color: var(--primary-text-color); }
   @container (max-width: 500px) { .grid { grid-template-columns: repeat(__SMALLCOLS__, minmax(0, 1fr)); } }
 `;
 

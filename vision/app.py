@@ -48,10 +48,14 @@ DATASET = Path(os.environ.get("NW_DATASET", "/dataset"))
 SCANS: dict = {}
 KEEP_SCANS = 20  # finished scans (and their frames in WORK) kept; older ones are deleted
 
-# Weekly training (train.py) on the labelled photos in NW_DATASET. The environment gives the
+# Training (train.py) on the labelled photos in NW_DATASET. The environment gives the
 # defaults (NW_TRAIN=0 turns it off); changes made on the web page or through POST /settings
 # are kept in WORK/settings.json and win over them.
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+# When a round runs: on the chosen days from the chosen hour, or as soon as enough new photos
+# are answered (min_new either way: on schedule, a day without that many is skipped).
+_WHEN = ["schedule", "count"]
+COUNT_EVERY = 600  # seconds between counts of the answered photos, in "count" mode
 _DEVICES = ["auto", "cpu"]  # auto: the Intel GPU when it can be used, otherwise the CPU
 # Training length: epochs and early-stop patience (normal: the environment's, 20 and 8).
 _LENGTHS = {"quick": (10, 4), "normal": None, "thorough": (40, 15)}
@@ -68,6 +72,8 @@ def _day_name(value: str) -> str:
 DEFAULTS = {
     "train_enabled": os.environ.get("NW_TRAIN", "1").strip().lower() not in ("0", "false", "no", "off"),
     "train_day": _day_name(os.environ.get("NW_TRAIN_DAY", "sunday")),
+    "train_days": None,  # None: just train_day (settings from before several days could be picked)
+    "train_when": "count" if os.environ.get("NW_TRAIN_WHEN", "").strip().lower() == "count" else "schedule",
     "train_hour": int(os.environ.get("NW_TRAIN_HOUR", "13")) % 24,
     "train_device": "cpu" if os.environ.get("NW_TRAIN_DEVICE", "").strip().lower() == "cpu" else "auto",
     "min_new": int(os.environ.get("NW_TRAIN_MIN_NEW", "100")),
@@ -387,7 +393,10 @@ def settings() -> dict:
     """The detector and training settings: the environment's defaults with the saved changes on top."""
     saved = _read_json(SETTINGS_FILE, {})
     saved = saved if isinstance(saved, dict) else {}
-    return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
+    out = {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
+    if not out["train_days"]:
+        out["train_days"] = [out["train_day"]]
+    return out
 
 
 def _clean_settings(changes: dict) -> dict:
@@ -402,6 +411,17 @@ def _clean_settings(changes: dict) -> dict:
             if str(value).lower() not in _DAYS:
                 raise ValueError(f"train_day must be one of {', '.join(_DAYS)}")
             out[key] = str(value).lower()
+            out.setdefault("train_days", [out[key]])  # a page that picks one day
+        elif key == "train_days":
+            days = [str(d).lower() for d in value] if isinstance(value, list) else None
+            if not days or any(d not in _DAYS for d in days):
+                raise ValueError(f"train_days must be a list of one or more of {', '.join(_DAYS)}")
+            out[key] = [d for d in _DAYS if d in days]  # week order, no repeats
+            out["train_day"] = out[key][0]  # what an older page shows
+        elif key == "train_when":
+            if value not in _WHEN:
+                raise ValueError(f"train_when must be one of {', '.join(_WHEN)}")
+            out[key] = value
         elif key in ("train_hour", "min_new", "min_first"):
             low, high = {"train_hour": (0, 23), "min_new": (1, 10000), "min_first": (10, 1000)}[key]
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
@@ -446,20 +466,55 @@ def save_settings(changes: dict) -> dict:
     return conf
 
 
+_answered: dict = {}  # the last count: {"new": answered since the last round, "at": when}
+
+
+def count_new_answered() -> int | None:
+    """Photos answered (confirmed) since the last real round, or None before the first round
+    or when the dataset can't be read. Counted the way train.py counts them."""
+    try:
+        from train import load_samples  # noqa: PLC0415 - light: no training libraries
+
+        history = _read_json(TRAIN_DIR / "history.json", [])
+        last = next(
+            (h for h in reversed(history) if isinstance(h, dict) and "confirmed" in h and not h.get("error") and not h.get("stopped")),
+            None,
+        )
+        confirmed = sum(1 for x in load_samples(DATASET) if x.trust == "confirmed")
+    except Exception as err:  # noqa: BLE001 - counted again next time
+        print(f"Counting answered photos failed: {err}", flush=True)
+        return None
+    new = None if last is None else confirmed - last["confirmed"]
+    _answered.update(new=new, at=datetime.now().isoformat(timespec="seconds"))
+    return new
+
+
 def _schedule_training() -> None:
-    """Once on the training day from the training hour (the host's local time): train.py
-    --if-needed, which only trains when enough new answered photos arrived since the last
-    round. The settings are read every minute, so changes apply without a restart."""
+    """schedule: once on each chosen day from the chosen hour (the host's local time).
+    count: as soon as min_new new photos are answered, counted every few minutes.
+    Either way train.py --if-needed, which also checks there are enough (and, before the
+    first round, enough answered animal photos). The settings are read every minute, so
+    changes apply without a restart."""
     done_on = None
+    counted = 0.0
     while True:
         time.sleep(60)
         conf, now = settings(), datetime.now()
-        if (
-            conf["train_enabled"]
-            and _DAYS[now.weekday()] == conf["train_day"]
+        if not conf["train_enabled"] or not DATASET.is_dir() or training_running():
+            continue
+        if conf["train_when"] == "count":
+            if time.monotonic() - counted < COUNT_EVERY:
+                continue
+            counted = time.monotonic()
+            new = count_new_answered()
+            # Before the first round, train.py waits for min_first answered animal photos.
+            if new is None or new >= conf["min_new"]:
+                if start_training("--if-needed"):
+                    counted = time.monotonic() + 3600  # a skipped first round: not again for an hour
+        elif (
+            _DAYS[now.weekday()] in conf["train_days"]
             and now.hour >= conf["train_hour"]
             and done_on != now.date()
-            and DATASET.is_dir()
             and start_training("--if-needed")
         ):
             done_on = now.date()
@@ -589,7 +644,11 @@ async def train_status(_request: web.Request) -> web.Response:
             # The round Undo the last round would undo, and the model it goes back to.
             "undo": None if running or _train_stopping else undo_target(history),
             "enabled": conf["train_enabled"],
-            "schedule": f"{conf['train_day']} from {conf['train_hour']}:00",
+            "schedule": f"after {conf['min_new']} new answered photos"
+            if conf["train_when"] == "count"
+            else f"{', '.join(conf['train_days'])} from {conf['train_hour']}:00",
+            # Answered since the last round, as last counted (count mode counts every few minutes).
+            "answered_new": _answered.get("new"),
             "settings": conf,
             "dataset": DATASET.is_dir(),
             "serving": _det.info.get("name"),
@@ -616,7 +675,7 @@ async def train_history(_request: web.Request) -> web.Response:
 
 async def settings_get(_request: web.Request) -> web.Response:
     return web.json_response(
-        {"settings": settings(), "days": _DAYS, "devices": _DEVICES, "lengths": list(_LENGTHS), "sizes": _SIZES}
+        {"settings": settings(), "days": _DAYS, "when": _WHEN, "devices": _DEVICES, "lengths": list(_LENGTHS), "sizes": _SIZES}
     )
 
 

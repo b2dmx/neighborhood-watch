@@ -9,6 +9,11 @@
 
 const DOMAIN = "neighborhood_watch";
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+// "Every day", "Weekdays", or the days themselves.
+const dayList = (days) =>
+  days.length === 7 ? "every day"
+  : days.length === 5 && !days.includes("saturday") && !days.includes("sunday") ? "weekdays"
+  : days.map((d) => cap(d).slice(0, 3)).join(", ");
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 const hourName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const devName = (d) => ({ GPU: "Intel GPU", NPU: "NPU", CPU: "CPU", xpu: "GPU", cpu: "CPU" })[d] || d || "—";
@@ -176,13 +181,15 @@ const STYLE = `
     font: inherit; font-size: 14px; color: var(--primary-text-color); background: var(--card-background-color);
     border: 1px solid var(--nw-line); border-radius: 10px; padding: 6px 10px;
   }
-  select option { background: var(--card-background-color); color: var(--primary-text-color); }
+  select option { background-color: var(--primary-background-color, #111); color: var(--primary-text-color); }
   input[type=number] { width: 90px; }
   .seg { display: inline-flex; border: 1px solid var(--nw-line); border-radius: 99px; overflow: hidden; }
   .seg label { padding: 6px 16px; cursor: pointer; font-size: 14px; font-weight: 500; }
   .seg label + label { border-left: 1px solid var(--nw-line); }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
   .seg label:has(input:checked) { background: var(--nw-accent); color: var(--nw-on-accent); }
+  .seg.days { max-width: 100%; }
+  .seg.days label { padding: 6px 10px; flex: 1 1 0; text-align: center; min-width: 0; }
   .switch { position: relative; width: 44px; height: 26px; flex: none; }
   .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; position: absolute; cursor: pointer; z-index: 1; }
   .switch span {
@@ -192,10 +199,10 @@ const STYLE = `
   }
   .switch span::after {
     content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
-    background: #fff; transition: transform .15s;
+    background: var(--switch-unchecked-button-color, var(--primary-background-color)); transition: transform .15s;
   }
   .switch input:checked + span { background: var(--nw-accent); }
-  .switch input:checked + span::after { transform: translateX(18px); }
+  .switch input:checked + span::after { transform: translateX(18px); background: var(--switch-checked-button-color, var(--nw-on-accent)); }
   .switch input:focus-visible + span { outline: 2px solid var(--nw-accent); outline-offset: 2px; }
   .switch input:disabled + span { opacity: .45; }
   .bar { height: 6px; border-radius: 99px; background: var(--nw-chip); overflow: hidden; margin-top: 10px; }
@@ -1094,13 +1101,15 @@ class NeighborhoodWatchPanel extends HTMLElement {
       return stageName(st.stage || "starting");
     }
     const enabled = s ? s.train_enabled : t.enabled;
-    let when = "Weekly training is off.";
+    let when = "Training is off.";
     // Before the first round it waits for enough answered animal photos instead. (An out-of-date
     // service has no history, so whether it's the first round isn't known.)
     const need = firstRound(rounds) && !outdated
       ? `there are ${s?.min_first ?? MIN_FIRST} answered animal photos`
       : `${s?.min_new} new photos are answered`;
-    if (enabled && s) when = `Next round: ${cap(s.train_day)} from ${hourName(s.train_hour)}, once ${need}.`;
+    const so = t.answered_new != null && !firstRound(rounds) ? ` (${t.answered_new} so far)` : "";
+    if (enabled && s && s.train_when === "count") when = `Next round: as soon as ${need}${so}.`;
+    else if (enabled && s) when = `Next round: ${dayList(s.train_days || [s.train_day])} from ${hourName(s.train_hour)}, once ${need}.`;
     else if (enabled) when = t.schedule ? `Next round: ${cap(t.schedule)}.` : "";
     if (!st.state) return when || "Training is on.";
     const last = {
@@ -1121,10 +1130,12 @@ class NeighborhoodWatchPanel extends HTMLElement {
 
   _history(rounds) {
     if (!rounds) return "";
-    const cell = (b, a, key) => {
+    // up: more is better (named right); otherwise fewer is (misses, false alarms).
+    const cell = (b, a, key, up = false) => {
       const x = b?.[key], y = a?.[key];
       if (y === undefined) return esc(x ?? "—");
-      return `${esc(x)} → <span class="${y < x ? "better" : y > x ? "worse" : ""}">${esc(y)}</span>`;
+      const better = up ? y > x : y < x, worse = up ? y < x : y > x;
+      return `${esc(x)} → <span class="${better ? "better" : worse ? "worse" : ""}">${esc(y)}</span>`;
     };
     const rows = rounds.length
       ? rounds.slice().reverse().map((r) => {
@@ -1133,13 +1144,13 @@ class NeighborhoodWatchPanel extends HTMLElement {
         const date = r.time ? new Date(r.time).toLocaleDateString([], { dateStyle: "medium" }) : "—";
         const mins = r.minutes != null ? `${Math.round(r.minutes)} min` : "—";
         return `<tr><td>${esc(r.round)}</td><td>${date}</td><td>${esc(devName(r.device))}</td><td>${mins}</td>` +
-          `<td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
+          `<td>${cell(r.before, r.after, "named_right", true)}</td><td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
       }).join("")
-      : `<tr><td colspan="7" class="muted">No rounds yet.</td></tr>`;
+      : `<tr><td colspan="8" class="muted">No rounds yet.</td></tr>`;
     return `<section class="card"><h3>Past rounds</h3>
-      <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one only when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
+      <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one when it names more animals right without missing more, or when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
+        <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Named right</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
         <tbody>${rows}</tbody></table></div></section>`;
   }
 
@@ -1149,6 +1160,10 @@ class NeighborhoodWatchPanel extends HTMLElement {
     }
     const off = s.train_enabled ? "" : "disabled";
     const days = DAYS.map((d) => `<option value="${d}" ${d === s.train_day ? "selected" : ""}>${cap(d)}</option>`).join("");
+    const picked = s.train_days || [s.train_day];
+    const dayChips = DAYS.map((d) => `<label><input type="checkbox" name="train_days" value="${d}" ${picked.includes(d) ? "checked" : ""} ${off}
+        aria-label="${cap(d)}">${cap(d).slice(0, 3)}</label>`).join("");
+    const counting = s.train_when === "count";
     const hours = Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === s.train_hour ? "selected" : ""}>${hourName(h)}</option>`).join("");
     // A segmented control: one radio per choice, named after its setting. A service from before
     // a setting existed doesn't send it, and the control is left out.
@@ -1163,14 +1178,22 @@ class NeighborhoodWatchPanel extends HTMLElement {
       <div class="hint" style="margin: -6px 0 10px">${SCHEDULE_HINT}</div>
       ${detecting}
       <h4>Training</h4>
-      <div class="row inline"><span class="label" id="l-enabled">Weekly training</span>
+      <div class="row inline"><span class="label" id="l-enabled">Training</span>
         <label class="switch"><input type="checkbox" id="enabled" aria-labelledby="l-enabled" ${s.train_enabled ? "checked" : ""}><span></span></label></div>
-      <div class="row"><span class="label">When</span>
+      ${s.train_when === undefined
+        ? `<div class="row"><span class="label">When</span>
         <span class="group"><select id="day" aria-label="Training day" ${off}>${days}</select><span>from</span>
-        <select id="hour" aria-label="Training hour" ${off}>${hours}</select></span></div>
+        <select id="hour" aria-label="Training hour" ${off}>${hours}</select></span></div>`
+        : `${seg("train_when", "Starts", [["schedule", "On a schedule"], ["count", "After new answers"]])}
+      ${counting ? "" : `<div class="row"><span class="label" id="l-days">Days</span>
+        <span class="seg days" role="group" aria-labelledby="l-days">${dayChips}</span></div>
+      <div class="row"><span class="label" id="l-hour">From</span>
+        <select id="hour" aria-labelledby="l-hour" ${off}>${hours}</select></div>`}`}
       ${s.min_first === undefined ? "" : `<div class="row"><span class="label" id="l-first">Photos for the first round</span>
         <input type="number" id="min_first" min="10" max="1000" value="${esc(s.min_first)}" aria-labelledby="l-first" ${off}></div>`}
-      <div class="row"><span class="label" id="l-min">New answered photos needed (after the first round)</span>
+      <div class="row"><span class="label" id="l-min">${counting
+        ? "Train after this many new answered photos"
+        : "New answered photos needed (after the first round)"}</span>
         <input type="number" id="min_new" min="1" max="10000" value="${esc(s.min_new)}" aria-labelledby="l-min" ${off}></div>
       ${seg("train_device", "Trains with", [["auto", "GPU"], ["cpu", "CPU"]])}
       ${seg("train_length", "Training length", [["quick", "Quick"], ["normal", "Normal"], ["thorough", "Thorough"]])}
@@ -1261,6 +1284,14 @@ class NeighborhoodWatchPanel extends HTMLElement {
       this._trainAction("train_undo", `Go back to the model from before round ${this._undoRound}?`));
     $("enabled")?.addEventListener("change", (e) => this._save({ train_enabled: e.target.checked }));
     $("day")?.addEventListener("change", (e) => this._save({ train_day: e.target.value }));
+    const dayBoxes = [...box.querySelectorAll("input[name=train_days]")];
+    for (const b of dayBoxes) {
+      b.addEventListener("change", () => {
+        const days = dayBoxes.filter((x) => x.checked).map((x) => x.value);
+        if (!days.length) { b.checked = true; return; }  // at least one day
+        this._save({ train_days: days });
+      });
+    }
     $("hour")?.addEventListener("change", (e) => this._save({ train_hour: Number(e.target.value) }));
     for (const key of NUMBER_BOXES) {
       $(key)?.addEventListener("change", (e) => {
@@ -1268,7 +1299,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
         this._save({ [key]: Math.round(Number(e.target.value)) });
       });
     }
-    for (const key of ["train_device", "detect_device", "train_length", "train_imgsz"]) {
+    for (const key of ["train_when", "train_device", "detect_device", "train_length", "train_imgsz"]) {
       for (const r of box.querySelectorAll(`input[name=${key}]`)) {
         r.addEventListener("change", (e) => this._save({ [key]: key === "train_imgsz" ? Number(e.target.value) : e.target.value }));
       }

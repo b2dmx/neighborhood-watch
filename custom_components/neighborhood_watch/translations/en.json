@@ -338,7 +338,7 @@
       },
       "detector": {
         "title": "Local detector",
-        "description": "Optional. A free detector on your own NAS or PC that looks at every photo before the AI. It trains every week on your answers in To review, and learns to name each animal you've answered often enough, so the AI is needed less and less. Start in Test only. Once the Detector tab shows 0 missed animals, switch to Skip empty frames.",
+        "description": "Optional. A free detector on your own NAS or PC that looks at every photo before the AI. It trains on your answers in To review (on a schedule, or after every so many answers), and learns to name each animal you've answered often enough, so the AI is needed less and less. Start in Test only. Once the Detector tab shows 0 missed animals, switch to Skip empty frames.",
         "data": {
           "detector_url": "Address",
           "detector_mode": "Mode",
