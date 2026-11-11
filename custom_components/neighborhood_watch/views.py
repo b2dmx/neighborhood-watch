@@ -32,7 +32,9 @@ class FrameView(HomeAssistantView):
             ),
             None,
         )
-        row = watch.find_sighting(sid, None) if watch else None
+        if watch is None:
+            return web.Response(status=503, headers={"Retry-After": "5"})
+        row = watch.find_sighting(sid, None)
         if row is None or not row.get("day"):
             return web.Response(status=404)
         read = dataset.read_crop if variant == "crop" else dataset.read_frame

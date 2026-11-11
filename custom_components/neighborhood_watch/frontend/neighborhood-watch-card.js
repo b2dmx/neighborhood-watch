@@ -59,7 +59,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     this._sectionsSet = !!config && "sections" in config;
     this._sig = null;
     this._signed = this._signed || {};
-    this._broken = this._broken || new Set();
+    this._broken = this._broken || new Map();  // path -> when it was given up on
     this._answered = this._answered || new Set(); // answered here: their buttons stay off
     this._hidden = this._hidden || new Map(); // answered in To review: id -> how it was listed then
     if (this._hass) this._render();
@@ -583,25 +583,30 @@ class NeighborhoodWatchCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("img[data-frame]").forEach((img) => {
       // "crop": cut to the animal the local detector found; the full frame otherwise.
       const path = `/api/${DOMAIN}/frame/${img.dataset.frame}${img.dataset.crop ? "/crop" : ""}`;
-      // A frame that's gone stays marked broken (or shows its fallback picture); it isn't
-      // asked for again on every redraw.
+      // A frame that won't load shows its fallback picture or is marked broken, and isn't
+      // asked for again on every redraw: only after a couple of minutes, since most failures
+      // pass (Home Assistant still starting, the photo folder slow to answer).
       const giveUp = () => {
         if (img.dataset.fallback && !img.dataset.fellBack) {
           img.dataset.fellBack = "1";
           img.src = img.dataset.fallback;
         } else img.classList.add("broken");
       };
-      if (this._broken.has(path)) return giveUp();
-      // A link that stops working (signature expired or revoked) is signed afresh, once.
+      const since = this._broken.get(path);
+      if (since && Date.now() - since < 120e3) return giveUp();
+      this._broken.delete(path);
+      // A failed load is tried twice more, a few seconds apart, each time signed afresh
+      // (the link may have expired).
       img.addEventListener("error", () => {
         if (img.dataset.fellBack) return img.classList.add("broken");
-        if (img.dataset.retried) {
-          this._broken.add(path);
+        const tries = Number(img.dataset.tries || 0);
+        if (tries >= 2) {
+          this._broken.set(path, Date.now());
           return giveUp();
         }
-        img.dataset.retried = "1";
+        img.dataset.tries = String(tries + 1);
         delete this._signed[path];
-        this._sign(img, path);
+        setTimeout(() => img.isConnected && this._sign(img, path), tries ? 6000 : 2000);
       });
       this._sign(img, path);
     });
