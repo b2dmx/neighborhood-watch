@@ -1078,6 +1078,20 @@
           "description": "Folders to move from. Empty: the default folder in the media folder."
         }
       }
+    },
+    "mark_animal": {
+      "name": "Mark the animal",
+      "description": "Saves where the animal is in a sighting's photo (the card does this when you drag a box on the enlarged photo). The local detector's training uses your box before any other, and the zoomed-in photo is cut around it.",
+      "fields": {
+        "sighting_id": {
+          "name": "Sighting",
+          "description": "The sighting's id."
+        },
+        "box": {
+          "name": "Box",
+          "description": "Left, top, right, bottom, each from 0 to 1 of the photo. Empty takes the mark away."
+        }
+      }
     }
   },
   "issues": {

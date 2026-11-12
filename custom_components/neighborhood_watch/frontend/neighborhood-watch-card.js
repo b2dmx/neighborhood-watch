@@ -694,7 +694,8 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _closeLightbox() {
     const from = this._zoom;
-    this._zoom = this._lb = null;
+    this._zoom = this._lb = this._marked = null;
+    this._marking = false;
     this._render(true);
     // Back to the picture it was opened from.
     if (from) this.shadowRoot.querySelector(`[data-zoom="${CSS.escape(from)}"]`)?.focus({ preventScroll: true });
@@ -706,8 +707,16 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!this._zoom) return "";
     return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
+        <button class="lbmark" aria-pressed="${this._marking ? "true" : "false"}" title="Drag a box around the animal: the detector learns from it">Mark the animal</button>
+        <div class="lbbox" hidden></div>
         <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}" draggable="false">
-        <div class="lbhint">Tap to zoom in · scroll, pinch or + and − to zoom · drag or arrows to move</div>
+        <div class="lbhint" role="status">${
+          this._marking
+            ? "Drag a box around the animal"
+            : this._marked === this._zoom
+              ? "Saved. The detector will learn from your box."
+              : "Tap to zoom in · scroll, pinch or + and − to zoom · drag or arrows to move"
+        }</div>
       </div>`;
   }
 
@@ -727,9 +736,19 @@ class NeighborhoodWatchCard extends HTMLElement {
     box.querySelector(".lbclose").focus();
     // Tapping around the picture (or ✕) closes it; the picture itself zooms and moves.
     box.addEventListener("click", (ev) => {
+      if (ev.target.closest(".lbmark")) {
+        // Mark the animal: the next drag on the picture draws a box instead of moving it.
+        this._marking = !this._marking;
+        this._marked = null;
+        this._render(true);
+        this.shadowRoot.querySelector(".lbmark")?.focus();
+        return;
+      }
       if (ev.target !== box && !ev.target.closest(".lbclose")) return;
       this._closeLightbox();
     });
+    const outline = box.querySelector(".lbbox");
+    let from = null; // where the box being drawn started
     const img = box.querySelector(".lbimg");
     // Kept on the card, so a redraw while it's open (a new sighting) keeps the zoom.
     const v = (this._lb = this._lb || { s: 1, x: 0, y: 0 });
@@ -764,11 +783,22 @@ class NeighborhoodWatchCard extends HTMLElement {
     const down = new Map();
     let moved = false;
     let pinch = 0;
+    const drawBox = (ev) => {
+      const l = Math.min(from.x, ev.clientX), t = Math.min(from.y, ev.clientY);
+      Object.assign(outline.style, {
+        left: `${l}px`, top: `${t}px`, width: `${Math.abs(ev.clientX - from.x)}px`, height: `${Math.abs(ev.clientY - from.y)}px`,
+      });
+      outline.hidden = false;
+    };
     img.addEventListener("pointerdown", (ev) => {
       try {
         img.setPointerCapture(ev.pointerId);
       } catch {
         // already gone (a very quick tap): it still counts
+      }
+      if (this._marking) {
+        from = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+        return;
       }
       down.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (down.size === 1) moved = false;
@@ -778,6 +808,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       }
     });
     img.addEventListener("pointermove", (ev) => {
+      if (from && ev.pointerId === from.id) return drawBox(ev);
       const was = down.get(ev.pointerId);
       if (!was) return;
       const now = { x: ev.clientX, y: ev.clientY };
@@ -798,6 +829,26 @@ class NeighborhoodWatchCard extends HTMLElement {
       }
     });
     const up = (ev) => {
+      if (from && ev.pointerId === from.id) {
+        // The box, as fractions of the picture as it is shown (zoomed or not).
+        const r = img.getBoundingClientRect();
+        const f = (v, start, size) => Math.max(0, Math.min(1, (v - start) / size));
+        const b = [
+          f(Math.min(from.x, ev.clientX), r.left, r.width), f(Math.min(from.y, ev.clientY), r.top, r.height),
+          f(Math.max(from.x, ev.clientX), r.left, r.width), f(Math.max(from.y, ev.clientY), r.top, r.height),
+        ];
+        from = null;
+        outline.hidden = true;
+        // A slip, not a box (or the picture isn't showing yet): nothing is saved.
+        if (ev.type === "pointercancel" || !r.width || !r.height || !(b[2] - b[0] >= 0.01) || !(b[3] - b[1] >= 0.01)) return;
+        const sid = this._zoom;
+        this._marking = false;
+        Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid, box: b.map((v) => Math.round(v * 10000) / 10000) }))
+          .then(() => (this._marked = sid))
+          .catch((err) => alert(`Box not saved: ${err.message || err}`))
+          .finally(() => this._zoom === sid && this._render(true));
+        return;
+      }
       if (!down.delete(ev.pointerId)) return;
       pinch = 0;
       if (down.size || moved || ev.type === "pointercancel") return;
@@ -814,7 +865,11 @@ class NeighborhoodWatchCard extends HTMLElement {
       const r = img.getBoundingClientRect();
       const mid = [r.left + r.width / 2, r.top + r.height / 2];
       const move = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] }[ev.key];
-      if (ev.key === "Tab") box.querySelector(".lbclose").focus();
+      if (ev.key === "Tab") {
+        // Tab goes between the two buttons (nothing behind the picture is reachable).
+        const buttons = [...box.querySelectorAll("button")];
+        buttons[(buttons.indexOf(this.shadowRoot.activeElement) + 1) % buttons.length].focus();
+      }
       else if (ev.key === "+" || ev.key === "=") zoomAt(mid[0], mid[1], v.s * 1.5);
       else if (ev.key === "-" || ev.key === "_") zoomAt(mid[0], mid[1], v.s / 1.5);
       else if (move && v.s > 1) {
@@ -867,7 +922,7 @@ class NeighborhoodWatchCard extends HTMLElement {
             <select data-sid="${sid}" aria-label="It was"><option value="">It was…</option>${options}</select>`;
       return `<div class="rev">
           <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
-          <div class="revname"><b>${esc(it.animal)}</b> <span class="muted">${esc(it.confidence)}</span></div>
+          <div class="revname"${it.disagree ? ` title="The AI said nothing is there, but the detector saw an animal. Which is it?"` : ""}><b>${esc(it.animal)}</b> <span class="muted">${it.disagree ? "· detector saw an animal" : esc(it.confidence)}</span></div>
           <div class="muted small">${esc(it.where)} · ${clock(it.time)} · <span data-ago="${esc(it.time)}">${ago(it.time)}</span></div>
           <div class="acts">${pick}</div>
           ${this._typing === String(it.id) && this._typedMsg ? `<div class="muted small" role="alert">${esc(this._typedMsg)}</div>` : ""}
@@ -1218,6 +1273,11 @@ const STYLE = `
   .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
   .foldbtn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; border-radius: 4px; }
   img.broken { opacity: .3; }
+  .lbmark { position: absolute; top: 12px; left: 14px; z-index: 1; min-height: 40px; padding: 0 16px; border-radius: 999px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .lbmark[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .lbmark:focus-visible, .lbclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .lbbox { position: fixed; z-index: 1; border: 2px solid var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); pointer-events: none; }
+  .lbbox[hidden] { display: none; }
   .initial { font-size: 2.4em; font-weight: 500; color: var(--secondary-text-color); }
   .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
   .nofold .section > h2 { cursor: auto; user-select: auto; }

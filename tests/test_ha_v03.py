@@ -1287,3 +1287,51 @@ def test_photos_are_saved_full_size_only_when_asked(tmp_path):
     dataset.save_sample(tmp_path, "d", "full", buffer.getvalue(), {"id": "full"}, True)
     with PILImage.open(tmp_path / "d" / "small.jpg") as small, PILImage.open(tmp_path / "d" / "full.jpg") as full:
         assert small.size == (1280, 720) and full.size == (2560, 1440)
+
+
+async def test_marking_the_animal_saves_the_box_with_the_photo(hass, watch):
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    sid = watch["events"][0].data["sighting_id"]
+    w = watch["entry"].runtime_data
+    result = await hass.services.async_call(
+        DOMAIN, "mark_animal", {"sighting_id": sid, "box": [0.6, 0.7, 0.2, 0.3]}, blocking=True, return_response=True
+    )
+    assert result == {"marked": sid, "box": [0.2, 0.3, 0.6, 0.7]}  # corners put in order
+    (record,) = list(w.dataset_root.rglob("*.json"))
+    assert json.loads(record.read_text())["user_box"] == [0.2, 0.3, 0.6, 0.7]
+    row = w.find_sighting(sid, None)
+    from custom_components.neighborhood_watch import dataset
+
+    assert dataset.read_crop(w.dataset_root, row["day"], sid)  # the zoomed-in photo is cut around it
+    # A slip (no area) and an unknown sighting save nothing; no box takes the mark away.
+    for data in ({"sighting_id": sid, "box": [0.5, 0.5, 0.5, 0.5]}, {"sighting_id": "nope", "box": [0, 0, 1, 1]}):
+        assert (await hass.services.async_call(DOMAIN, "mark_animal", data, blocking=True, return_response=True)) == {"marked": None}
+    await hass.services.async_call(DOMAIN, "mark_animal", {"sighting_id": sid}, blocking=True)
+    assert "user_box" not in json.loads(record.read_text())
+
+
+async def test_a_nothing_the_detector_disagrees_with_waits_in_to_review(hass, watch, aioclient_mock):
+    await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.6)
+    watch["ai"].say(FIRST, "Nothing|high|na|na|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    w = watch["entry"].runtime_data
+    (item,) = hass.states.get("sensor.neighborhood_watch_to_review").attributes["items"]
+    assert (item["animal"], item["disagree"]) == ("Nothing", True)
+    # "Right": it really is empty, a confirmed empty photo for training; it leaves the list.
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": item["id"], "answer": "right"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.neighborhood_watch_to_review").attributes["items"] == []
+    (record,) = list(w.dataset_root.rglob("*.json"))
+    meta = json.loads(record.read_text())
+    assert (meta["label"], meta["labelled_by"]) == ("Nothing", "right")
+
+
+async def test_a_nothing_the_detector_agrees_with_is_not_reviewed(hass, watch, aioclient_mock):
+    await _with_detector(hass, watch, "shadow", aioclient_mock, animal=0.1)
+    watch["ai"].say(FIRST, "Nothing|high|na|na|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.neighborhood_watch_to_review").attributes["items"] == []

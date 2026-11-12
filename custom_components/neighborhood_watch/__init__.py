@@ -113,6 +113,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def undo_last(call: ServiceCall) -> ServiceResponse:
         return await engine().async_undo_last()
 
+    async def mark(call: ServiceCall) -> ServiceResponse:
+        return await engine().async_mark(call.data["sighting_id"], call.data.get("box"))
+
     async def correct(call: ServiceCall) -> ServiceResponse:
         watch = engine()
         return await watch.async_correct(
@@ -221,6 +224,18 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
     hass.services.async_register(
         DOMAIN, "undo_last_answer", undo_last, vol.Schema({}), supports_response=SupportsResponse.OPTIONAL
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "mark_animal",
+        mark,
+        vol.Schema(
+            {
+                vol.Required("sighting_id"): cv.string,
+                vol.Optional("box"): vol.All(cv.ensure_list, vol.Length(min=4, max=4), [vol.Coerce(float)]),
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
         DOMAIN,

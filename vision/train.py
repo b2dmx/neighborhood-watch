@@ -224,7 +224,7 @@ def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, st
         if s.animal:
             with Image.open(s.jpg) as im:
                 sizes[s.id] = w, h = im.size
-            s.boxes = merge((cache.get(s.id) or {}).get("boxes", []) + stored_boxes(s, w, h))
+            s.boxes = merge(user_box(s, w, h) + (cache.get(s.id) or {}).get("boxes", []) + stored_boxes(s, w, h))
             if not s.boxes and s.trust == "confirmed":
                 s.boxes = ai_box(s, w, h)
     rescue_boxes([s for s in samples if s.animal and s.trust == "confirmed" and not s.boxes],
@@ -293,6 +293,8 @@ def main_box(s: Sample, w: int, h: int) -> int:
     it was most, else the most confident."""
     if not s.boxes:
         return -1
+    if user_box(s, w, h):  # a person marked it: that box (first, with the top score)
+        return 0
     said = ai_box(s, w, h)
     if said:
         overlaps = [_iou(b, said[0]) for b in s.boxes]
@@ -322,6 +324,18 @@ def class_of(s: Sample, names: list[str]) -> int | None:
         )
         return names.index(s.name) if sure else None
     return names.index(GENERIC)
+
+
+def user_box(s: Sample, w: int, h: int) -> list[list[float]]:
+    """Where a person marked the animal (0-1 of the frame): used before any other box. Its
+    score of 1 puts it first, and a teacher's box over the same animal gives way to it."""
+    b = s.meta.get("user_box")
+    if not (isinstance(b, list) and len(b) == 4):
+        return []
+    x1, y1, x2, y2 = (float(v) for v in b)
+    if not (0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1):
+        return []
+    return [[x1 * w, y1 * h, x2 * w, y2 * h, 1.0]]
 
 
 def ai_box(s: Sample, w: int, h: int) -> list[list[float]]:

@@ -74,6 +74,24 @@ def set_label(root: Path, day: str, sid: str, label: str | None, how: str) -> bo
     return True
 
 
+def set_box(root: Path, day: str, sid: str, box: list[float] | None) -> bool:
+    """Where a person marked the animal in the photo (0-1: x1, y1, x2, y2), or None to take
+    the mark away. Training uses it before any other box."""
+    path = root / day / f"{sid}.json"
+    meta = _read_record(path)
+    if meta is None:
+        return False
+    if box is None:
+        meta.pop("user_box", None)
+    else:
+        meta["user_box"] = [round(float(v), 4) for v in box]
+    try:
+        _write_record(path, meta)
+    except OSError:
+        return False
+    return True
+
+
 def rename_labels(root: Path, names: dict[str, str]) -> int:
     """An animal was renamed: every saved photo answered or named with the old name takes
     the new one, so the detector keeps learning it as one animal."""
@@ -179,7 +197,10 @@ def read_crop(root: Path, day: str, sid: str) -> bytes | None:
         meta = json.loads((root / day / f"{sid}.json").read_text(encoding="utf-8"))
         det = meta.get("detector") or {}
         boxes = det.get("boxes") or []
-        ai_box = meta.get("ai_box")
+        # Where a person marked the animal wins over where the AI said it was.
+        ai_box = meta.get("user_box") or meta.get("ai_box")
+        if meta.get("user_box"):
+            boxes = []
         if not boxes and not ai_box:
             return frame
         size = det.get("size") or [None, None]

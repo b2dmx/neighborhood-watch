@@ -62,6 +62,18 @@ set_reference_photo:
 
 undo_last_answer:
 
+mark_animal:
+  fields:
+    sighting_id:
+      required: true
+      example: 3fa2c1d9e0
+      selector:
+        text:
+    box:
+      example: "[0.42, 0.55, 0.61, 0.8]"
+      selector:
+        object:
+
 correct:
   fields:
     answer:

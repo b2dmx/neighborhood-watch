@@ -64,6 +64,9 @@ LOCAL_FILL = "fill_in"  # only when no AI model answers
 LOCAL_FIRST = "first"  # a name it has proved it gets right is used without asking the AI
 LOCAL_NAMING_MODES = [LOCAL_FIRST, LOCAL_FILL, LOCAL_OFF]
 LOCAL_INFO_SECONDS = 600  # how long what the detector can name is remembered
+# The AI said nothing is there, but the detector saw an animal at least this surely: the
+# photo waits in To review. Your answer is a real empty scene to learn from, or a missed animal.
+DISAGREE_MIN = 0.3
 
 # --- alert rules (animal, wildlife and built-in) ---
 CONF_ALERT_AT = "alert_at"  # camera slugs; "*" = every camera; empty = never

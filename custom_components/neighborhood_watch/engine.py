@@ -63,6 +63,7 @@ from .const import (
     CONF_DETECTOR_MODE,
     CONF_LOCAL_NAMING,
     LOCAL_FIRST,
+    DISAGREE_MIN,
     LOCAL_INFO_SECONDS,
     LOCAL_OFF,
     CONF_DETECTOR_URL,
@@ -1576,6 +1577,7 @@ class WatchEngine:
                 "log": logic.is_cat_for_log(v, rules)
                 or (wild and v.animal.lower() not in logic.HARMLESS),
                 "possible": wild and v.confidence == logic.LOW,
+                **({"disagree": True} if self._detector_disagrees(check) else {}),
                 # An unknown animal keeps what its coat looked like, so the card can draw it.
                 **(
                     {"pattern": v.pattern, "base": v.base, "description": v.description}
@@ -1759,9 +1761,17 @@ class WatchEngine:
         await self.async_correct(row["id"], None, "wrong")
         return {"removed": {k: row[k] for k in ("time", "where", "animal", "confidence")}}
 
+    def _detector_disagrees(self, check: Check) -> bool:
+        """An AI looked and was sure nothing is there, but the local detector saw an animal."""
+        det, v = check.detector, check.verdict
+        if not det or check.models.startswith("Local") or v.animal != logic.NOTHING or v.confidence != logic.HIGH:
+            return False
+        return float(det.get("animal") or 0.0) >= max(DISAGREE_MIN, float(self.options.get(CONF_DETECTOR_MIN, 0.2)))
+
     def review_queue(self, days: int = 7) -> list[dict[str, Any]]:
         """Sightings nobody has answered yet, newest first: anything with an animal in it
-        (a confident "nothing" is left out) whose photo was kept."""
+        whose photo was kept. A confident "nothing" is left out, unless the local detector
+        saw an animal in it (one of the two is wrong, and either answer teaches the detector)."""
         rows = self.sightings()
         cutoff = _iso(dt_util.utcnow() - timedelta(days=days)) or ""
         recent = rows[bisect_left(rows, cutoff, key=_row_time):]  # rows are time-ordered
@@ -1770,7 +1780,7 @@ class WatchEngine:
             for s in reversed(recent)
             if s.get("user") in (None, "other")  # "other" still waits for what it was
             and s.get("day")
-            and not (s.get("animal") == logic.NOTHING and s.get("confidence") == logic.HIGH)
+            and (s.get("disagree") or not (s.get("animal") == logic.NOTHING and s.get("confidence") == logic.HIGH))
         ]
 
     def find_sighting(self, sid: str | None, camera: CameraConfig | None) -> dict[str, Any] | None:
@@ -1794,6 +1804,26 @@ class WatchEngine:
         """Take back the last answer (see _undo_last)."""
         async with self._lock:
             return await self._undo_last()
+
+    async def async_mark(self, sid: str, box: list[float] | None) -> dict[str, Any]:
+        """Where the animal is in a sighting's saved photo, marked by a person (0-1: x1, y1,
+        x2, y2; None takes the mark away). The detector's training uses it before any other
+        box, and the zoomed-in photo is cut around it."""
+        row = self.find_sighting(sid, None)
+        if row is None or not row.get("day"):
+            return {"marked": None}
+        if box is not None:
+            x1, y1, x2, y2 = (min(1.0, max(0.0, float(v))) for v in box)
+            box = [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+            if box[2] - box[0] < 0.005 or box[3] - box[1] < 0.005:
+                return {"marked": None}
+        saved = await self.hass.async_add_executor_job(dataset.set_box, self.dataset_root, row["day"], row["id"], box)
+        if not saved:
+            return {"marked": None}
+        row["box"] = bool(box)
+        self._save()
+        self._notify()
+        return {"marked": row["id"], "box": box}
 
     async def _correct(
         self, sid: str | None, camera: CameraConfig | None, answer: str

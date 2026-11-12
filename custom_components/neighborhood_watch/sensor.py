@@ -266,7 +266,10 @@ class ToReview(WatchEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "items": [
-                {k: s.get(k) for k in ("id", "time", "where", "animal", "confidence")}
+                {
+                    **{k: s.get(k) for k in ("id", "time", "where", "animal", "confidence")},
+                    **({"disagree": True} if s.get("disagree") else {}),
+                }
                 for s in self._queue[:40]
             ],
             # The last answer, which the card offers to undo.

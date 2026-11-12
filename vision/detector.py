@@ -24,6 +24,10 @@ from PIL import Image
 
 MEGADETECTOR_LABELS = {0: "animal", 1: "person", 2: "vehicle"}
 COMPILE_CONFIG = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1"}  # one request at a time
+# On the GPU: full precision. Its default half precision scored the same photos far lower
+# than the CPU did (animals the CPU found at 0.9 came out under the line), so a model that
+# tested well found much less once it was served.
+GPU_CONFIG = {**COMPILE_CONFIG, "INFERENCE_PRECISION_HINT": os.environ.get("NW_GPU_PRECISION", "f32")}
 _gpu_failed = False  # once the GPU fails to compile a model, don't retry it on every reload
 
 
@@ -141,7 +145,8 @@ class Detector:
         self.last_used = time.monotonic()
         if self._model is None:
             try:
-                compiled = self.core.compile_model(self.core.read_model(self.xml), self.wanted, COMPILE_CONFIG)
+                config = GPU_CONFIG if self.wanted == "GPU" else COMPILE_CONFIG
+                compiled = self.core.compile_model(self.core.read_model(self.xml), self.wanted, config)
                 self.device = self.wanted
             except Exception:  # noqa: BLE001 - e.g. the container can't reach the GPU: run on the CPU
                 if self.wanted == "CPU":
