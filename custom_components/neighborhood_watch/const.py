@@ -50,6 +50,7 @@ CONF_REVIEW_PAGE = "review_page"  # where an alert's "Other…" button opens
 CONF_DATASET = "dataset"
 CONF_DATASET_DIR = "dataset_dir"
 CONF_DATASET_GB = "dataset_gb"
+CONF_DATASET_FULL = "dataset_full_size"  # save photos at the camera's size, not shrunk
 CONF_DETECTOR_URL = "detector_url"
 CONF_DETECTOR_MODE = "detector_mode"
 CONF_DETECTOR_MIN = "detector_min"
@@ -112,6 +113,7 @@ DEFAULT_OPTIONS: dict = {
     CONF_DATASET: True,
     CONF_DATASET_DIR: "",
     CONF_DATASET_GB: 5,
+    CONF_DATASET_FULL: False,
     CONF_DETECTOR_URL: "",
     CONF_DETECTOR_MODE: DETECTOR_SHADOW,
     CONF_DETECTOR_MIN: 0.2,

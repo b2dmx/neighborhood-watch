@@ -1194,3 +1194,96 @@ async def test_names_are_never_used_when_turned_off(hass, watch, aioclient_mock)
     await trigger(hass, "yard")
     (event,) = watch["events"]
     assert event.data["animal"] == "No answer"
+
+
+async def test_while_an_animal_is_missing_the_ai_always_looks(hass, watch, aioclient_mock):
+    # The local model may call the missing animal by a lookalike's name: nobody would be told.
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.9, {"Milo": 0.6})
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.luna_missing_mode"}, blocking=True)
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    watch["ai"].say(SECOND, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    assert FIRST in watch["ai"].calls
+
+
+async def test_a_filled_in_priority_animal_is_not_counted(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Luna", 0.95, {"Luna": 0.5}, mode="fill_in")
+    await trigger(hass, "yard")  # every model fails; the local model is sure it's the priority animal
+    (event,) = watch["events"]
+    assert (event.data["animal"], event.data["confidence"]) == ("Luna", "low")
+    assert event.data["counted"] == "no"
+
+
+async def test_the_models_own_name_is_marked_and_not_scored_against_itself(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.9, {"Milo": 0.6})
+    await trigger(hass, "yard")
+    w = watch["entry"].runtime_data
+    assert w.detector_week() == []  # the detector isn't scored on its own answer
+    await hass.async_block_till_done()
+    (record,) = list(w.dataset_root.rglob("*.json"))
+    assert json.loads(record.read_text())["named_by"] == "local"  # training won't learn from it
+
+
+async def test_the_names_own_score_is_what_is_held_to_the_line(hass, watch, aioclient_mock):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", 0.9, {"Milo": 0.6})
+    aioclient_mock.clear_requests()
+    box = {"label": "animal", "name": "Milo", "confidence": 0.9, "name_confidence": 0.4, "box": [8, 6, 32, 24]}
+    aioclient_mock.post("http://vision:8765/detect", json={"width": 64, "height": 48, "detections": [box]})
+    aioclient_mock.get("http://vision:8765/health", json={"ok": True, "model": "trained-5", "names": ["Milo"], "sure": {"Milo": 0.6}})
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == [FIRST]  # an animal is surely there (0.9), but which one isn't (0.4)
+
+
+async def test_right_after_wrong_puts_the_sighting_back(hass, watch):
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    sid = watch["events"][0].data["sighting_id"]
+    w = watch["entry"].runtime_data
+    milo = w.animal_by_name("Milo")
+    for answer in ("wrong", "right"):
+        await hass.services.async_call(DOMAIN, "correct", {"sighting_id": sid, "answer": answer}, blocking=True)
+    row = w.find_sighting(sid, None)
+    assert (row["user"], row["wrong"], row["confidence"]) == ("right", False, "confirmed")
+    assert w.counted_sightings(milo)[-1]["id"] == sid and w.last_seen(milo) is not None
+
+
+async def test_a_renamed_animal_keeps_its_sightings(hass, watch):
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    w = watch["entry"].runtime_data
+    milo = w.animal_by_name("Milo")
+    row = w.sightings()[-1]
+    row["animal"] = "Shadow"  # as if recorded under the name it had before
+    w.animal_state(milo)["name"] = "Shadow"
+    await w._follow_renames()
+    assert row["animal"] == "Milo" and w.animal_state(milo)["name"] == "Milo"
+    assert w.counted_sightings(milo)[-1] is row
+
+
+def test_saved_records_survive_an_interrupted_rewrite_and_a_rename(tmp_path):
+    from custom_components.neighborhood_watch import dataset
+
+    day = tmp_path / "2026-11-01"
+    day.mkdir()
+    (day / "a.json").write_text(json.dumps({"id": "a", "label": None, "ai_animal": "Shadow"}) + "\n}\n")  # leftovers
+    assert dataset.set_label(tmp_path, "2026-11-01", "a", "Shadow", "right")
+    assert json.loads((day / "a.json").read_text()) == {"id": "a", "label": "Shadow", "ai_animal": "Shadow", "labelled_by": "right"}
+    assert dataset.rename_labels(tmp_path, {"Shadow": "Milo"}) == 1
+    assert json.loads((day / "a.json").read_text())["label"] == "Milo"
+    assert not list(day.glob("*.tmp"))
+
+
+def test_photos_are_saved_full_size_only_when_asked(tmp_path):
+    from io import BytesIO
+
+    from PIL import Image as PILImage
+
+    from custom_components.neighborhood_watch import dataset
+
+    buffer = BytesIO()
+    PILImage.new("RGB", (2560, 1440), "gray").save(buffer, "JPEG")
+    dataset.save_sample(tmp_path, "d", "small", buffer.getvalue(), {"id": "small"})
+    dataset.save_sample(tmp_path, "d", "full", buffer.getvalue(), {"id": "full"}, True)
+    with PILImage.open(tmp_path / "d" / "small.jpg") as small, PILImage.open(tmp_path / "d" / "full.jpg") as full:
+        assert small.size == (1280, 720) and full.size == (2560, 1440)

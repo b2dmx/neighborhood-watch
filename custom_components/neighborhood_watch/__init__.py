@@ -115,18 +115,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     async def correct(call: ServiceCall) -> ServiceResponse:
         watch = engine()
-        result = await watch.async_correct(
+        return await watch.async_correct(
             call.data.get("sighting_id"),
             camera(watch, call.data.get("camera"), False),
             call.data["answer"],
         )
-        if result.get("error"):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="unknown_animal",
-                translation_placeholders={"animal": call.data["answer"]},
-            )
-        return result
 
     async def scan(call: ServiceCall) -> ServiceResponse:
         watch = engine()

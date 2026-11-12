@@ -206,7 +206,10 @@ class Detector:
         raw = raw.T
         scores_all = raw[:, 4:]
         cls = scores_all.argmax(1)
-        conf = scores_all.max(1)
+        # A model that names animals: "is an animal there" is all its names' scores together
+        # (a cat it can't tell apart splits its score between two names and would otherwise
+        # fall under the line as a miss). Which one it is stays the best single name.
+        conf = np.minimum(scores_all.sum(1), 1.0) if self.named else scores_all.max(1)
         mask = conf >= self.min_conf
         raw, cls, conf = raw[mask], cls[mask], conf[mask]
         cx, cy, bw, bh = raw[:, 0], raw[:, 1], raw[:, 2], raw[:, 3]
@@ -238,7 +241,9 @@ class Detector:
                         "label": "animal",
                         "name": self.labels.get(int(cls[i]), str(int(cls[i]))),
                         "names": {self.labels.get(int(c), str(int(c))): round(float(every[i][c]), 3) for c in ranked},
+                        # confidence: an animal is there. name_confidence: it is this one.
                         "confidence": round(float(conf[i]), 3),
+                        "name_confidence": round(float(every[i][cls[i]]), 3),
                         "box": [round(float(v)) for v in boxes[i]],
                     }
                 )

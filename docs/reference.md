@@ -236,7 +236,7 @@ For your own automations, the Neighborhood Watch device has **Pest on camera** (
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
-- **Saved photos.** Every checked frame is saved, downscaled to 1280 px, beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`; the folder is the media folder's `neighborhood_watch/dataset` unless you set another under **Saved photos**.
+- **Saved photos.** Every checked frame is saved, downscaled to 1280 px (or at the camera's own size, up to 4K, with **Save photos at full size**: about 4 times the space, and the local detector then trains on animals as large as it sees them live), beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`; the folder is the media folder's `neighborhood_watch/dataset` unless you set another under **Saved photos**.
 - **Corrections.** A button on an alert, the `correct` action, or the card's ✓ / ? / It was… labels that frame. It also fixes tracking: the sighting, its photo and the last-seen time move to the right animal.
 - **Pruning.** When the folder reaches its size limit, the oldest unlabelled frames go first.
 
@@ -254,8 +254,10 @@ The `vision` folder holds a small service that runs [MegaDetector](https://micro
 
 Once it's [trained on your photos](#training-the-detector-on-your-photos), the same model also **names** what it finds (each of your animals, Raccoon, Deer, ...), and the aim is to need the AI less and less, until not at all. **Use the detector's names** (same page) decides how its names are used:
 
-- **Trust it first** (default): a name it has proved it gets right is used straight away, with no AI call. "Proved" means right at least 95% of the time on the held-back photos, from a confidence line measured for each name separately. Priority, always-strict, long-absent and missing animals still go to the AI. Below the line, the AI looks as usual.
-- **Only when no AI model answers:** its name (sure or not) instead of **No answer**.
+- **Trust it first** (default): a name it has proved it gets right is used straight away, with no AI call. "Proved" means right at least 95% of the time on the held-back photos (and at least 15 times), from a line measured for each name separately; every held-back photo it wrongly gave that name to counts against it, lookalikes without a name of their own included. Priority, always-strict, long-absent and missing animals still go to the AI, and while **any** animal is in missing mode the AI looks at everything (the model could call the missing one by a lookalike's name). Below the line, the AI looks as usual.
+- **Only when no AI model answers:** its name (sure or not) instead of **No answer**. A priority, always-strict, long-absent or missing animal named this way is shown but not counted until you confirm it.
+
+A name the model gave itself is never used to train it (only your answers and the AI's are), and such sightings don't count towards the detector's agreement score.
 - **Never.**
 
 The Detector tab shows which names it's trusted with, which it's still learning, and how many sightings this week were named without an AI call.
@@ -270,10 +272,10 @@ A new or changed address is checked when you save it: if the service doesn't ans
 
 MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [saved photos](#corrections-and-saved-photos)) and gets better every week:
 
-1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo (and, for a confirmed photo neither could box, where the AI said the animal was). The animal's box is named after what it was: your answer, or the AI's when it was sure and nobody answered. Each animal with at least 12 confirmed photos gets a name of its own; the rest are just "animal". Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
+1. **Labelling.** Every animal photo gets its boxes from two "teachers": a general COCO YOLO11 model and the boxes the detector stored with the photo (and, for a confirmed photo neither could box, where the AI said the animal was, or else the best guess of MegaDetector or the teacher at a very low threshold: you said an animal is there, so the likeliest spot is worth learning from). The animal's box is named after what it was: your answer, or the AI's when it was sure and nobody answered. Each animal with at least 12 confirmed photos gets a name of its own; the rest are just "animal". Photos marked empty become background examples. Photos you marked "Not sure" are skipped. AI-only photos (nobody confirmed them) are used for training, but never to judge a model.
 2. **Fair test.** The confirmed photos from the most recent ~20% of days are held back as the test set and never trained on. So are confirmed animal photos that no teacher could box, which are exactly the misses that matter. Confidently empty frames from those days are the empty side of the test.
-3. **Training.** One YOLO11 model that both finds and names is trained on everything else: from YOLO11s the first time, then from the model being served.
-4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it if it **names more of the test animals right without missing more**, or if it **misses fewer animals** and makes **at least 10% fewer mistakes in all** (misses plus false alarms) while naming no fewer right. For each name it also measures the confidence from which that name was right at least 95% of the time (kept in `id.json` with the model): that's the line **Trust it first** uses. The model is then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
+3. **Training.** One YOLO11 model that both finds and names is trained on everything else: from YOLO11s the first time, then from the model being served. Each photo is trained on whole and as the tiles the service cuts it into, so animals are the size the detector sees them. "Is an animal there" is all its names' scores together, so a cat it can't tell apart is still found; which one it is has a score of its own.
+4. **Promotion.** The model being served and the new one are both run on the test set the way the service runs them, at a 0.2 threshold. The new model replaces it if it **names more of the test animals right without missing more** (or raising many more false alarms), or if it **misses fewer animals** and makes **at least 10% fewer mistakes in all** (misses plus false alarms) while naming no fewer right. For each name it also measures the confidence from which that name was right at least 95% of the time (kept in `id.json` with the model): that's the line **Trust it first** uses. The model is then exported to OpenVINO and served within a minute, no restart. If it fails to load, MegaDetector is used.
 
 It needs the saved-photos folder mounted at `/dataset` (read-only is enough), and `shm_size`, both already in [`vision/compose.yaml`](../vision/compose.yaml).
 
@@ -289,7 +291,7 @@ It needs the saved-photos folder mounted at `/dataset` (read-only is enough), an
 Got a trail-cam card, a phone video or old recordings? Put them in the detector's scan folder, then use the card's **Scan a folder** box or the `neighborhood_watch.scan` action:
 
 1. The detector checks every photo, and a frame every second of every video. It keeps the moments with an animal, grouped into **visits** (one per photo, or a stretch of a video), each with its best frame. Hours of footage become a short list.
-2. Each visit is named by the same AI as the cameras (one or two calls per visit, up to the limit you set).
+2. Each visit is named like a camera's sighting, up to the limit you set: by the local model when it has proved it gets the name right, else by the AI. Scans only use free AI models, so old footage never spends paid calls or the quota live checks need.
 3. A report, `neighborhood-watch-report/index.html` plus `report.csv`, is written into the scanned folder, with every visit's frame. The **Last scan** sensor and the card show the totals, and the people who get alerts get a summary.
 4. Every visit appears in **To review** and joins the saved photos. Scanned footage can be old, so it never changes anyone's last-seen tracking.
 
@@ -299,7 +301,7 @@ The integration installs a **Neighborhood Watch** card, so there's no resource t
 
 - **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos));
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
-- wildlife, last night's summary, and each camera's last detection with ✓ / ? / It was… buttons;
+- wildlife, last night's summary, and each camera's last detection with ✓ / ? buttons (It was… is in To review);
 - the critical-alert switches;
 - **Scan a folder**: start a [bulk scan](#bulk-scanning-photos-and-videos) and see the last one's totals.
 

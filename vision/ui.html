@@ -279,7 +279,7 @@ function stageText(t, rounds) {
     if (t.stopping) return "Stopping…";
     if (st.stage === "training" && st.epochs) return `Training: pass ${st.epoch} of ${st.epochs}`;
     if (st.stage === "labelling" && st.total) return `Marking animals in the photos: ${st.done} of ${st.total}`;
-    return cap(st.stage || "starting");
+    return ({ labelling: "Marking animals in the photos", training: "Training" })[st.stage] || cap(st.stage || "starting");
   }
   const s = t.settings;
   const need = rounds.some(realRound)

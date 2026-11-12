@@ -1,9 +1,9 @@
 """The watch engine: cameras → snapshot → AI chain → verdict → tracking and the sighting event.
 
-Each camera takes its snapshot (and asks the local detector) as soon as it triggers, under a
-lock of its own. The AI calls and the recording then run one check at a time (the AI quotas
-are per model and per day, and the lock keeps the order of sightings). A camera already
-waiting its turn is not queued twice.
+Each camera takes its snapshot, asks the local detector and then the AI as soon as it
+triggers, under a lock of its own (so cameras are checked side by side). Only the recording
+runs one at a time, answers from To review included, which keeps the order of sightings. A
+camera already waiting its turn is not queued twice.
 """
 from __future__ import annotations
 
@@ -56,12 +56,12 @@ from .const import (
     CONF_CRITICAL_SOUND,
     CONF_CRITICAL_VOLUME,
     CONF_DATASET,
+    CONF_DATASET_FULL,
     CONF_DATASET_DIR,
     CONF_DATASET_GB,
     CONF_DETECTOR_MIN,
     CONF_DETECTOR_MODE,
     CONF_LOCAL_NAMING,
-    LOCAL_FILL,
     LOCAL_FIRST,
     LOCAL_INFO_SECONDS,
     LOCAL_OFF,
@@ -419,6 +419,9 @@ class WatchEngine:
         self.animals: dict[str, AnimalConfig] = {}  # by slug
         self.recipients: list[RecipientConfig] = []
         self._deterring: dict[str, Callable[[], None]] = {}
+        self._rev = 0  # goes up with every change that is saved
+        self._summaries: dict[str, tuple[tuple[int, int], Any]] = {}
+        self._stopped = False
         self.frames: dict[str, Frame] = {}
         self._queued: set[str] = set()
         self.hub_device_id: str | None = None
@@ -553,7 +556,8 @@ class WatchEngine:
 
     def wildlife_seen(self, now: datetime | None = None) -> dict[str, dict[str, Any]]:
         """Every wildlife kind seen (last 30 days)."""
-        now = now or dt_util.utcnow()
+        if now is None:
+            return self._summary("wildlife", lambda: self.wildlife_seen(dt_util.utcnow()))
         night = self.night_start()
         week = now - timedelta(days=7)
         pests = self.pests
@@ -577,7 +581,8 @@ class WatchEngine:
     def unknown_seen(self, now: datetime | None = None) -> dict[str, dict[str, Any]]:
         """Every unknown animal kind seen ('Unknown Cat'), with the coat of its latest sighting
         that described one."""
-        now = now or dt_util.utcnow()
+        if now is None:
+            return self._summary("unknown", lambda: self.unknown_seen(dt_util.utcnow()))
         night = self.night_start()
         week = now - timedelta(days=7)
         kinds: dict[str, dict[str, Any]] = {}
@@ -685,6 +690,30 @@ class WatchEngine:
 
     # --- state helpers ----------------------------------------------------------------
 
+    async def _follow_renames(self) -> None:
+        """A renamed animal keeps its history: its sightings and its saved photos' labels
+        take the new name (they are matched by name; the name each animal had is kept)."""
+        renamed: dict[str, str] = {}
+        for animal in self.animals.values():
+            state = self.animal_state(animal)
+            was = state.get("name")
+            if was and was != animal.name:
+                renamed[was] = animal.name
+            state["name"] = animal.name
+        if not renamed:
+            return
+        swap = {**renamed, **{f"not:{old}": f"not:{new}" for old, new in renamed.items()}}
+        for row in self.sightings():
+            for key in ("animal", "label"):
+                if row.get(key) in swap:
+                    row[key] = swap[row[key]]
+        if self.options.get(CONF_DATASET, True):
+            try:
+                await self.hass.async_add_executor_job(dataset.rename_labels, self.dataset_root, swap)
+            except Exception as err:  # noqa: BLE001 - the saved photos are best-effort
+                _LOGGER.warning("Saved photos not relabelled after a rename: %s", err)
+        self._save()
+
     def animal_state(self, animal: AnimalConfig) -> dict[str, Any]:
         return self.data.setdefault("animals", {}).setdefault(animal.slug, {})
 
@@ -772,6 +801,7 @@ class WatchEngine:
         for row in self.sightings():
             row.setdefault("id", uuid4().hex[:10])
         self.sightings().sort(key=lambda s: s.get("time") or "")  # older versions appended
+        await self._follow_renames()
         if "www_secret" not in self.data:
             self.data["www_secret"] = token_hex(16)
             self._save()
@@ -833,6 +863,7 @@ class WatchEngine:
         for cancel in self._deterring.values():
             cancel()
         self._deterring.clear()
+        self._stopped = True
         await self._store.async_save(self.data)
 
     def _prune_removed(self) -> None:
@@ -912,7 +943,19 @@ class WatchEngine:
         return self.references.get(animal.slug)
 
     def _save(self) -> None:
+        self._rev += 1
+        if self._stopped:  # a check that outlived a reload must not write over the new engine's data
+            return
         self._store.async_delay_save(lambda: self.data, 5)
+
+    def _summary(self, key: str, compute: Callable[[], Any]) -> Any:
+        """A summary of the sightings (asked for on every update by the sensors), worked out
+        again only after something was saved or five minutes passed (its time windows move)."""
+        stamp = (self._rev, int(time.time() // 300))
+        hit = self._summaries.get(key)
+        if hit is None or hit[0] != stamp:
+            hit = self._summaries[key] = (stamp, compute())
+        return hit[1]
 
     @callback
     def _notify(self) -> None:
@@ -1025,20 +1068,11 @@ class WatchEngine:
                 and detector["animal"] < float(self.options.get(CONF_DETECTOR_MIN, 0.2))
                 and not self.any_missing_mode()  # in missing mode the AI always looks
             )
-            naming = self.options.get(CONF_LOCAL_NAMING, LOCAL_FIRST)
-            local = self._local_verdict(detector, sure_only=True) if naming == LOCAL_FIRST else None
             if skip:
                 verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
                 models = "Local detector (no animal)"
-            elif local is not None:
-                # It has proved it gets this name right: no AI call.
-                verdict, models = local, f"Local model ({detector.get('model') or 'trained'})"
             else:
-                verdict, models = await self._identify_capped(cam)
-                fill = self._local_verdict(detector, sure_only=False) if naming != LOCAL_OFF else None
-                if verdict.animal == logic.NO_ANSWER and fill is not None:
-                    verdict = fill
-                    models = f"Local model ({detector.get('model') or 'trained'}), no AI answered"
+                verdict, models = await self._name(cam, detector)
             if detector is not None:
                 self._log_local(detector, verdict, used=models.startswith("Local model"), now=now)
             check = Check(cam, verdict, models, content, now, detector=detector)
@@ -1048,6 +1082,28 @@ class WatchEngine:
         # hold up the next check.
         await self._deliver(sends)
         return self._result(check)
+
+    async def _name(
+        self, cam: CameraConfig, detector: dict[str, Any] | None, *, free_only: bool = False
+    ) -> tuple[logic.Verdict, str]:
+        """What's in a frame, and who said so. The local model first when it has proved it
+        gets the name right (no AI call); otherwise the AI, with the local model's name
+        filling in when no AI answers. free_only (scans of old footage): no paid last
+        resort and no wait to try again, so live checks keep their quota."""
+        naming = self.options.get(CONF_LOCAL_NAMING, LOCAL_FIRST)
+        label = f"Local model ({(detector or {}).get('model') or 'trained'})"
+        # While any animal is missing the AI always looks: the local model may call the
+        # missing one by a lookalike's name, and then nobody would be told.
+        if naming == LOCAL_FIRST and not self.any_missing_mode():
+            local = self._local_verdict(detector, sure_only=True)
+            if local is not None:
+                return local, label
+        verdict, models = await self._identify_capped(cam, free_only=free_only)
+        if verdict.animal == logic.NO_ANSWER and naming != LOCAL_OFF:
+            fill = self._local_verdict(detector, sure_only=False)
+            if fill is not None:
+                return fill, f"{label}, no AI answered"
+        return verdict, models
 
     async def _detect(self, frame: bytes) -> dict[str, Any] | None:
         """Ask the local detector (MegaDetector) what's in the frame; None if it's not set up
@@ -1082,7 +1138,8 @@ class WatchEngine:
                 info = await self._local_info(url)
                 result.update(
                     name=top["name"],
-                    name_confidence=top.get("confidence", 0.0),
+                    # Its score for this name (an older service only has the box's score).
+                    name_confidence=top.get("name_confidence", top.get("confidence", 0.0)),
                     sure_from=(info.get("sure") or {}).get(top["name"]),
                     model=info.get("model"),
                 )
@@ -1097,18 +1154,21 @@ class WatchEngine:
         """What the served model can name and from which confidence each name is trusted
         (the vision service's /health), remembered for a few minutes."""
         cached = getattr(self, "_local_cache", None)
-        if cached and time.monotonic() - cached[0] < LOCAL_INFO_SECONDS and cached[2] == url:
+        if cached and cached[2] == url and time.monotonic() < cached[0]:
             return cached[1]
-        info: dict[str, Any] = {}
+        known = cached[1] if cached and cached[2] == url else {}
         try:
             async with asyncio.timeout(5):
                 response = await async_get_clientsession(self.hass).get(f"{url}/health")
+                response.raise_for_status()
                 body = await response.json()
-            if isinstance(body, dict):
-                info = {"model": body.get("model"), "names": body.get("names") or [], "sure": body.get("sure") or {}}
-        except Exception:  # noqa: BLE001 - nothing trusted until it answers
-            info = {}
-        self._local_cache = (time.monotonic(), info, url)
+            if not isinstance(body, dict):
+                raise ValueError("not an object")
+            info = {"model": body.get("model"), "names": body.get("names") or [], "sure": body.get("sure") or {}}
+            self._local_cache = (time.monotonic() + LOCAL_INFO_SECONDS, info, url)
+        except Exception:  # noqa: BLE001 - one hiccup: what was known stands, asked again in 30 s
+            info = known
+            self._local_cache = (time.monotonic() + 30, info, url)
         return info
 
     def _local_verdict(self, det: dict[str, Any] | None, *, sure_only: bool) -> logic.Verdict | None:
@@ -1134,6 +1194,14 @@ class WatchEngine:
                 return None
         display = animal.name if animal else name
         level = logic.HIGH if sure else logic.MEDIUM if conf >= 0.5 else logic.LOW
+        # Filling in for the AI: an animal that needs two models to agree (priority,
+        # always-strict, long-absent, missing) is shown, but not counted until someone confirms.
+        needs_check = bool(
+            (animal and (animal.priority or animal.always_strict or self.missing_mode(animal)))
+            or name.lower() in self.strict_keys()
+        )
+        if needs_check:
+            level = logic.LOW
         box = None
         size = det.get("size") or [None, None]
         top = (det.get("boxes") or [{}])[0].get("box")
@@ -1148,6 +1216,7 @@ class WatchEngine:
             first_look_said=f"local:{name.lower()}|{round(conf, 3)}",
             second_opinion_said="",
             named=(name.lower(),),
+            unchecked=needs_check,
             box=box,
         )
 
@@ -1272,12 +1341,12 @@ class WatchEngine:
             return False
         return not logic.in_time_window(dt_util.now().time(), start, end)
 
-    async def _identify_capped(self, cam: CameraConfig) -> tuple[logic.Verdict, str]:
+    async def _identify_capped(self, cam: CameraConfig, *, free_only: bool = False) -> tuple[logic.Verdict, str]:
         """_identify with a cap on the whole chain: past it, what had been said is decided."""
         said: dict[str, Any] = {}
         try:
             async with asyncio.timeout(IDENTIFY_CAP_SECONDS):
-                return await self._identify(cam, said)
+                return await self._identify(cam, said, free_only=free_only)
         except TimeoutError:
             _LOGGER.warning(
                 "%s: the AI took over %s s, deciding on what it had said", cam.name, IDENTIFY_CAP_SECONDS
@@ -1304,7 +1373,7 @@ class WatchEngine:
         return verdict, models
 
     async def _identify(
-        self, cam: CameraConfig, said: dict[str, Any] | None = None
+        self, cam: CameraConfig, said: dict[str, Any] | None = None, *, free_only: bool = False
     ) -> tuple[logic.Verdict, str]:
         """Ask the chain. Each answer is written into `said` as it arrives, so a caller that
         gives up early can still decide on what was said."""
@@ -1336,7 +1405,7 @@ class WatchEngine:
                     return True
             return False
 
-        if not await first_look(order):
+        if not await first_look(order) and not free_only:
             # Nobody answered: the paid models (from either list) have a go, then, if there's
             # still time, the first look once more (a burst of checks can hit free limits).
             tried = {m for _, m in order}
@@ -1363,6 +1432,9 @@ class WatchEngine:
         backup_check = from_backup and logic.names_animal(first)
         second, second_label = "", ""
         said["unconfirmed"] = backup_check
+        # Set before the second opinion is asked: if the time cap ends the wait, a priority
+        # animal nobody double-checked is held as unchecked, as when the second model fails.
+        said["unchecked"] = bool(answer and answer.name in priority)
         if special or backup_check or wild_check:
             chain = self._chain(CONF_SECOND_OPINION, free_only=not special)
             awake = set(self._awake([m for m in chain if m != first_model]))
@@ -1475,7 +1547,7 @@ class WatchEngine:
             "time": _iso(now),
             "detector": check.detector,
         }
-        if check.detector is not None and not check.models.startswith("Local detector"):
+        if check.detector is not None and not check.models.startswith("Local"):
             self._score_detector(v, check.detector, now)
         if logic.is_noteworthy(v, rules):
             cam_state["last_noteworthy"] = v.animal
@@ -1525,11 +1597,13 @@ class WatchEngine:
                 "second_opinion_said": v.second_opinion_said,
                 "models_used": check.models,
                 "label": None,
+                **({"named_by": "local"} if check.models.startswith("Local model") else {}),
                 **({"ai_box": [round(c, 4) for c in v.box]} if v.box else {}),
             }
             try:
                 await self.hass.async_add_executor_job(
-                    dataset.save_sample, self.dataset_root, day, sid, check.frame, meta
+                    dataset.save_sample, self.dataset_root, day, sid, check.frame, meta,
+                    bool(self.options.get(CONF_DATASET_FULL)),
                 )
             except Exception as err:  # noqa: BLE001 - training data is best-effort
                 _LOGGER.debug("Training sample not saved: %s", err)
@@ -1711,6 +1785,19 @@ class WatchEngine:
     async def async_correct(
         self, sid: str | None, camera: CameraConfig | None, answer: str
     ) -> dict[str, Any]:
+        """A person's verdict on a sighting (see _correct), recorded one at a time with the
+        checks, so an answer and a check never rewrite the same photo at once."""
+        async with self._lock:
+            return await self._correct(sid, camera, answer)
+
+    async def async_undo_last(self) -> dict[str, Any]:
+        """Take back the last answer (see _undo_last)."""
+        async with self._lock:
+            return await self._undo_last()
+
+    async def _correct(
+        self, sid: str | None, camera: CameraConfig | None, answer: str
+    ) -> dict[str, Any]:
         """A person's verdict on a sighting: "right", "wrong", or what it really was.
 
         Tracking moves to the right animal, the photo follows, and the training sample is
@@ -1737,22 +1824,18 @@ class WatchEngine:
             row["user"] = "unsure"
             row["label"] = None
         elif answer.lower() == "right":
-            row["label"] = before
-            row["user"] = "right"
-            if old and not row.get("counted"):
+            # Also after an earlier "wrong": it's back on the animal. A person's yes is as
+            # sure as it gets (a priority animal's confirmed sighting).
+            row.update(label=before, user="right", wrong=False, confidence="confirmed")
+            if old:
                 row["counted"] = True
                 row["log"] = True
                 await self._recompute(old, row)
-        elif answer.lower() == "other":
-            # Something else, to be picked later: off the animal's tracking, still in To review.
+        elif answer.lower() in ("other", "wrong"):
+            # Not that animal ("other": to be picked later, so it stays in To review): off the
+            # animal's tracking.
             row["label"] = f"not:{before}"
-            row["user"] = "other"
-            row["wrong"] = True
-            if old:
-                await self._recompute(old, row, removed=True)
-        elif answer.lower() == "wrong":
-            row["label"] = f"not:{before}"
-            row["user"] = "wrong"
+            row["user"] = answer.lower()
             row["wrong"] = True
             if old:
                 await self._recompute(old, row, removed=True)
@@ -1790,7 +1873,7 @@ class WatchEngine:
         self._notify()
         return {"corrected": {k: row.get(k) for k in ("id", "time", "where", "animal", "label")}, "was": before}
 
-    async def async_undo_last(self) -> dict[str, Any]:
+    async def _undo_last(self) -> dict[str, Any]:
         """Take back the last answer: the sighting is as it was (back in To review), and
         tracking and the photo follow."""
         undo = self.data.pop("last_answer", None)
@@ -1841,7 +1924,11 @@ class WatchEngine:
                 state["on_camera_until"] = None
                 state["confirmed_until"] = None
                 async with self._photo_lock(subject):
-                    restored = await self.hass.async_add_executor_job(_restore_previous, photo)
+                    try:
+                        restored = await self.hass.async_add_executor_job(_restore_previous, photo)
+                    except OSError as err:
+                        _LOGGER.warning("%s: the previous photo wasn't restored: %s", subject.name, err)
+                        restored = False
                 state["photo_at"] = (latest["time"] if latest else None) if restored else None
             cam_state = self.camera_state(row.get("camera", ""))
             if cam_state.get("current") == subject.name:
@@ -1851,9 +1938,12 @@ class WatchEngine:
                 dataset.read_frame, self.dataset_root, row["day"], row["id"]
             )
             if frame:
-                async with self._photo_lock(subject):
-                    await self.hass.async_add_executor_job(_rotate_and_write, photo, frame)
-                state["photo_at"] = row["time"]
+                try:
+                    async with self._photo_lock(subject):
+                        await self.hass.async_add_executor_job(_rotate_and_write, photo, frame)
+                    state["photo_at"] = row["time"]
+                except OSError as err:
+                    _LOGGER.warning("%s: the photo wasn't updated: %s", subject.name, err)
 
     @callback
     def _on_phone_action(self, event: Event) -> None:
@@ -2171,13 +2261,23 @@ class WatchEngine:
         record = self.data["scans"][sid]
         try:
             status: dict[str, Any] = {}
+            failed = 0
             for _ in range(6 * 60 * 12):  # up to 12 hours
-                async with asyncio.timeout(30):
-                    response = await session.get(f"{url}/scan/{sid}")
-                    if response.status == 404:  # the detector restarted and forgot this scan
-                        status = {"state": "error", "error": "The detector restarted during the scan."}
-                        break
-                    status = await response.json()
+                try:
+                    async with asyncio.timeout(30):
+                        async with session.get(f"{url}/scan/{sid}") as response:
+                            if response.status == 404:  # the detector restarted and forgot this scan
+                                status = {"state": "error", "error": "The detector restarted during the scan."}
+                                break
+                            response.raise_for_status()
+                            status = await response.json()
+                    failed = 0
+                except Exception:  # noqa: BLE001 - one slow or broken answer doesn't end a long scan
+                    failed += 1
+                    if failed >= 6:
+                        raise
+                    await asyncio.sleep(5)
+                    continue
                 record.update(
                     files_total=status.get("files_total"), files_done=status.get("files_done")
                 )
@@ -2198,9 +2298,12 @@ class WatchEngine:
                 results.append(entry)
             report = None
             if status.get("state") == "done":
-                async with asyncio.timeout(120):
-                    answer = await (await session.post(f"{url}/scan/{sid}/report", json={"names": names})).json()
-                report = answer.get("report")
+                try:  # the report is an extra: without it the visits and names still stand
+                    async with asyncio.timeout(120):
+                        async with session.post(f"{url}/scan/{sid}/report", json={"names": names}) as response:
+                            report = (await response.json()).get("report")
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning("Scan %s: no report: %s", sid, err)
             tally: dict[str, int] = {}
             for entry in results:
                 key = entry.get("animal") or "animal"
@@ -2225,16 +2328,17 @@ class WatchEngine:
         """Identify one visit's best frame like a camera check (without tracking)."""
         url = self._detector_url()
         async with asyncio.timeout(60):
-            response = await async_get_clientsession(self.hass).get(f"{url}/scan/{sid}/frame/{visit['n']}")
-            if response.status != 200:
-                return None
-            frame = await response.read()
+            async with async_get_clientsession(self.hass).get(f"{url}/scan/{sid}/frame/{visit['n']}") as response:
+                if response.status != 200:
+                    return None
+                frame = await response.read()
         slug = f"scan_{sid}_{visit['n']}"
         place = f"{folder}/{visit['file']}"
         cam = CameraConfig("", f"scan of {place}", slug, "", [], [], logic.Cooldown(), [])
         await self.hass.async_add_executor_job(_write, self.frame_path(slug), frame)
         try:
-            verdict, models = await self._identify_capped(cam)
+            # Old footage: the local model when it's sure, else free AI models only.
+            verdict, models = await self._name(cam, await self._detect(frame), free_only=True)
         finally:
             await self.hass.async_add_executor_job(remove_file, self.frame_path(slug))
         now = dt_util.utcnow()
@@ -2254,6 +2358,7 @@ class WatchEngine:
                 "scan": sid,
             }
         )
+        self._prune(now)
         if self.options.get(CONF_DATASET, True):
             meta = {
                 "id": row_id,
@@ -2267,11 +2372,13 @@ class WatchEngine:
                 "second_opinion_said": verdict.second_opinion_said,
                 "models_used": models,
                 "label": None,
+                **({"named_by": "local"} if models.startswith("Local model") else {}),
                 **({"ai_box": [round(c, 4) for c in verdict.box]} if verdict.box else {}),
             }
             try:
                 await self.hass.async_add_executor_job(
-                    dataset.save_sample, self.dataset_root, day, row_id, frame, meta
+                    dataset.save_sample, self.dataset_root, day, row_id, frame, meta,
+                    bool(self.options.get(CONF_DATASET_FULL)),
                 )
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Scan sample not saved: %s", err)

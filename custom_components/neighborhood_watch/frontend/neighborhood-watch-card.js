@@ -5,6 +5,9 @@
  * Every section can be turned off, devices hidden, and the layout tuned in the editor.
  */
 const DOMAIN = "neighborhood_watch";
+// Signed photo links, shared by every card on the page: path -> {url, exp}, and the requests under way.
+const SIGNED = new Map();
+const SIGNING = new Map();
 const SECTIONS = [
   { value: "review", label: "To review" },
   { value: "animals", label: "Animals" },
@@ -70,9 +73,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!this._tick) this._tick = setInterval(() => this._onTick(), 60000);
     if (!this._onKey) {
       this._onKey = (ev) => {
-        if (ev.key !== "Escape" || !this._zoom) return;
-        this._zoom = this._lb = null;
-        this._render(true);
+        if (ev.key === "Escape" && this._zoom) this._closeLightbox();
       };
       window.addEventListener("keydown", this._onKey);
     }
@@ -86,6 +87,8 @@ class NeighborhoodWatchCard extends HTMLElement {
       window.addEventListener("pointerup", this._onRelease);
       window.addEventListener("pointercancel", this._onRelease);
     }
+    // Put back on the page (edit mode, a view laid out again): the sprites were stopped.
+    if (this.shadowRoot && this._hass && this._config) this._render(true);
   }
 
   disconnectedCallback() {
@@ -261,10 +264,40 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _busy() {
-    // Typing: a redraw now would undo it. (Not a list: closing one without choosing leaves
-    // it focused.)
+    // A press in progress: a redraw now would swap the button under the finger, and the tap
+    // could land on another sighting's. Typing, or a list that's open: a redraw would undo it.
+    // (At most 30 s, see _render: a list closed without choosing stays focused.)
+    if (this._pressing) return true;
     const el = this.shadowRoot?.activeElement;
-    return !!(el && !el.disabled && el.matches("input, textarea"));
+    return !!(el && !el.disabled && el.matches("input, textarea, select"));
+  }
+
+  // What has the keyboard focus, so a redraw can give it back (the redraw replaces every element).
+  _focused() {
+    const el = this.shadowRoot?.activeElement;
+    if (!el) return null;
+    const data = [...el.attributes].filter((a) => a.name.startsWith("data-") && a.name !== "data-ago");
+    let caret = null;
+    try {
+      if (el.matches("input, textarea") && el.selectionStart != null) caret = [el.selectionStart, el.selectionEnd];
+    } catch (e) {}
+    if (data.length)
+      return { sel: el.tagName.toLowerCase() + data.map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join(""), caret };
+    if (el.classList.contains("foldbtn")) return { title: el.textContent.split(" · ")[0].trim() };
+    return null;
+  }
+
+  _refocus(was) {
+    if (!was || this._zoom) return;
+    const root = this.shadowRoot;
+    const el = was.sel
+      ? root.querySelector(was.sel)
+      : [...root.querySelectorAll(".foldbtn")].find((b) => b.textContent.split(" · ")[0].trim() === was.title);
+    if (!el || el.disabled) return;
+    el.focus({ preventScroll: true });
+    try {
+      if (was.caret) el.setSelectionRange(was.caret[0], was.caret[1]);
+    } catch (e) {}
   }
 
   _resume() {
@@ -289,6 +322,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     }
     this._pending = false;
     const root = this.shadowRoot;
+    const focused = this._focused();
     const typing = root?.querySelector("[data-note-text]");
     if (typing && this._note) this._note.text = typing.value;
     const about = root?.querySelector("[data-note-about]");
@@ -334,8 +368,8 @@ class NeighborhoodWatchCard extends HTMLElement {
         el.click();
       });
     }
-    const cols = this._config.columns || 3;
-    const ph = this._config.photo_height || 140;
+    const cols = Math.max(1, Math.min(6, Math.round(Number(this._config.columns)) || 3));
+    const ph = Math.max(60, Math.min(400, Math.round(Number(this._config.photo_height)) || 140));
     if (this._styleKey !== `${cols}|${ph}`) {
       this._styleKey = `${cols}|${ph}`;
       this._style = STYLE.replace("__COLS__", cols).replace("__SMALLCOLS__", Math.min(cols, 2)).replace("__PH__", ph);
@@ -368,15 +402,20 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (this._config.fold !== false) this.shadowRoot.querySelectorAll(".section > h2, .whole > h2").forEach((h) => {
       const key = h.textContent.split(" · ")[0].trim();
       if (this._folded().has(key)) h.parentElement.classList.add("folded");
-      tappable(h);
-      h.setAttribute("aria-expanded", String(!this._folded().has(key)));
+      // The title stays a heading (screen readers jump between headings); the button is inside it.
+      const btn = document.createElement("span");
+      btn.className = "foldbtn";
+      btn.append(...h.childNodes);
+      h.append(btn);
+      tappable(btn);
+      btn.setAttribute("aria-expanded", String(!this._folded().has(key)));
       h.addEventListener("click", () => {
         const folded = this._folded();
         folded.has(key) ? folded.delete(key) : folded.add(key);
         try {
           localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
         } catch (e) {}
-        h.setAttribute("aria-expanded", String(!h.parentElement.classList.toggle("folded")));
+        btn.setAttribute("aria-expanded", String(!h.parentElement.classList.toggle("folded")));
       });
     });
     this.shadowRoot.querySelectorAll("[data-more]").forEach((el) => {
@@ -500,11 +539,12 @@ class NeighborhoodWatchCard extends HTMLElement {
       if (h) {
         this._reviewShown = true;
         h.parentElement.classList.remove("folded");
-        h.setAttribute("aria-expanded", "true");
+        h.querySelector(".foldbtn")?.setAttribute("aria-expanded", "true");
         setTimeout(() => h.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       }
     } else if (location.hash !== "#review") this._reviewShown = false;
     this._wireLightbox();
+    this._refocus(focused);
     const scanButton = this.shadowRoot.querySelector("[data-scan]");
     if (scanButton)
       scanButton.addEventListener("click", () => {
@@ -541,6 +581,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (it) this._hidden.set(sid, listedAs(it));
     // Answered while the list is that long: keep only the newest few hundred.
     for (const old of this._answered) if (this._answered.size > 200) this._answered.delete(old);
+    this._note = this._noteFor(d, it, answer) || this._note;
     this._render(true);
     Promise.resolve(this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid })).catch((err) => {
       this._answered.delete(sid);
@@ -548,18 +589,18 @@ class NeighborhoodWatchCard extends HTMLElement {
       this._render(true);
       alert(`Answer not saved: ${err.message || err}`);
     });
-    // A mistake fixed: offer to tell the AI, where it will use it.
-    if (["right", "unsure"].includes(answer)) return;
-    if (!it) return;
+  }
+
+  // A mistake fixed: the note box that offers to tell the AI, where it will use it.
+  _noteFor(d, it, answer) {
+    if (["right", "unsure"].includes(answer) || !it) return null;
     // Notes are about an animal or a camera; wildlife kinds can't hold one.
     const known = new Set(d.animals.map((x) => x.name));
     const about = [];
     if (answer !== "wrong" && known.has(answer)) about.push(["animal", answer, `${answer}: how to recognise them`]);
     if (known.has(it.animal) && it.animal !== answer) about.push(["animal", it.animal, `${it.animal}: how to tell them apart`]);
     if (d.cameras.some((c) => c.name === it.where)) about.push(["camera", it.where, `${it.where} camera: what's in this view`]);
-    if (!about.length) return;
-    this._note = { said: it.animal, was: answer === "wrong" ? "not that" : answer, about, text: "" };
-    this._render(true);
+    return about.length ? { said: it.animal, was: answer === "wrong" ? "not that" : answer, about, text: "" } : null;
   }
 
   _noteBox() {
@@ -597,37 +638,66 @@ class NeighborhoodWatchCard extends HTMLElement {
       this._broken.delete(path);
       // A failed load is tried twice more, a few seconds apart, each time signed afresh
       // (the link may have expired).
+      // (Counted per photo on the card: a redraw replaces the element, and must not start
+      // the count again, or a photo that's gone would be asked for on every redraw.)
       img.addEventListener("error", () => {
         if (img.dataset.fellBack) return img.classList.add("broken");
-        const tries = Number(img.dataset.tries || 0);
+        this._tries = this._tries || new Map();
+        const tries = this._tries.get(path) || 0;
         if (tries >= 2) {
+          this._tries.delete(path);
           this._broken.set(path, Date.now());
           return giveUp();
         }
-        img.dataset.tries = String(tries + 1);
+        this._tries.set(path, tries + 1);
         delete this._signed[path];
-        setTimeout(() => img.isConnected && this._sign(img, path), tries ? 6000 : 2000);
+        SIGNED.delete(path);
+        setTimeout(() => img.isConnected && this._sign(img, path, giveUp), tries ? 6000 : 2000);
       });
-      this._sign(img, path);
+      img.addEventListener("load", () => this._tries?.delete(path));
+      this._sign(img, path, giveUp);
     });
   }
 
-  _sign(img, path) {
+  _sign(img, path, giveUp) {
     // Signed links last a day; sign again in the last hour so a thumbnail never goes stale.
-    const cached = this._signed[path];
+    // Shared by every card on the page (SIGNED), and one request per photo however many
+    // redraws ask for it meanwhile.
+    const cached = this._signed[path] || SIGNED.get(path);
     if (cached && cached.exp - Date.now() > 3600e3) {
+      this._signed[path] = cached;
       img.src = cached.url;
       return;
     }
-    this._hass
-      .callWS({ type: "auth/sign_path", path, expires: 86400 })
-      .then((r) => {
-        const now = Date.now();
-        for (const [p, c] of Object.entries(this._signed)) if (c.exp <= now) delete this._signed[p];
-        this._signed[path] = { url: r.path, exp: now + 86400e3 };
-        img.src = r.path;
+    let asking = SIGNING.get(path);
+    if (!asking) {
+      asking = this._hass
+        .callWS({ type: "auth/sign_path", path, expires: 86400 })
+        .then((r) => {
+          const now = Date.now();
+          for (const [p, c] of SIGNED) if (c.exp <= now) SIGNED.delete(p);
+          for (const [p, c] of Object.entries(this._signed)) if (c.exp <= now) delete this._signed[p];
+          const link = { url: r.path, exp: now + 86400e3 };
+          SIGNED.set(path, link);
+          return link;
+        })
+        .finally(() => SIGNING.delete(path));
+      SIGNING.set(path, asking);
+    }
+    asking
+      .then((link) => {
+        this._signed[path] = link;
+        if (img.isConnected) img.src = link.url;
       })
-      .catch(() => img.classList.add("broken"));
+      .catch(() => (giveUp ? giveUp() : img.classList.add("broken")));
+  }
+
+  _closeLightbox() {
+    const from = this._zoom;
+    this._zoom = this._lb = null;
+    this._render(true);
+    // Back to the picture it was opened from.
+    if (from) this.shadowRoot.querySelector(`[data-zoom="${CSS.escape(from)}"]`)?.focus({ preventScroll: true });
   }
 
   _lightbox() {
@@ -637,7 +707,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
         <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}" draggable="false">
-        <div class="lbhint">Tap to zoom in · scroll or pinch to zoom · drag to move</div>
+        <div class="lbhint">Tap to zoom in · scroll, pinch or + and − to zoom · drag or arrows to move</div>
       </div>`;
   }
 
@@ -658,8 +728,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     // Tapping around the picture (or ✕) closes it; the picture itself zooms and moves.
     box.addEventListener("click", (ev) => {
       if (ev.target !== box && !ev.target.closest(".lbclose")) return;
-      this._zoom = this._lb = null;
-      this._render(true);
+      this._closeLightbox();
     });
     const img = box.querySelector(".lbimg");
     // Kept on the card, so a redraw while it's open (a new sighting) keeps the zoom.
@@ -740,6 +809,21 @@ class NeighborhoodWatchCard extends HTMLElement {
     };
     img.addEventListener("pointerup", up);
     img.addEventListener("pointercancel", up);
+    // Keyboard: + and - zoom, the arrows move, Tab stays on Close (nothing behind it is reachable).
+    box.addEventListener("keydown", (ev) => {
+      const r = img.getBoundingClientRect();
+      const mid = [r.left + r.width / 2, r.top + r.height / 2];
+      const move = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] }[ev.key];
+      if (ev.key === "Tab") box.querySelector(".lbclose").focus();
+      else if (ev.key === "+" || ev.key === "=") zoomAt(mid[0], mid[1], v.s * 1.5);
+      else if (ev.key === "-" || ev.key === "_") zoomAt(mid[0], mid[1], v.s / 1.5);
+      else if (move && v.s > 1) {
+        v.x += move[0];
+        v.y += move[1];
+        apply();
+      } else return;
+      ev.preventDefault();
+    });
   }
 
   _review(d) {
@@ -772,7 +856,6 @@ class NeighborhoodWatchCard extends HTMLElement {
     const suggest = `<datalist id="nw-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
     const rows = items.slice(0, limit).map((it) => {
       const sid = esc(it.id);
-      const off = "";
       const pick =
         this._typing === String(it.id)
           ? `<input class="typed" data-type-sid="${sid}" list="nw-names" placeholder="What was it?" aria-label="What was it?">` +
@@ -838,13 +921,17 @@ class NeighborhoodWatchCard extends HTMLElement {
     this._ir = this._ir || {};
     for (const a of this._devices().animals || []) {
       const seen = this._state(a.keys.last_seen);
-      const url = this._state(a.keys.last_photo)?.attributes?.entity_picture;
+      const photo = this._state(a.keys.last_photo);
+      const url = photo?.attributes?.entity_picture;
       const look = seen?.attributes?.appearance;
-      if (!look || !NWSprites.hasCollar(look) || !url || url in this._ir) continue;
-      this._ir[url] = false;
-      NWSprites.isInfrared(url).then((ir) => {
-        this._ir[url] = ir;
-        if (ir) this._render(true);
+      // One answer per photo: the link's access token changes every few minutes, the photo
+      // (the image entity's state) only when a new one is taken.
+      const was = this._ir[a.keys.last_photo];
+      if (!look || !NWSprites.hasCollar(look) || !url || was?.photo === photo.state) continue;
+      const mine = (this._ir[a.keys.last_photo] = { photo: photo.state, ir: false });
+      NWSprites.isInfrared(url, `${a.keys.last_photo}|${photo.state}`).then((ir) => {
+        mine.ir = ir;
+        if (ir && this._ir[a.keys.last_photo] === mine) this._render(true);
       });
     }
   }
@@ -872,7 +959,9 @@ class NeighborhoodWatchCard extends HTMLElement {
     const isCat = /cat/i.test(name);
     const pic = isCat
       ? `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify({ cat: NWSprites.nearestLook(k), ...(live ? { mode: "alert" } : {}) }))}" role="img" aria-label="${esc(name)}"></canvas>`
-      : catFace({ pattern: k.pattern, base: k.base, looks: k.description || "" });
+      : /cat/i.test(k.description || "")
+        ? catFace({ pattern: k.pattern, base: k.base, looks: k.description || "" })
+        : `<div class="initial" role="img" aria-label="${esc(name)}">${esc((name.replace(/^unknown\s+/i, "") || "?").charAt(0).toUpperCase())}</div>`;
     const badges = [];
     if (k.tonight) badges.push(`<span class="badge">${esc(k.tonight)} tonight</span>`);
     if (k.possible) badges.push(`<span class="badge dim">possible</span>`);
@@ -912,7 +1001,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       // stays the fallback (an older photo, or no training data saved).
       const cropId = seen?.attributes?.photo_id;
       const look = seen?.attributes?.appearance;
-      const ir = look && NWSprites.hasCollar(look) && this._ir?.[photo?.attributes?.entity_picture];
+      const ir = look && NWSprites.hasCollar(look) && this._ir?.[a.keys.last_photo]?.ir;
       // Away lately: asleep for part of the time, more the longer it has been gone.
       const awayDays = !live && absent?.state === "on" && seen ? (Date.now() - new Date(seen.state).getTime()) / 864e5 : NaN;
       const mode = live ? { mode: "alert" } : awayDays >= 0 ? { mode: "sleep", share: NWSprites.sleepShare(awayDays) } : {};
@@ -1127,6 +1216,9 @@ function catFace({ pattern = "na", base = "na", looks = "" }) {
 const STYLE = `
   :host { display: block; container-type: inline-size; }
   .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
+  .foldbtn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; border-radius: 4px; }
+  img.broken { opacity: .3; }
+  .initial { font-size: 2.4em; font-weight: 500; color: var(--secondary-text-color); }
   .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
   .nofold .section > h2 { cursor: auto; user-select: auto; }
   .nofold .section > h2::after { content: none; }
@@ -1136,7 +1228,7 @@ const STYLE = `
   .subhead { font-size: .85em; font-weight: 600; margin: 14px 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: .04em; }
   .section + .section, .section + .side, .side + .section { margin-top: 18px; }
-  .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px 28px; align-items: start; }
+  .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 18px 28px; align-items: start; }
   .side > .section { margin-top: 0; min-width: 0; }
   .grid { display: grid; grid-template-columns: repeat(__COLS__, minmax(0, 1fr)); gap: 12px; }
   .tile { border-radius: 18px; overflow: hidden; background: var(--secondary-background-color); border: 2px solid transparent; display: flex; flex-direction: column; }
@@ -1267,44 +1359,6 @@ function outline(g, col) {
     }
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (o[y][x]) g[y][x] = o[y][x];
 }
-function rects(g) {
-  let r = "";
-  for (let y = 0; y < N; y++)
-    for (let x = 0; x < N; x++) if (g[y][x]) r += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="${g[y][x]}"/>`;
-  return r;
-}
-function svg(g) {
-  return `<svg viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" class="sprite">${rects(g)}</svg>`;
-}
-// Frames shown one after another (a flip-book): [[grid, seconds], ...], looping. All the
-// distinct frames sit side by side on one strip and a single animation slides the strip,
-// so exactly one frame shows at any moment. Each sprite starts at a random point.
-function animated(frames) {
-  const keys = [], strips = [];
-  const index = frames.map(([g]) => {
-    const key = rects(g);
-    let i = keys.indexOf(key);
-    if (i < 0) {
-      i = keys.push(key) - 1;
-      strips.push(`<g transform="translate(${i * N} 0)">${key}</g>`);
-    }
-    return i;
-  });
-  if (reducedMotion()) return svg(frames[0][0]); // still, when motion is turned down
-  const total = frames.reduce((t, [, d]) => t + d, 0);
-  const start = -(Math.random() * total).toFixed(2);
-  let at = 0;
-  const times = [], values = [];
-  frames.forEach(([, d], k) => {
-    times.push((at / total).toFixed(4));
-    values.push(`${-index[k] * N} 0`);
-    at += d;
-  });
-  return `<svg viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" class="sprite" overflow="hidden"><g>` +
-    `<animateTransform attributeName="transform" type="translate" dur="${total}s" begin="${start}s" repeatCount="indefinite" calcMode="discrete" keyTimes="${times.join(";")}" values="${values.join(";")}"/>` +
-    `${strips.join("")}</g></svg>`;
-}
-
 function reducedMotion() {
   if (globalThis.NW_FORCE_MOTION) return false; // preview pages play regardless
   try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
@@ -1329,14 +1383,6 @@ function lift(g, dy) {
   return out;
 }
 
-function pixelCat(o) {
-  return svg(catGrid(o));
-}
-// Idle: the tail sways and curls, breathing, an ear flick, blinks (one slow), now and then
-// a yawn or a paw lick.
-function idleCat(o) {
-  return animated(idleCatFrames(o));
-}
 function idleCatFrames(o) {
   if (!o.pawUp) return o.tailWrap ? [...idleFrames(o), ...wrapIn(o), ...idleFrames(o, true), ...wrapOut(o)] : idleFrames(o);
   const down = { ...o, pawUp: false };
@@ -1487,13 +1533,6 @@ function sleepCatFrames(o, share = 0.75) {
 // three quarters after a month, nearly always after two months.
 function sleepShare(days) {
   return days > 60 ? 0.95 : days > 30 ? 0.75 : 0.5;
-}
-function sleepCat(o, share) {
-  return animated(sleepCatFrames(o, share));
-}
-// On alert: ears up, tail straight up, wide eyes; still apart from a blink.
-function alertCat(o) {
-  return animated(alertCatFrames(o));
 }
 function alertCatFrames(o) {
   const a = catGrid({ ...o, alert: true });
@@ -2920,11 +2959,6 @@ function recolor(g, test, c) {
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) if (g[y][x] && g[y][x] !== LINE && test(x, y, g[y][x])) g[y][x] = typeof c === "function" ? c(x, y) : c;
 }
-// Idle for wildlife: breathing, the tail (or a bird's head) moves, a blink, then the
-// animal's own move (ACTS) now and then.
-function idle(make, name) {
-  return animated(idleWildFrames(make, name));
-}
 function idleWildFrames(make, name) {
   const rest = make({ tail: 0 });
   const acts = (ACTS[name] || []).map(([f, d]) => [make({ tail: 0, ...f }), d]);
@@ -2941,18 +2975,10 @@ function idleWildFrames(make, name) {
     [breathe(rest, 36), 0.7],
   ];
 }
-// Walking in: legs swinging (four-legged animals) or hopping (the rest).
-function walker(make) {
-  return animated(walkerFrames(make));
-}
 function walkerFrames(make) {
   const a = make({ walk: 1 }), b = make({ walk: 2 });
   if (JSON.stringify(a) === JSON.stringify(b)) return [[make({}), 0.25], [lift(make({}), 2), 0.18]];
   return [[a, 0.18], [make({}), 0.12], [b, 0.18], [make({}), 0.12]];
-}
-// On alert: head up, tail up, holding still apart from a blink.
-function alertWild(make) {
-  return animated(alertWildFrames(make));
 }
 function alertWildFrames(make) {
   const a = make({ alert: true });
@@ -3447,6 +3473,7 @@ function buildLater(spec, first, done) {
   return job;
 }
 // Plays a sprite on a canvas until stopped; a walk-in plays once, then the idle loops.
+const SPRITE_START = new Map(); // spec -> when it first started playing
 function playSprite(canvas, spec) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return () => {};
@@ -3460,7 +3487,24 @@ function playSprite(canvas, spec) {
     if (!frames.length) return;
     const loopFrom = spec.mode === "walk" ? frames.length - spriteFrames({ ...spec, mode: "idle" }).length : 0;
     // Held still (reduced motion), it shows its resting frame, never one caught mid-move.
-    let i = reducedMotion() ? loopFrom : spec.mode === "walk" ? 0 : Math.floor(Math.random() * frames.length);
+    // Where it would be by now had it never stopped: a redraw replaces the canvas, and the
+    // animal must not jump to another frame (or walk in again) each time.
+    const key = JSON.stringify(spec);
+    const total = frames.reduce((sum, f) => sum + f[1], 0);
+    if (!SPRITE_START.has(key))
+      SPRITE_START.set(key, performance.now() - (spec.mode === "walk" ? 0 : Math.random() * total * 1000));
+    let i = loopFrom;
+    if (!reducedMotion()) {
+      let t = (performance.now() - SPRITE_START.get(key)) / 1000;
+      const intro = frames.slice(0, loopFrom).reduce((sum, f) => sum + f[1], 0);
+      i = 0;
+      if (t >= intro) {
+        const loop = total - intro;
+        t = loop > 0 ? (t - intro) % loop : 0;
+        i = loopFrom;
+      }
+      while (i < frames.length - 1 && t >= frames[i][1]) t -= frames[i++][1];
+    }
     const step = () => {
       show(frames[i][0]);
       if (reducedMotion()) return;
@@ -3493,11 +3537,12 @@ function mountSprites(root) {
 // Whether a photo is a night-vision (infrared) picture: almost no colour in it. A collar's
 // colour can't be told from those, so the sprite shows it grey.
 const IR_PHOTOS = new Map();
-function isInfrared(url) {
+function isInfrared(url, key = url) {
   if (!url) return Promise.resolve(false);
-  if (!IR_PHOTOS.has(url))
+  if (IR_PHOTOS.size > 200) IR_PHOTOS.clear();
+  if (!IR_PHOTOS.has(key))
     IR_PHOTOS.set(
-      url,
+      key,
       new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -3518,7 +3563,7 @@ function isInfrared(url) {
         img.src = url;
       }),
     );
-  return IR_PHOTOS.get(url);
+  return IR_PHOTOS.get(key);
 }
 const spriteKind = (name) => Object.keys(WILD).find((k) => k.toLowerCase() === String(name || "").toLowerCase());
 

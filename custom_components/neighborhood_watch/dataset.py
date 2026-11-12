@@ -1,5 +1,5 @@
-"""Training data: every checked frame, downscaled, with what the AI said and what a person
-confirmed or corrected. This is what a custom model is trained on later.
+"""Training data: every checked frame (downscaled unless full size is on), with what the AI
+said and what a person confirmed or corrected. This is what a custom model is trained on later.
 
 Layout: <root>/<YYYY-MM-DD>/<sighting id>.jpg + .json. Only files; nothing here is needed
 for the watch to run, so every function is best-effort and runs in the executor.
@@ -13,32 +13,89 @@ import shutil
 from typing import Any
 
 MAX_SIDE = 1280
+FULL_SIDE = 3840  # "full size": the camera's own size, up to 4K
 
 
-def save_sample(root: Path, day: str, sid: str, frame: bytes, meta: dict[str, Any]) -> None:
+def save_sample(
+    root: Path, day: str, sid: str, frame: bytes, meta: dict[str, Any], full: bool = False
+) -> None:
+    """full: keep the camera's size (the detector then trains on animals as large as it
+    sees them live; about 4 times the space)."""
     from PIL import Image  # noqa: PLC0415
 
     folder = root / day
     folder.mkdir(parents=True, exist_ok=True)
+    side = FULL_SIDE if full else MAX_SIDE
     with Image.open(BytesIO(frame)) as original:
         img = original.convert("RGB")
-        img.thumbnail((MAX_SIDE, MAX_SIDE))
+        img.thumbnail((side, side))
         buffer = BytesIO()
         img.save(buffer, "JPEG", quality=88)
     (folder / f"{sid}.jpg").write_bytes(buffer.getvalue())
-    (folder / f"{sid}.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    _write_record(folder / f"{sid}.json", meta)
+
+
+def _write_record(path: Path, meta: dict[str, Any]) -> None:
+    """Written beside it and moved into place, so a record is never left half rewritten
+    (which left a few unreadable ones behind)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _read_record(path: Path) -> dict[str, Any] | None:
+    """A photo's record; one with leftovers after it (an old interrupted rewrite) is read up
+    to the end of its first object."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        meta = json.loads(text)
+    except ValueError:
+        try:
+            meta, _end = json.JSONDecoder().raw_decode(text.lstrip())
+        except ValueError:
+            return None
+    return meta if isinstance(meta, dict) else None
 
 
 def set_label(root: Path, day: str, sid: str, label: str | None, how: str) -> bool:
     path = root / day / f"{sid}.json"
-    try:
-        meta = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    meta = _read_record(path)
+    if meta is None:
         return False
     meta["label"] = label
     meta["labelled_by"] = how
-    path.write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    try:
+        _write_record(path, meta)
+    except OSError:  # the folder is away (a NAS that's off): the answer itself still stands
+        return False
     return True
+
+
+def rename_labels(root: Path, names: dict[str, str]) -> int:
+    """An animal was renamed: every saved photo answered or named with the old name takes
+    the new one, so the detector keeps learning it as one animal."""
+    changed = 0
+    if not root.exists():
+        return 0
+    for path in root.rglob("*.json"):
+        meta = _read_record(path)
+        if meta is None:
+            continue
+        hit = False
+        for key in ("label", "ai_animal"):
+            if meta.get(key) in names:
+                meta[key] = names[meta[key]]
+                hit = True
+        if hit:
+            try:
+                _write_record(path, meta)
+                changed += 1
+            except OSError:
+                continue
+    return changed
 
 
 def read_frame(root: Path, day: str, sid: str) -> bytes | None:

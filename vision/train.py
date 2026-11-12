@@ -3,7 +3,9 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
 
 1. Auto-label: every animal photo gets boxes from two teachers, a COCO YOLO11m at 1280 px
    (its animal classes as one class) and the boxes the detector stored with the photo. A
-   confirmed animal photo neither could box uses the box the AI gave, if any.
+   confirmed animal photo neither could box uses the box the AI gave, if any, else the
+   best guess of MegaDetector or the teacher at a very low threshold (you said an animal is
+   there, so the most likely spot is worth learning from: these are the photos it misses).
    Photos marked empty become background images (no boxes).
    Each animal photo's main box is named after what it was (your answer, or the AI's when it
    was sure and nobody has answered): the animals with at least MIN_PER_NAME answered photos
@@ -11,13 +13,15 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
 2. Split by time: the confirmed photos from the most recent ~20% of dates are the
    evaluation set and are never trained on. So are confirmed animal photos that no teacher
    could box (they can't be trained on, but they're the misses that matter most).
-3. Train a one-class YOLO ("animal"), from yolo11s (COCO) the first time, then from the
-   trained model being served (so after an undo, from the model it went back to).
+3. Train one YOLO that finds and names, from yolo11s (COCO) the first time, then from the
+   trained model being served (so after an undo, from the model it went back to). Every
+   photo is trained on whole and as the tiles the service cuts it into, so animals are the
+   size the detector really sees them.
 4. Score the model being served and the new one on the evaluation set, the way the service
    runs them (OpenVINO, tiles) at the integration's threshold. The new model is promoted
-   if it names more of the held-back animals right without missing more of them, or misses
-   fewer and makes at least 10% fewer mistakes in all (misses plus false alarms) while naming
-   no fewer right. For each name it also finds the confidence from which that name was right
+   if it names more of the held-back animals right without missing more of them (or raising
+   many more false alarms), or misses fewer and makes at least 10% fewer mistakes in all
+   (misses plus false alarms) while naming no fewer right. For each name it also finds the confidence from which that name was right
    at least SURE_PRECISION of the time (id.json beside the export): from there the
    integration can trust it without asking the AI.
 5. A promoted model is exported to OpenVINO in WORK/models/trained-<n>/ and named in
@@ -49,7 +53,10 @@ CONFIRMED = {"right", "corrected"}
 GENERIC = "animal"  # the class for animals without enough answered photos to have their own
 MIN_PER_NAME = int(os.environ.get("NW_TRAIN_MIN_PER_NAME", "12"))
 SURE_PRECISION = float(os.environ.get("NW_TRAIN_SURE_PRECISION", "0.95"))
-SURE_MIN_COUNT = 5  # a name is trusted only after this many right answers above the line
+# A name is trusted only after this many right answers above the line (5 in a row proves little).
+SURE_MIN_COUNT = int(os.environ.get("NW_TRAIN_SURE_MIN", "15"))
+RESCUE = "megadetector+yolo11m@1"  # how unboxed answered photos get a best-guess box
+MAX_TILES = int(os.environ.get("NW_TILES", "8"))
 COCO_ANIMALS = list(range(14, 24))  # bird cat dog horse sheep cow elephant bear zebra giraffe
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -108,6 +115,7 @@ class Sample:
     boxes: list = field(default_factory=list)  # [x1, y1, x2, y2, conf] in jpg pixels
     name: str = ""  # what the animal is (your answer, else the AI's), title case
     main: int = -1  # which box is that animal (the others are just "animal")
+    rescued: bool = False  # its only box is a best guess (rescue_boxes)
 
     @property
     def empty_ok(self) -> bool:
@@ -125,11 +133,8 @@ def load_samples(dataset: Path) -> list[Sample]:
         jpg = js.with_suffix(".jpg")
         if not jpg.exists():
             continue
-        try:
-            meta = json.loads(js.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(meta, dict):
+        meta = read_record(js)
+        if meta is None:
             continue
         by = (meta.get("labelled_by") or "").lower()
         trust = "confirmed" if by in CONFIRMED else "skip" if by == "unsure" else "ai"
@@ -143,6 +148,23 @@ def load_samples(dataset: Path) -> list[Sample]:
         out.append(Sample(str(meta.get("id") or js.stem), jpg, meta, stamp, date, animal, trust,
                           name=named[:1].upper() + named[1:] if animal else ""))
     return [s for s in out if s.trust != "skip"]
+
+
+def read_record(path: Path) -> dict | None:
+    """A photo's record. One with leftovers after it (an interrupted rewrite) is read up to
+    the end of its first object rather than thrown away."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        meta = json.loads(text)
+    except ValueError:
+        try:
+            meta, _end = json.JSONDecoder().raw_decode(text.lstrip())
+        except ValueError:
+            return None
+    return meta if isinstance(meta, dict) else None
 
 
 def stored_boxes(s: Sample, w: int, h: int) -> list[list[float]]:
@@ -174,7 +196,8 @@ def _iou(a, b) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, status) -> None:
+def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, status,
+                  megadetector: Path | None = None) -> None:
     """Fill s.boxes for animal photos: COCO YOLO11m (cached per id) + the stored boxes."""
     from PIL import Image  # noqa: PLC0415
 
@@ -196,14 +219,73 @@ def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, st
                           for b, c in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist())],
             }
         write_json(cache_path, cache)
+    sizes: dict[str, tuple[int, int]] = {}
     for s in samples:
         if s.animal:
             with Image.open(s.jpg) as im:
-                w, h = im.size
+                sizes[s.id] = w, h = im.size
             s.boxes = merge((cache.get(s.id) or {}).get("boxes", []) + stored_boxes(s, w, h))
             if not s.boxes and s.trust == "confirmed":
                 s.boxes = ai_box(s, w, h)
-            s.main = main_box(s, w, h)
+    rescue_boxes([s for s in samples if s.animal and s.trust == "confirmed" and not s.boxes],
+                 work, megadetector, imgsz, device, cache, cache_path, status)
+    for s in samples:
+        if s.animal:
+            if not s.boxes and s.trust == "confirmed":
+                s.boxes = [list(b) for b in (cache.get(s.id) or {}).get("rescue_boxes", [])]
+                s.rescued = bool(s.boxes)
+            s.main = main_box(s, *sizes[s.id])
+
+
+def rescue_boxes(todo: list[Sample], work: Path, megadetector: Path, imgsz: int, device: str,
+                 cache: dict, cache_path: Path, status) -> None:
+    """A best-guess box for answered animal photos that nothing could box: MegaDetector's
+    (run in tiles, as the service runs it) or else the COCO teacher's most likely animal, at a
+    threshold far below normal. A person said an animal is there, so the likeliest spot is
+    usually it. A guess covering most of the frame, or a speck, is not used. Cached per id."""
+    from PIL import Image  # noqa: PLC0415
+
+    todo = [s for s in todo if (cache.get(s.id) or {}).get("rescue") != RESCUE]
+    if not todo:
+        return
+    md = None
+    try:
+        import detector as det  # noqa: PLC0415
+
+        md = det.env_detector(megadetector, det.make_core(work))
+        md.min_conf = 0.05
+    except Exception as err:  # noqa: BLE001 - no MegaDetector here: the teacher alone
+        print(f"MegaDetector unavailable for best-guess boxes ({err})", flush=True)
+    from ultralytics import YOLO  # noqa: PLC0415
+
+    teacher = YOLO(weights(work, "yolo11m.pt"))
+    for i, s in enumerate(todo):
+        if i % 10 == 0:
+            status(stage="labelling", done=i, total=len(todo))
+        guess: list[float] = []
+        try:
+            with Image.open(s.jpg) as im:
+                rgb = im.convert("RGB")
+            w, h = rgb.size
+            if md is not None:
+                found = [d for d in md.detect(rgb) if d["label"] == "animal"]
+                if found:
+                    guess = [float(v) for v in found[0]["box"]] + [0.3]
+            if not guess:
+                r = teacher.predict(rgb, imgsz=imgsz, conf=0.03, classes=COCO_ANIMALS, device=device, verbose=False)[0]
+                if len(r.boxes):
+                    k = int(r.boxes.conf.argmax())
+                    guess = [round(float(v), 1) for v in r.boxes.xyxy[k].tolist()] + [0.3]
+            if guess:
+                bw, bh = guess[2] - guess[0], guess[3] - guess[1]
+                if bw < 8 or bh < 8 or bw * bh > 0.6 * w * h:
+                    guess = []
+        except Exception as err:  # noqa: BLE001 - one unreadable photo doesn't end the round
+            print(f"No best-guess box for {s.id}: {err}", flush=True)
+        entry = cache.setdefault(s.id, {})
+        entry["rescue"] = RESCUE
+        entry["rescue_boxes"] = [guess] if guess else []
+    write_json(cache_path, cache)
 
 
 def main_box(s: Sample, w: int, h: int) -> int:
@@ -233,7 +315,11 @@ def class_of(s: Sample, names: list[str]) -> int | None:
     """The class of the photo's main box; None when it shouldn't be trained on (the AI named
     one of the classes without being sure, and nobody has answered)."""
     if s.name in names:
-        sure = s.trust == "confirmed" or str(s.meta.get("ai_confidence") or "").lower() == "high"
+        # A name the local model gave itself (named_by: local) teaches it nothing new, and a
+        # wrong one would teach it its own mistake.
+        sure = s.trust == "confirmed" or (
+            str(s.meta.get("ai_confidence") or "").lower() == "high" and s.meta.get("named_by") != "local"
+        )
         return names.index(s.name) if sure else None
     return names.index(GENERIC)
 
@@ -274,40 +360,105 @@ def split(samples: list[Sample]) -> tuple[list[Sample], list[Sample]]:
     return train, evals
 
 
-def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], seed: int = 0) -> tuple[Path, int]:
-    """images/{train,val} + labels/{train,val} + data.yaml. val (20% of the animal and of the
-    empty photos) only picks the best epoch and stops early; it is not the evaluation set."""
+def tiles_of(w: int, h: int, size: int) -> list[tuple[int, int, int, int]]:
+    """The tiles the service cuts a frame into (detector.Detector.tiles)."""
+    import math  # noqa: PLC0415
+
+    target = float(size)
+    while True:
+        cols, rows = math.ceil(w / target), math.ceil(h / target)
+        if cols * rows <= MAX_TILES:
+            break
+        target *= 1.15
+    if cols * rows <= 1:
+        return []
+    tw, th = w / cols, h / rows
+    pad_x, pad_y = tw * 0.1, th * 0.1
+    return [
+        (max(0, int(c * tw - pad_x)), max(0, int(r * th - pad_y)),
+         min(w, int((c + 1) * tw + pad_x)), min(h, int((r + 1) * th + pad_y)))
+        for r in range(rows) for c in range(cols)
+    ]
+
+
+def label_lines(s: Sample, names: list[str], region: tuple[int, int, int, int]) -> list[str]:
+    """YOLO label lines for the boxes inside region (x0, y0, x1, y1 of the photo): a box
+    counts when at least half of it is inside, and is clipped to the region."""
+    x0, y0, x1, y1 = region
+    rw, rh = x1 - x0, y1 - y0
+    main, generic = class_of(s, names), names.index(GENERIC)
+    lines = []
+    for i, (bx1, by1, bx2, by2, _c) in enumerate(s.boxes):
+        cx1, cy1 = max(float(x0), bx1), max(float(y0), by1)
+        cx2, cy2 = min(float(x1), bx2), min(float(y1), by2)
+        if cx2 - cx1 < 2 or cy2 - cy1 < 2:
+            continue
+        if (cx2 - cx1) * (cy2 - cy1) < 0.5 * max(1.0, (bx2 - bx1) * (by2 - by1)):
+            continue
+        k = main if i == s.main else generic
+        lines.append(
+            f"{k} {((cx1 + cx2) / 2 - x0) / rw:.6f} {((cy1 + cy2) / 2 - y0) / rh:.6f} {(cx2 - cx1) / rw:.6f} {(cy2 - cy1) / rh:.6f}"
+        )
+    return lines
+
+
+def burst(s: Sample) -> tuple:
+    """Photos of one visit (same camera, same hour) look nearly alike: they stay together."""
+    return (s.date, str(s.meta.get("camera") or ""), s.time[11:13])
+
+
+def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz: int = 960, seed: int = 0) -> tuple[Path, int]:
+    """images/{train,val} + labels/{train,val} + data.yaml. val (about 20% of the animal and
+    of the empty photos, whole visits at a time so near-identical frames don't sit on both
+    sides) only picks the best epoch and stops early; it is not the evaluation set.
+
+    Each animal photo goes in whole and as every service tile holding one of its boxes, so
+    the model trains on animals at the size it will see them. There are usually far more
+    empty photos than animal ones: as many as the animal photos are kept (at least 200),
+    half of them as a tile."""
     from PIL import Image  # noqa: PLC0415
 
     shutil.rmtree(root, ignore_errors=True)
+    rng = random.Random(seed)
     parts: dict[str, list[Sample]] = {"val": [], "train": []}
+    n_animals = sum(s.animal for s in train)
     for animal in (True, False):
         group = sorted((s for s in train if s.animal == animal), key=lambda s: s.id)
-        random.Random(seed).shuffle(group)
+        rng.shuffle(group)
+        if not animal:
+            group = group[: max(200, n_animals)]
         n_val = max(1, round(len(group) * 0.2)) if len(group) > 1 else 0
-        parts["val"] += group[:n_val]
-        parts["train"] += group[n_val:]
+        visits: dict[tuple, list[Sample]] = {}
+        for s in group:
+            visits.setdefault(burst(s), []).append(s)
+        for visit in visits.values():  # whole visits into val until it has its share
+            part = "val" if len([x for x in parts["val"] if x.animal == animal]) < n_val and len(visits) > 1 else "train"
+            parts[part] += visit
+        if n_val and not any(x.animal == animal for x in parts["train"]):  # one visit only: split it
+            mine = [x for x in parts["val"] if x.animal == animal]
+            parts["val"] = [x for x in parts["val"] if x.animal != animal] + mine[:n_val]
+            parts["train"] += mine[n_val:]
     for part, group in parts.items():
         (root / "images" / part).mkdir(parents=True)
         (root / "labels" / part).mkdir(parents=True)
-        for s in group:
+        for n, s in enumerate(group):
+            with Image.open(s.jpg) as im:
+                w, h = im.size
+                regions = tiles_of(w, h, imgsz)
+                if s.animal:
+                    wanted = [(t, label_lines(s, names, t)) for t in regions]
+                    wanted = [(t, lines) for t, lines in wanted if lines]
+                else:  # every other empty photo also gives one tile
+                    wanted = [(rng.choice(regions), [])] if regions and n % 2 else []
+                for k, (t, lines) in enumerate(wanted):
+                    im.convert("RGB").crop(t).save(root / "images" / part / f"{s.id}_t{k}.jpg", "JPEG", quality=90)
+                    (root / "labels" / part / f"{s.id}_t{k}.txt").write_text("\n".join(lines), encoding="utf-8")
             dest = root / "images" / part / f"{s.id}.jpg"
             if os.name == "posix":
                 dest.symlink_to(s.jpg.resolve())
             else:
                 shutil.copyfile(s.jpg, dest)
-            lines = []
-            if s.animal:
-                with Image.open(s.jpg) as im:
-                    w, h = im.size
-                main = class_of(s, names)
-                generic = names.index(GENERIC)
-                for i, (x1, y1, x2, y2, _c) in enumerate(s.boxes):
-                    x1, x2 = max(0.0, x1), min(float(w), x2)
-                    y1, y2 = max(0.0, y1), min(float(h), y2)
-                    k = main if i == s.main else generic
-                    if x2 - x1 >= 2 and y2 - y1 >= 2:
-                        lines.append(f"{k} {(x1 + x2) / 2 / w:.6f} {(y1 + y2) / 2 / h:.6f} {(x2 - x1) / w:.6f} {(y2 - y1) / h:.6f}")
+            lines = label_lines(s, names, (0, 0, w, h)) if s.animal else []
             (root / "labels" / part / f"{s.id}.txt").write_text("\n".join(lines), encoding="utf-8")
     yaml_path = root / "data.yaml"
     listed = "".join(f"  {i}: {json.dumps(n)}\n" for i, n in enumerate(names))
@@ -341,8 +492,9 @@ def best_scores(found: list[list[dict]]) -> list[float]:
 def naming(found: list[list[dict]], evals: list[Sample], names: list[str], threshold: float) -> dict:
     """How well the model names the held-back photos. A photo's answer is its most confident
     box's name (at or above the detector threshold). Per name: right/total, and `sure`, the
-    lowest confidence from which that name was right at least SURE_PRECISION of the time
-    (photos of other animals and empty photos count against it)."""
+    lowest name score from which that name was right at least SURE_PRECISION of the time.
+    Every other held-back photo it gave that name to counts against it: another of your
+    animals, an animal with no name of its own (a lookalike), or an empty photo."""
     guesses: dict[str, list[tuple[float, bool]]] = {}
     right = total = 0
     per: dict[str, dict] = {n: {"photos": 0, "right": 0} for n in names if n != GENERIC}
@@ -356,8 +508,8 @@ def naming(found: list[list[dict]], evals: list[Sample], names: list[str], thres
             if said == truth:
                 right += 1
                 per[truth]["right"] += 1
-        if said in per and (truth or not s.animal):
-            guesses.setdefault(said, []).append((top["confidence"], said == truth))
+        if said in per:
+            guesses.setdefault(said, []).append((top.get("name_confidence", top["confidence"]), said == truth))
     sure: dict[str, float] = {}
     for name, rows in guesses.items():
         rows.sort(key=lambda r: -r[0])
@@ -402,7 +554,8 @@ def better(before: dict, after: dict) -> bool:
         return False
     mistakes = lambda m: m["misses"] + m["false_alarms"]  # noqa: E731
     named, named_before = after.get("named_right", 0), before.get("named_right", 0)
-    if named > named_before and after["misses"] <= before["misses"]:
+    alarms_ok = after["false_alarms"] <= max(before["false_alarms"] * 1.5, before["false_alarms"] + 5)
+    if named > named_before and after["misses"] <= before["misses"] and alarms_ok:
         return True
     return (
         named >= named_before
@@ -530,7 +683,7 @@ def run(args: argparse.Namespace) -> int:
 
         settings.update({"sync": False, "weights_dir": str(tdir / "weights"), "runs_dir": str(tdir / "runs")})
 
-        teacher_boxes(samples, work, args.teacher_imgsz, device, status)
+        teacher_boxes(samples, work, args.teacher_imgsz, device, status, args.megadetector)
         names = pick_names(samples)
         entry["names"] = names
         train, evals = split(samples)
@@ -543,6 +696,7 @@ def run(args: argparse.Namespace) -> int:
             "train_empty": len(train) - len(boxed),
             "train_boxes": sum(len(s.boxes) for s in boxed),
             "unboxed_confirmed_animals": len(unboxed),
+            "best_guess_boxes": sum(s.rescued for s in boxed),
             "eval_animals": sum(s.animal for s in evals),
             "eval_empty": sum(not s.animal for s in evals),
             "per_name": {n: sum(1 for s in boxed if class_of(s, names) == i) for i, n in enumerate(names)},
@@ -574,7 +728,7 @@ def run(args: argparse.Namespace) -> int:
         previous = current_dir / "best.pt" if (current_dir / "best.pt").exists() else None
         start = str(previous) if previous else weights(work, "yolo11s.pt")
         entry["start_from"] = Path(start).parent.name if previous else "yolo11s.pt"
-        data_yaml, val_animals = build_yolo_dataset(train, tdir / "data", names)
+        data_yaml, val_animals = build_yolo_dataset(train, tdir / "data", names, args.imgsz)
         # With only a few animals to validate on, the "best" epoch is noise (often an early,
         # barely trained one): then train every epoch and keep the last.
         small = val_animals < 30

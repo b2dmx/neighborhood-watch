@@ -69,6 +69,7 @@ from .const import (
     CONF_CRITICAL_SOUND,
     CONF_CRITICAL_VOLUME,
     CONF_DATASET,
+    CONF_DATASET_FULL,
     CONF_DATASET_DIR,
     CONF_DATASET_GB,
     CONF_DETECTOR_MIN,
@@ -1187,6 +1188,7 @@ class WatchOptionsFlow(OptionsFlow):
                         CONF_DATASET_DIR, description={"suggested_value": values[CONF_DATASET_DIR] or None}
                     ): TEXT,
                     vol.Required(CONF_DATASET_GB, default=values[CONF_DATASET_GB]): _number(1, 500, "GB"),
+                    vol.Required(CONF_DATASET_FULL, default=values[CONF_DATASET_FULL]): BOOL,
                 }
             ),
         )

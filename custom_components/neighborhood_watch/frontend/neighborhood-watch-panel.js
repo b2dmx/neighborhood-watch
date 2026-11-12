@@ -275,16 +275,19 @@ class Flow {
       ? { handler: [entryId, "animal"], ...(subentryId ? { subentry_id: subentryId } : {}) }
       : { handler: entryId };
     this.id = null;
+    this.closed = false;
   }
   async begin() {
     const result = await this.hass.callApi("POST", this.base, this.start);
     this.id = result.flow_id;
+    if (this.closed) this.abort(); // closed while it was opening: don't leave the flow behind
     return result;
   }
   async step(input) {
     return this.hass.callApi("POST", `${this.base}/${this.id}`, input);
   }
   abort() {
+    this.closed = true;
     if (!this.id) return;
     const id = this.id;
     this.id = null;
@@ -332,11 +335,14 @@ class FlowForm {
     this._clean = undefined;
     this._touched = false; // anything submitted that may change a setting
     try {
-      let result = await this.flow.begin();
+      const flow = this.flow;
+      let result = await flow.begin();
       for (const step of this.path) {
+        if (flow.closed) return; // the form was closed (another tab) while it was opening
         if (result.type !== "menu" && result.type !== "form") break;
-        result = await this.flow.step(typeof step === "string" ? { next_step_id: step } : step);
+        result = await flow.step(typeof step === "string" ? { next_step_id: step } : step);
       }
+      if (flow.closed) return;
       this.show(result);
     } catch (err) {
       this.el.innerHTML = `<div class="error" role="alert"></div>
@@ -496,6 +502,7 @@ class FlowForm {
     } catch (err) {
       for (const b of buttons) b.disabled = false;
       const message = errText(err);
+      if (this.flow?.closed) return; // closed meanwhile: nothing to show, nothing to reopen
       if (err?.status_code === 404 || /invalid flow|unknown flow/i.test(message)) {
         // The flow is gone (Home Assistant restarted): start the form again.
         this.flow.id = null;
@@ -547,6 +554,10 @@ class NeighborhoodWatchPanel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (this._card) this._card.hass = hass;
+    for (const f of this._forms || []) {
+      const form = f.el.querySelector("ha-form");
+      if (form) form.hass = hass;
+    }
     this._syncToggles();
     this._reviewCount();
     if (first && this.isConnected) this._start();
@@ -829,11 +840,14 @@ class NeighborhoodWatchPanel extends HTMLElement {
     const input = row.querySelector("input");
     input.setAttribute("aria-label", label);
     input.addEventListener("change", async () => {
+      input._changed = Date.now();
       try {
         await this._hass.callService("switch", input.checked ? "turn_on" : "turn_off", { entity_id: entityId });
       } catch (err) {
+        input._changed = 0;
         this._syncToggles(); // back to what the switch says
       }
+      setTimeout(() => this._syncToggles(), 2100);
     });
     this._toggles.push({ input, entityId });
     this._syncToggles();
@@ -843,7 +857,8 @@ class NeighborhoodWatchPanel extends HTMLElement {
   _syncToggles() {
     for (const { input, entityId } of this._toggles || []) {
       const state = this._hass?.states[entityId]?.state;
-      input.checked = state === "on";
+      // Just flipped here: its own update is on the way, so other updates don't flip it back.
+      if (Date.now() - (input._changed || 0) > 2000) input.checked = state === "on";
       input.disabled = state !== "on" && state !== "off";
     }
     // The animals list's "Missing" chips.
@@ -1029,11 +1044,18 @@ class NeighborhoodWatchPanel extends HTMLElement {
   async _refreshVision() {
     clearTimeout(this._timer);
     if (!this._hass || !this.isConnected || this._tab !== "detector") return;
+    // Polls, saves and coming back to the tab all ask: only the newest answer is used, so an
+    // older one can't put back what a save just changed.
+    const mine = (this._visionAsk = (this._visionAsk || 0) + 1);
+    let answer;
     try {
-      this._vision = await this._hass.callWS({ type: `${DOMAIN}/vision` });
+      answer = await this._hass.callWS({ type: `${DOMAIN}/vision` });
     } catch (err) {
-      this._vision = { loaded: false, error: { code: "ws", message: err.message || String(err) } };
+      answer = { loaded: false, error: { code: "ws", message: err.message || String(err) } };
     }
+    if (mine !== this._visionAsk) return;
+    this._vision = answer;
+    clearTimeout(this._timer);
     // Don't redraw under the user's typing.
     if (!NUMBER_BOXES.includes(this.shadowRoot.activeElement?.id)) this._renderVision();
     if (!document.hidden) this._timer = setTimeout(() => this._refreshVision(), this._vision?.train?.running ? 5000 : 30000);
@@ -1273,7 +1295,16 @@ class NeighborhoodWatchPanel extends HTMLElement {
           ? `<section class="card"><div class="hint" style="margin: 0">This vision service is out of date. Pull its image again to see training history and settings here.</div></section>`
           : this._settings(t.settings) + this._history(d.history)}`;
     }
+    // Nothing changed (most polls): leave it be, so an open list stays open and nothing is
+    // read out again. Otherwise the keyboard focus goes back to the same control.
+    if (html === this._visionHtml && box.firstChild) return;
+    this._visionHtml = html;
+    const active = this.shadowRoot.activeElement;
+    const focus = active && box.contains(active)
+      ? active.id ? `#${CSS.escape(active.id)}` : active.name ? `input[name="${CSS.escape(active.name)}"][value="${CSS.escape(active.value)}"]` : null
+      : null;
     box.innerHTML = html;
+    if (focus) box.querySelector(focus)?.focus({ preventScroll: true });
     const $ = (id) => box.querySelector(`#${id}`);
     $("retry")?.addEventListener("click", () => { this._vision = null; this._renderVision(); this._refreshVision(); });
     $("train")?.addEventListener("click", () =>

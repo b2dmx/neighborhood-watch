@@ -325,15 +325,17 @@
       },
       "training": {
         "title": "Saved photos",
-        "description": "Every checked frame is saved, downscaled, with what the AI said and what you answered. These photos are shown in To review, used when you correct a sighting, and are what the local detector trains on.",
+        "description": "Every checked frame is saved (downscaled, unless full size is on) with what the AI said and what you answered. These photos are shown in To review, used when you correct a sighting, and are what the local detector trains on.",
         "data": {
           "dataset": "Save checked photos (needed for Review)",
           "dataset_dir": "Folder",
-          "dataset_gb": "Keep at most"
+          "dataset_gb": "Keep at most",
+          "dataset_full_size": "Save photos at full size"
         },
         "data_description": {
           "dataset_dir": "Leave empty for the media folder. For a network share added under Settings → System → Storage, enter its path, e.g. /media/your_share/neighborhood_watch. Existing photos stay where they are; use the Move saved photos action to bring them over. The local detector trains on this folder: mount it into the vision service at /dataset.",
-          "dataset_gb": "When full, the oldest unanswered photos go first; ones you answered are kept longest."
+          "dataset_gb": "When full, the oldest unanswered photos go first; ones you answered are kept longest.",
+          "dataset_full_size": "Off: photos are shrunk to 1280 pixels wide. On: they keep the camera's size (up to 4K), so the local detector trains on animals as large as it sees them live and finds small ones better. Takes about 4 times the space, so the oldest unanswered photos are removed sooner: raise Keep at most to match. Applies to photos saved from now on."
         }
       },
       "detector": {
