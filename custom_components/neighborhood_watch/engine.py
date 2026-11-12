@@ -691,6 +691,61 @@ class WatchEngine:
 
     # --- state helpers ----------------------------------------------------------------
 
+    async def _real_photo(self, subject: AnimalConfig) -> None:
+        """Set the animal's photo to its last real one: the frame of its newest counted
+        sighting, else the newest saved photo a person confirmed as it. None of either: no
+        photo (the card shows its sprite)."""
+        state = self.animal_state(subject)
+        photo = self.photo_path(subject)
+        frame, at = None, None
+        if not self.options.get(CONF_DATASET, True):
+            # No saved photos to look in: the one photo kept from before, if any.
+            rows = self.counted_sightings(subject)
+            try:
+                async with self._photo_lock(subject):
+                    restored = await self.hass.async_add_executor_job(_restore_previous, photo)
+            except OSError:
+                restored = False
+            state["photo_at"] = rows[-1]["time"] if restored and rows else None
+            return
+        try:
+            if True:
+                for row in reversed(self.counted_sightings(subject)):
+                    if not row.get("day"):
+                        continue
+                    frame = await self.hass.async_add_executor_job(
+                        dataset.read_frame, self.dataset_root, row["day"], row["id"]
+                    )
+                    if frame:
+                        at = row["time"]
+                        break
+                if frame is None:
+                    found = await self.hass.async_add_executor_job(
+                        dataset.latest_confirmed, self.dataset_root, {subject.name}
+                    )
+                    if subject.name in found:
+                        day, sid, stamp = found[subject.name]
+                        frame = await self.hass.async_add_executor_job(dataset.read_frame, self.dataset_root, day, sid)
+                        at = _iso(_dt(stamp)) or stamp
+            async with self._photo_lock(subject):
+                if frame:
+                    await self.hass.async_add_executor_job(_write, photo, frame)
+                else:
+                    await self.hass.async_add_executor_job(remove_file, photo)
+        except OSError as err:
+            _LOGGER.warning("%s: the photo wasn't put back: %s", subject.name, err)
+            frame = None
+        state["photo_at"] = at if frame else None
+
+    async def _fill_missing_photos(self) -> None:
+        """Animals with no photo (never seen since, or theirs was taken away) get their last
+        real one, once after start."""
+        for animal in list(self.animals.values()):
+            if not self.animal_state(animal).get("photo_at"):
+                await self._real_photo(animal)
+        self._save()
+        self._notify()
+
     async def _follow_renames(self) -> None:
         """A renamed animal keeps its history: its sightings and its saved photos' labels
         take the new name (they are matched by name; the name each animal had is kept)."""
@@ -803,6 +858,8 @@ class WatchEngine:
             row.setdefault("id", uuid4().hex[:10])
         self.sightings().sort(key=lambda s: s.get("time") or "")  # older versions appended
         await self._follow_renames()
+        # In the background: the saved photos may be on a slow or sleeping disk.
+        self.entry.async_create_background_task(self.hass, self._fill_missing_photos(), f"{DOMAIN} photos")
         if "www_secret" not in self.data:
             self.data["www_secret"] = token_hex(16)
             self._save()
@@ -1953,13 +2010,8 @@ class WatchEngine:
             if state.get("photo_at") == row.get("time"):
                 state["on_camera_until"] = None
                 state["confirmed_until"] = None
-                async with self._photo_lock(subject):
-                    try:
-                        restored = await self.hass.async_add_executor_job(_restore_previous, photo)
-                    except OSError as err:
-                        _LOGGER.warning("%s: the previous photo wasn't restored: %s", subject.name, err)
-                        restored = False
-                state["photo_at"] = (latest["time"] if latest else None) if restored else None
+                # Its photo came from the sighting taken away: back to its last real photo.
+                await self._real_photo(subject)
             cam_state = self.camera_state(row.get("camera", ""))
             if cam_state.get("current") == subject.name:
                 cam_state["current"] = None

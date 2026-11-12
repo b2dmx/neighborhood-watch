@@ -1075,12 +1075,11 @@ class NeighborhoodWatchCard extends HTMLElement {
   // AI described at its latest sighting.
   _unknownTile(name, k, hub) {
     const live = k.last_seen && Date.now() - new Date(k.last_seen).getTime() < 10 * 60e3;
-    const isCat = /cat/i.test(name);
-    const pic = isCat
-      ? `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify({ cat: NWSprites.nearestLook(k), ...(live ? { mode: "alert" } : {}) }))}" role="img" aria-label="${esc(name)}"></canvas>`
-      : /cat/i.test(k.description || "")
-        ? catFace({ pattern: k.pattern, base: k.base, looks: k.description || "" })
-        : `<div class="initial" role="img" aria-label="${esc(name)}">${esc((name.replace(/^unknown\s+/i, "") || "?").charAt(0).toUpperCase())}</div>`;
+    // Always a sprite: its own kind's when there is one (an unknown fox), else the cat
+    // look nearest to the coat the AI described.
+    const kind = /cat/i.test(name) ? null : NWSprites.spriteKind(name.replace(/^unknown\s+/i, ""));
+    const spec = kind ? { wild: kind } : { cat: NWSprites.nearestLook(k) };
+    const pic = `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify({ ...spec, ...(live ? { mode: "alert" } : {}) }))}" role="img" aria-label="${esc(name)}"></canvas>`;
     const badges = [];
     if (k.tonight) badges.push(`<span class="badge">${esc(k.tonight)} tonight</span>`);
     if (k.possible) badges.push(`<span class="badge dim">possible</span>`);
@@ -1119,18 +1118,17 @@ class NeighborhoodWatchCard extends HTMLElement {
       // The photo's crop around the animal: smaller and quicker than the whole frame, which
       // stays the fallback (an older photo, or no training data saved).
       const cropId = seen?.attributes?.photo_id;
-      const look = seen?.attributes?.appearance;
-      const ir = look && NWSprites.hasCollar(look) && this._ir?.[a.keys.last_photo]?.ir;
+      // Its own look when one is set, else the ready-made look nearest to its description.
+      const attrs = seen?.attributes || {};
+      const look = attrs.appearance || NWSprites.nearestLook({ pattern: attrs.pattern, base: attrs.base, description: attrs.looks || "" });
+      const ir = NWSprites.hasCollar(look) && this._ir?.[a.keys.last_photo]?.ir;
       // Away lately: asleep for part of the time, more the longer it has been gone.
       const awayDays = !live && absent?.state === "on" && seen ? (Date.now() - new Date(seen.state).getTime()) / 864e5 : NaN;
       const mode = live ? { mode: "alert" } : awayDays >= 0 ? { mode: "sleep", share: NWSprites.sleepShare(awayDays) } : {};
-      const sprite = look && { cat: { ...look, ...(ir ? { ir: true } : {}) }, ...mode };
+      const sprite = { cat: { ...look, ...(ir ? { ir: true } : {}) }, ...mode };
+      // No real photo (never seen, or it's older than the card keeps): the animal's sprite.
       const img = !hasPhoto
-        ? `<div class="nophoto">${
-            sprite
-              ? `<canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify(sprite))}" role="img" aria-label="${esc(a.name)}"></canvas>`
-              : catFace(seen?.attributes || {})
-          }</div>`
+        ? `<div class="nophoto"><canvas class="sprite" width="48" height="48" data-sprite="${esc(JSON.stringify(sprite))}" role="img" aria-label="${esc(a.name)}"></canvas></div>`
         : cropId
           ? `<img data-frame="${esc(cropId)}" data-crop="1" data-fallback="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`
           : `<img src="${esc(photo.attributes.entity_picture)}" alt="${esc(a.name)}">`;
@@ -1223,115 +1221,6 @@ const listedAs = (it) => `${it.animal}|${it.confidence}`;
 // Typed words that are the buttons' answers, not something it was ("none" and "nothing" mean Nothing).
 const TYPED_RESERVED = ["right", "wrong", "unsure", "not sure", "skip", "maybe", "other"];
 
-// A cat face drawn from how the animal is described: its coat pattern and main tone, and
-// words in its description (colours, calico/tortie, tabby, spotted, tuxedo, bicolour/van,
-// colourpoint/Siamese, long-haired, ear tufts, folded ears, hairless, eye colour). Shown
-// until there's a recent photo.
-function catFace({ pattern = "na", base = "na", looks = "" }) {
-  const t = looks.toLowerCase();
-  const has = (...w) => w.some((x) => t.includes(x));
-  const tones = { white: "#f2efe9", grey: "#8b9099", black: "#1c1c1f", na: "#a59f96" };
-  const WHITE = "#f4f1ea";
-  let fur = tones[base] || tones.na;
-  // Colour words refine the tone (a black coat stays black).
-  if (base === "grey" && has("dark grey", "dark gray")) fur = "#4b4e56";
-  if (base !== "black" && has("blue", "slate", "russian blue", "silver") && !has("blue eye", "blue-eye")) fur = "#7d8794";
-  if (base !== "white" && has("brown", "chocolate")) fur = "#3f2c22";
-  if (has("orange", "ginger", "red tabby", "marmalade")) fur = "#d98b45";
-  if (has("cream", "buff", "fawn", "apricot")) fur = "#e3c79c";
-  if (has("smoke")) fur = "#3a3c42";
-  if (base === "white" && !has("calico", "tortie", "patch", "blotch", "bicolor", "bicolour", "van")) fur = tones.white;
-  const hairless = has("hairless", "sphynx", "sphinx");
-  if (hairless) fur = "#e9c3b5";
-  const dark = ["#1c1c1f", "#3a3c42", "#3f2c22", "#4b4e56"].includes(fur) ? "#0e0e10" : "#00000055";
-
-  const fluffy = !hairless && has("long-hair", "long hair", "longhair", "fluffy", "bushy", "maine coon", "norwegian", "persian", "ragdoll");
-  const tufts = has("ear tuft", "lynx", "maine coon");
-  const folded = has("folded ear", "scottish fold", "fold ears");
-  const bib = has("bib", "white chest", "white upper chest", "tuxedo");
-  const calico = has("calico") || (pattern === "blotchy" && base === "white");
-  const tortie = !calico && (has("tortie", "tortoiseshell") || (pattern === "blotchy" && base !== "white"));
-  const bicolor = has("bicolor", "bicolour", "van ", "white with ", "mostly white", "harlequin");
-  const point = has("colorpoint", "colourpoint", "pointed", "siamese", "himalayan", "birman", "ragdoll", "balinese");
-  const tabby = pattern === "striped" || has("tabby", "stripe", "mackerel");
-  const spotted = has("spotted", "spots", "bengal", "leopard");
-
-  const parts = [];
-  if (fluffy)
-    parts.push(`<path d="M24 55 L13 61 L21 64.5 L15 71.5 L27 70.5 L50 73 L73 70.5 L85 71.5 L79 64.5 L87 61 L76 55 Z" fill="${fur}" stroke="${fur}" stroke-width="2" stroke-linejoin="round"/>`);
-  // Ears: pointed (or small and folded), pink inside unless dark-pointed.
-  const earFill = point ? "#3d332e" : bicolor ? "#4a4a50" : fur;
-  const rightEar = calico ? "#4a4a50" : earFill;  // a calico's dark patch takes in her right ear
-  if (folded) parts.push(`<path d="M26 42 Q23 28 36 29 Q40 30 38 35 Z" fill="${earFill}"/><path d="M74 42 Q77 28 64 29 Q60 30 62 35 Z" fill="${rightEar}"/>`);
-  else {
-    parts.push(
-      `<path d="M26.5 44 C22.5 34 22.5 23 26 16.5 Q28 13.8 30.5 15.8 C35.5 20.5 40.5 26.5 45 33 Z" fill="${earFill}"/>`,
-      `<path d="M73.5 44 C77.5 34 77.5 23 74 16.5 Q72 13.8 69.5 15.8 C64.5 20.5 59.5 26.5 55 33 Z" fill="${rightEar}"/>`
-    );
-    if (!point) parts.push(`<path d="M28.5 39 C26.5 32 27 26 29 21.5 C32.5 25 36 29 39.5 34 Z" fill="#e8a0a8" opacity=".55"/><path d="M71.5 39 C73.5 32 73 26 71 21.5 C67.5 25 64 29 60.5 34 Z" fill="#e8a0a8" opacity=".55"/>`);
-    if (tufts) parts.push(`<path d="M26 14 L24 4 M26 14 L29 5 M74 14 L76 4 M74 14 L71 5" stroke="${earFill}" stroke-width="1.6" stroke-linecap="round"/>`);
-  }
-  const head = "M50 29.5 C64.5 29.5 76 38.5 77.5 51.5 C79 64.5 68.5 79 50 80.5 C31.5 79 21 64.5 22.5 51.5 C24 38.5 35.5 29.5 50 29.5 Z";
-  const clip = `h${Math.random().toString(36).slice(2, 9)}`;
-  parts.push(`<path d="${head}" fill="${fur}"/><g clip-path="url(#${clip})">`);
-  if (calico)
-    parts.push(
-      `<path d="M30 34 Q46 30 44 50 Q34 56 24 50 Q22 40 30 34 Z" fill="#d9894a"/>`,
-      `<path d="M54 26 Q74 26 84 44 L80 48 Q66 40 56 42 Z" fill="#4a4a50"/>`
-    );
-  if (tortie)
-    parts.push(
-      `<path d="M28 36 Q40 30 42 44 Q32 50 24 46 Z" fill="#b8682e"/><path d="M58 60 Q70 54 76 64 Q66 72 58 68 Z" fill="#b8682e"/>`,
-      `<path d="M52 30 Q62 34 58 42 Q50 40 52 30 Z" fill="#c98845"/>`
-    );
-  if (bicolor && !calico) parts.push(`<path d="M24 40 Q50 22 76 40 Q66 34 50 34 Q34 34 24 40 Z" fill="#4a4a50"/>`);
-  if (tabby)
-    // A tabby's face: the "M" on the forehead with lines above it, a line from the outer
-    // corner of each eye, and stripes curving across the cheeks.
-    parts.push(
-      `<g stroke="${dark}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".9">` +
-        `<path d="M41 43.5 Q42 37.5 43.5 36.5 Q45.5 38.5 47 41.5 Q48.5 35.5 50 35 Q51.5 35.5 53 41.5 Q54.5 38.5 56.5 36.5 Q58 37.5 59 43.5" stroke-width="1.9"/>` +
-        `<path d="M45.5 31.5 L46.5 34.5 M50 30 V33 M54.5 31.5 L53.5 34.5" stroke-width="1.8"/>` +
-        `<path d="M33.5 50.5 Q29.5 50.5 26.5 53 M66.5 50.5 Q70.5 50.5 73.5 53" stroke-width="1.6"/>` +
-        `<path d="M24 58.5 Q28 59 31.5 61.5 M76 58.5 Q72 59 68.5 61.5 M25.5 64.5 Q28.5 64.5 31 66.5 M74.5 64.5 Q71.5 64.5 69 66.5" stroke-width="1.6"/>` +
-        `</g>`
-    );
-  if (spotted)
-    parts.push(
-      [[34, 38], [44, 34], [56, 34], [66, 38], [27, 52], [73, 52], [30, 63], [70, 63]]
-        .map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="${dark}"/>`)
-        .join("")
-    );
-  if (point) parts.push(`<ellipse cx="50" cy="63" rx="15" ry="12" fill="#3d332e" opacity=".85"/>`);
-  // A tuxedo (white bib) has a white muzzle: a narrow blaze from the forehead between the eyes, widening over the muzzle (the chin stays dark).
-  else if (bib && base !== "white" && !calico)
-    parts.push(`<path d="M50 42 Q47 49 45.5 56 Q42 64 34 72 L31.5 75.5 Q40 72.5 50 74 Q60 72.5 68.5 75.5 L66 72 Q58 64 54.5 56 Q53 49 50 42 Z" fill="${WHITE}"/>`);
-  else if (bib || base === "white" || calico || bicolor) parts.push(`<path d="M38 66 Q50 82 62 66 Q56 74 50 74 Q44 74 38 66 Z" fill="${WHITE}"/>`);
-
-  parts.push("</g>");
-
-  // Eyes: blue for colourpoints unless said otherwise; odd-eyed gets one of each.
-  const named = has("green") ? "#a6b83a" : has("blue eye", "blue-eye") || (point && !has("green", "copper")) ? "#6aa7d8"
-    : has("copper", "orange eye", "amber") ? "#d0802e" : "#d4b23a";
-  const [left, right] = has("odd-eye", "odd eye", "heterochrom") ? ["#6aa7d8", "#d4b23a"] : [named, named];
-  const light = [tones.white, WHITE, "#e3c79c", "#e9c3b5"].includes(fur);
-  const eye = (x, iris) =>
-    `<ellipse cx="${x}" cy="52" rx="5.4" ry="5.8" fill="${iris}" stroke="#00000040" stroke-width=".6"/>` +
-    `<ellipse cx="${x}" cy="52.3" rx="1.5" ry="4.4" fill="#111"/>` +
-    `<circle cx="${x + 1.6}" cy="49.6" r="1.15" fill="#fff" opacity=".9"/>`;
-  parts.push(
-    eye(39, left),
-    eye(61, right),
-    `<path d="M46.4 61.6 Q50 60.4 53.6 61.6 Q52.4 64.6 50 65.6 Q47.6 64.6 46.4 61.6 Z" fill="#e48a95"/>`,
-    `<path d="M50 65.6 V67.4 M50 67.4 Q47.6 70.4 44.6 69 M50 67.4 Q52.4 70.4 55.4 69" stroke="${light ? "#5a4f4a" : dark === "#0e0e10" ? "#8a8a90" : "#2a2a2a"}" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
-  );
-  if (!hairless)
-    parts.push(
-      `<path d="M33 64 Q22 61.5 12 61.5 M33 67 Q22 67.5 13 70 M67 64 Q78 61.5 88 61.5 M67 67 Q78 67.5 87 70" stroke="${light ? "#9a958c" : "#e9e6df"}" stroke-width=".9" fill="none" stroke-linecap="round" opacity=".9"/>`
-    );
-  return `<svg viewBox="0 0 100 100" class="face" aria-hidden="true"><defs><clipPath id="${clip}"><path d="${head}"/></clipPath></defs>${parts.join("")}</svg>`;
-}
-
 const STYLE = `
   :host { display: block; container-type: inline-size; }
   .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
@@ -1343,7 +1232,6 @@ const STYLE = `
   .lbmark:focus-visible, .lbclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
   .lbbox { position: fixed; z-index: 1; border: 2px solid var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); pointer-events: none; }
   .lbbox[hidden] { display: none; }
-  .initial { font-size: 2.4em; font-weight: 500; color: var(--secondary-text-color); }
   .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
   .nofold .section > h2 { cursor: auto; user-select: auto; }
   .nofold .section > h2::after { content: none; }
@@ -1362,7 +1250,6 @@ const STYLE = `
   .tile.is-missing { border-color: var(--error-color, #db4437); }
   .pic { position: relative; height: __PH__px; cursor: pointer; }
   .pic img, .nophoto { display: block; width: 100%; height: 100%; object-fit: cover; }
-  .face { width: 62%; height: 78%; }
   .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color);
     background: linear-gradient(135deg, var(--secondary-background-color), var(--card-background-color)); }
   .over { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 12px 8px; color: var(--primary-text-color);

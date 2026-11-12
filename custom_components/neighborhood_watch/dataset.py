@@ -116,6 +116,34 @@ def rename_labels(root: Path, names: dict[str, str]) -> int:
     return changed
 
 
+def latest_confirmed(root: Path, names: set[str]) -> dict[str, tuple[str, str, str]]:
+    """For each of these animals, its newest saved photo that a person confirmed (Right, or
+    corrected to it): name -> (day folder, sighting id, time). The newest days are read first
+    and the search stops once every name is found."""
+    found: dict[str, tuple[str, str, str]] = {}
+    if not root.exists() or not names:
+        return found
+    # Dated folders (the cameras' photos) newest first; any other folder (photos added by
+    # hand) only after them.
+    dated = lambda p: len(p.name) == 10 and p.name[4] == p.name[7] == "-"  # noqa: E731
+    for day in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: (dated(p), p.name), reverse=True):
+        best: dict[str, tuple[str, str, str]] = {}
+        for path in day.glob("*.json"):
+            meta = _read_record(path)
+            if not meta or meta.get("labelled_by") not in ("right", "corrected"):
+                continue
+            name = meta.get("label")
+            if name not in names or name in found or not path.with_suffix(".jpg").exists():
+                continue
+            stamp = str(meta.get("time") or "")
+            if name not in best or stamp > best[name][2]:
+                best[name] = (day.name, str(meta.get("id") or path.stem), stamp)
+        found.update(best)
+        if len(found) == len(names):
+            break
+    return found
+
+
 def read_frame(root: Path, day: str, sid: str) -> bytes | None:
     try:
         return (root / day / f"{sid}.jpg").read_bytes()

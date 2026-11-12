@@ -72,6 +72,6 @@ The code is [MIT](LICENSE). The Neighborhood Watch logo and icons (`brand-source
 
 <p align="center">
   <a href="LICENSE">MIT</a> · <a href="https://ko-fi.com/goobis2dmx">Support on Ko-fi</a><br><br>
-  Neighborhood Watch v0.28.0 by Goobis<br>
+  Neighborhood Watch v0.28.1 by Goobis<br>
   AI was used to help develop this application
 </p>

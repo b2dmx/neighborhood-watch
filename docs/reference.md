@@ -300,7 +300,7 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
 - **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos)). Tap a photo to enlarge it; **Mark the animal** there lets you drag a box around it, which the local detector learns from before any other box (most useful on small or dark animals it missed);
-- each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Without a recent photo it shows a face drawn from the animal's description (colours, calico, tortie, tabby, spotted, tuxedo, bicolour, colourpoint, long hair, ear tufts, folded ears, hairless, eye colour);
+- each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Its photo is its last real one: the newest sighting that was counted, or, when a wrong one is taken away, the newest photo you confirmed as it. Without a recent photo it shows the animal's pixel sprite (its own look, or the ready-made one nearest to its description);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ? buttons (It was… is in To review);
 - the critical-alert switches;
 - **Scan a folder**: start a [bulk scan](#bulk-scanning-photos-and-videos) and see the last one's totals.

@@ -1335,3 +1335,46 @@ async def test_a_nothing_the_detector_agrees_with_is_not_reviewed(hass, watch, a
     await trigger(hass, "yard")
     await hass.async_block_till_done()
     assert hass.states.get("sensor.neighborhood_watch_to_review").attributes["items"] == []
+
+
+async def test_a_wrong_sighting_gives_the_photo_back_to_the_last_real_one(hass, watch, freezer):
+    w = watch["entry"].runtime_data
+    milo = w.animal_by_name("Milo")
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    first = watch["events"][0].data["sighting_id"]
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": first, "answer": "right"}, blocking=True)
+    real_at = w.animal_state(milo)["photo_at"]
+    freezer.tick(timedelta(hours=2))
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    second = watch["events"][-1].data["sighting_id"]
+    assert second != first and w.animal_state(milo)["photo_at"] != real_at
+    # Taken away: the photo is the earlier, real one again (even with no ".prev" file left).
+    w.photo_path(milo).with_name(w.photo_path(milo).stem + ".prev" + w.photo_path(milo).suffix).unlink(missing_ok=True)
+    await hass.services.async_call(DOMAIN, "correct", {"sighting_id": second, "answer": "wrong"}, blocking=True)
+    assert w.animal_state(milo)["photo_at"] == real_at and w.photo_path(milo).exists()
+    # Nothing counted any more: the newest photo a person confirmed, straight from the saved photos.
+    w.sightings().clear()
+    w.animal_state(milo)["photo_at"] = None
+    await w._fill_missing_photos()
+    assert w.animal_state(milo)["photo_at"] and w.photo_path(milo).exists()
+
+
+def test_the_newest_confirmed_photo_prefers_camera_days_over_added_folders(tmp_path):
+    from custom_components.neighborhood_watch import dataset
+
+    def put(folder, sid, label, by, time):
+        (tmp_path / folder).mkdir(exist_ok=True)
+        (tmp_path / folder / f"{sid}.jpg").write_bytes(b"jpg")
+        (tmp_path / folder / f"{sid}.json").write_text(json.dumps({"id": sid, "label": label, "labelled_by": by, "time": time}))
+
+    put("references", "r1", "Milo", "corrected", "2026-10-01T00:00:00+00:00")
+    put("2026-10-10", "a", "Milo", "right", "2026-10-10T01:00:00+00:00")
+    put("2026-10-10", "b", "Milo", "right", "2026-10-10T05:00:00+00:00")
+    put("2026-10-12", "c", "Milo", None, "2026-10-12T05:00:00+00:00")  # nobody confirmed it
+    put("references", "r2", "Luna", "corrected", "2026-10-01T00:00:00+00:00")
+    found = dataset.latest_confirmed(tmp_path, {"Milo", "Luna", "Nobody"})
+    assert found == {"Milo": ("2026-10-10", "b", "2026-10-10T05:00:00+00:00"), "Luna": ("references", "r2", "2026-10-01T00:00:00+00:00")}
