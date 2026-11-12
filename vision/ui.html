@@ -209,27 +209,25 @@
 
   <section class="card">
     <h2>Past rounds</h2>
-    <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one when it names more animals right without missing more, or when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
+    <div class="hint" id="rule" style="margin: -6px 0 10px"></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Named right</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
+      <thead id="history-head"></thead>
       <tbody id="history"><tr><td colspan="8" class="empty">—</td></tr></tbody>
     </table></div>
   </section>
 </main>
 
-<script>
+<script type="module">
+// The wording shared with the Detector tab in Home Assistant.
+import {
+  DAYS, cap, hourName, devName, stageText, progress, historyRows, PROMOTION_RULE, HISTORY_HEAD, MIN_FIRST,
+} from "./detector-ui.js";
+
 const $ = (id) => document.getElementById(id);
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const hourName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const devName = (d) => ({ GPU: "Intel GPU", NPU: "NPU", CPU: "CPU", xpu: "GPU", cpu: "CPU" })[d] || d || "—";
 let busy = false;
 
-// "Every day", "Weekdays", or the days themselves.
-const dayList = (days) =>
-  days.length === 7 ? "every day"
-  : days.length === 5 && !days.includes("saturday") && !days.includes("sunday") ? "weekdays"
-  : days.map((d) => cap(d).slice(0, 3)).join(", ");
+$("rule").textContent = PROMOTION_RULE;
+$("history-head").innerHTML = HISTORY_HEAD;
 for (let h = 0; h < 24; h++) $("hour").add(new Option(hourName(h), h));
 
 async function api(path, body) {
@@ -268,71 +266,6 @@ function showSettings(s) {
   for (const el of [$("hour"), $("min_new"), $("min_first"), ...training]) el.disabled = !s.train_enabled;
 }
 
-// Before the first round, training waits for this many answered animal photos (the
-// Photos for the first round setting; this is only its default, for an older service).
-const MIN_FIRST = 40;
-const realRound = (r) => r.confirmed != null && !r.error && !r.stopped;
-
-function stageText(t, rounds) {
-  const st = t.status || {};
-  if (t.running) {
-    if (t.stopping) return "Stopping…";
-    if (st.stage === "training" && st.epochs) return `Training: pass ${st.epoch} of ${st.epochs}`;
-    if (st.stage === "labelling" && st.total) return `Marking animals in the photos: ${st.done} of ${st.total}`;
-    return ({ labelling: "Marking animals in the photos", training: "Training" })[st.stage] || cap(st.stage || "starting");
-  }
-  const s = t.settings;
-  const need = rounds.some(realRound)
-    ? `${s.min_new} new photos are answered`
-    : `there are ${s.min_first ?? MIN_FIRST} answered animal photos`;
-  const so = t.answered_new != null && rounds.some(realRound) ? ` (${t.answered_new} so far)` : "";
-  const when = !s.train_enabled
-    ? "Training is off."
-    : s.train_when === "count"
-      ? `Next round: as soon as ${need}${so}.`
-      : `Next round: ${dayList(s.train_days || [s.train_day])} from ${hourName(s.train_hour)}, once ${need}.`;
-  if (!st.state) return when;
-  const last = {
-    skipped: "Last round skipped", done: "Last round finished", error: "Last round failed", stopped: "Last round stopped",
-  }[st.state] || "Last round";
-  const at = st.finished || st.started;
-  const stage = st.stage && st.state !== "stopped" ? `: ${st.stage}` : "";
-  return `${last}${at ? " " + new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""}${stage}. ${when}`;
-}
-
-function progress(t) {
-  const st = t.status || {};
-  let f = null;
-  if (t.running && st.stage === "training" && st.epochs) f = st.epoch / st.epochs;
-  else if (t.running && st.stage === "labelling" && st.total) f = st.done / st.total;
-  $("bar").hidden = f === null;
-  if (f !== null) $("bar").firstElementChild.style.width = `${Math.round(f * 100)}%`;
-}
-
-// up: more is better (named right); otherwise fewer is (misses, false alarms).
-function cell(before, after, key, up = false) {
-  const b = before?.[key], a = after?.[key];
-  if (a === undefined) return b ?? "—";
-  const tone = (up ? a > b : a < b) ? "better" : (up ? a < b : a > b) ? "worse" : "";
-  return `${b} → <span class="${tone}">${a}</span>`;
-}
-
-function showHistory(rounds) {
-  const body = $("history");
-  if (!rounds.length) {
-    body.innerHTML = `<tr><td colspan="8" class="empty">No rounds yet.</td></tr>`;
-    return;
-  }
-  body.innerHTML = rounds.slice().reverse().map((r) => {
-    const result = r.error ? `<span class="worse">Failed</span>` : r.stopped ? "Stopped"
-      : r.promoted ? (r.undone ? "Undone" : `<span class="better">New model</span>`) : "Kept the old one";
-    const date = r.time ? new Date(r.time).toLocaleDateString([], { dateStyle: "medium" }) : "—";
-    const mins = r.minutes != null ? `${Math.round(r.minutes)} min` : "—";
-    return `<tr><td>${r.round}</td><td>${date}</td><td>${devName(r.device)}</td><td>${mins}</td>` +
-      `<td>${cell(r.before, r.after, "named_right", true)}</td><td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
-  }).join("");
-}
-
 let timer;
 async function refresh() {
   clearTimeout(timer);
@@ -348,7 +281,9 @@ async function refresh() {
     $("loaded").textContent = h.loaded ? "Awake" : "Asleep until the next photo";
     chip(running ? "Training" : "Ready", running ? "warn" : "good");
     $("train-state").textContent = stageText(t, rounds || []);
-    progress(t);
+    const done = progress(t);
+    $("bar").hidden = done === null;
+    if (done !== null) $("bar").firstElementChild.style.width = `${Math.round(done * 100)}%`;
     $("train").disabled = running || busy || !t.dataset;
     $("train").title = t.dataset ? "" : "The vision service can't see your saved photos. In its compose file, mount the folder set in Neighborhood Watch under Configure → Advanced → Saved photos at /dataset.";
     $("stop").hidden = !running;
@@ -357,7 +292,7 @@ async function refresh() {
     $("undo").hidden = undoRound == null;
     $("undo").disabled = busy;
     if (![$("min_new"), $("min_first")].includes(document.activeElement)) showSettings(t.settings);  // don't undo typing
-    showHistory(rounds);
+    $("history").innerHTML = historyRows(rounds, "empty");
   } catch (err) {
     chip("Can't reach the service", "bad");
   }

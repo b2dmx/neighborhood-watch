@@ -694,6 +694,11 @@ async def ui_page(_request: web.Request) -> web.Response:
     return web.FileResponse(UI_DIR / "ui.html", headers={"Cache-Control": "no-cache"})
 
 
+async def ui_shared(_request: web.Request) -> web.Response:
+    """The wording this page shares with the Detector tab in Home Assistant."""
+    return web.FileResponse(UI_DIR / "detector-ui.js", headers={"Cache-Control": "no-cache"})
+
+
 async def ui_font(_request: web.Request) -> web.Response:
     return web.FileResponse(UI_DIR / "GoogleSans.woff2", headers={"Cache-Control": "public, max-age=31536000"})
 
@@ -832,6 +837,7 @@ def make_app() -> web.Application:
             web.get("/settings", settings_get),
             web.post("/settings", settings_set),
             web.get("/", ui_page),
+            web.get("/detector-ui.js", ui_shared),
             web.get("/GoogleSans.woff2", ui_font),
         ]
     )

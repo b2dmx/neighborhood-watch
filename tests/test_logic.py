@@ -533,3 +533,13 @@ def test_same_visit_window_follows_the_camera_cooldown():
 def test_summary_marks_possible_wildlife():
     s = logic.summarize([("Raccoon", "Yard", True), ("Raccoon", "Yard", False), ("Opossum", "Bins", True)], ["Raccoon", "Opossum"])
     assert s.lines == ["Raccoon — 2 sightings (1 confirmed, 1 possible) (Yard)", "Opossum — 1 sighting (1 possible) (Bins)"]
+
+
+def test_the_two_detector_pages_share_one_wording_file():
+    """The Detector tab (Home Assistant) and the vision service's page import the same module;
+    the vision service has its own copy, which must not drift."""
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    shared = root / "custom_components" / "neighborhood_watch" / "frontend" / "neighborhood-watch-detector.js"
+    assert shared.read_text(encoding="utf-8") == (root / "vision" / "detector-ui.js").read_text(encoding="utf-8")

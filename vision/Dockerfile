@@ -27,7 +27,7 @@ RUN python3 -m venv /venv \
 ENV PATH=/venv/bin:$PATH
 
 WORKDIR /app
-COPY app.py detector.py scan.py train.py worker.py ui.html GoogleSans.woff2 OFL.txt ./
+COPY app.py detector.py scan.py train.py worker.py ui.html detector-ui.js GoogleSans.woff2 OFL.txt ./
 
 ENV NW_MODEL=/models/megadetector \
     NW_DEVICE=AUTO \

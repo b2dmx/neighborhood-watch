@@ -373,6 +373,7 @@ async def _async_reload(hass: HomeAssistant, entry: WatchConfigEntry) -> None:
 
 
 CARD_URL = f"/{DOMAIN}/neighborhood-watch-card.js"
+SPRITES_URL = f"/{DOMAIN}/neighborhood-watch-sprites.js"
 
 
 async def _register_card(hass: HomeAssistant) -> None:
@@ -381,9 +382,15 @@ async def _register_card(hass: HomeAssistant) -> None:
         return
     from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
 
-    path = Path(__file__).parent / "frontend" / "neighborhood-watch-card.js"
+    folder = Path(__file__).parent / "frontend"
     # No long-lived cache: browsers revalidate, so a card update shows without a restart.
-    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
+    # The card loads its sprites (the pixel-art animals) from the file beside it.
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(CARD_URL, str(folder / "neighborhood-watch-card.js"), False),
+            StaticPathConfig(SPRITES_URL, str(folder / "neighborhood-watch-sprites.js"), False),
+        ]
+    )
     if "frontend" in hass.config.components:
         from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 

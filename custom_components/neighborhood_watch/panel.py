@@ -237,6 +237,10 @@ async def async_register_panel(hass: HomeAssistant, version: str) -> None:
         await hass.http.async_register_static_paths(
             [
                 StaticPathConfig(PANEL_URL, str(folder / "neighborhood-watch-panel.js"), False),
+                # The Detector tab's wording, shared with the vision service's own page.
+                StaticPathConfig(
+                    f"/{DOMAIN}/neighborhood-watch-detector.js", str(folder / "neighborhood-watch-detector.js"), False
+                ),
                 StaticPathConfig(FONT_URL, str(folder / "GoogleSans.woff2"), True),
             ]
         )

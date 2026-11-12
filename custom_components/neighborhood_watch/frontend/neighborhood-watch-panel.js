@@ -8,29 +8,17 @@
 // reach the vision service itself.
 
 const DOMAIN = "neighborhood_watch";
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-// "Every day", "Weekdays", or the days themselves.
-const dayList = (days) =>
-  days.length === 7 ? "every day"
-  : days.length === 5 && !days.includes("saturday") && !days.includes("sunday") ? "weekdays"
-  : days.map((d) => cap(d).slice(0, 3)).join(", ");
-const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
-const hourName = (h) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const devName = (d) => ({ GPU: "Intel GPU", NPU: "NPU", CPU: "CPU", xpu: "GPU", cpu: "CPU" })[d] || d || "—";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+// The wording shared with the vision service's own page (fetched with this page's version).
+const {
+  DAYS, cap, hourName, devName, stageText, progress, historyRows, PROMOTION_RULE, HISTORY_HEAD,
+} = await import(new URL("./neighborhood-watch-detector.js" + new URL(import.meta.url).search, import.meta.url).href);
 const MENU = "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z";
 const BACK = "M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z";
 const CHEVRON = "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
 const NEW = "add_new"; // the options flow's "+ Add ..." choice
-// Training: the Photos for the first round default (an older service doesn't send it), and
-// the hints that explain it. A stopped or failed round doesn't count as the first.
-const MIN_FIRST = 40;
-const firstRound = (rounds) => !(rounds || []).some((r) => r.confirmed != null && !r.error && !r.stopped);
 const NO_DATASET =
   "The vision service can't see your saved photos. In its compose file, mount the folder from Detector → Saved photos at /dataset.";
-// Training stages (vision/train.py) in plain words.
-const STAGES = { starting: "Starting", labelling: "Marking animals in the photos", training: "Training" };
-const stageName = (stage) => STAGES[stage] || cap(stage || "");
 const SAVES = " Saves straight away.";
 // The switches the page shows as toggles (switch.py), and what each does.
 const CRITICAL_HINT = {
@@ -1113,67 +1101,13 @@ class NeighborhoodWatchPanel extends HTMLElement {
     return "";
   }
 
-  _stageText(t, rounds, outdated) {
-    const st = t.status || {};
-    const s = t.settings;
-    if (t.running) {
-      if (t.stopping) return "Stopping…";
-      if (st.stage === "training" && st.epochs) return `Training: pass ${st.epoch ?? 0} of ${st.epochs}`;
-      if (st.stage === "labelling" && st.total) return `Marking animals in the photos: ${st.done ?? 0} of ${st.total}`;
-      return stageName(st.stage || "starting");
-    }
-    const enabled = s ? s.train_enabled : t.enabled;
-    let when = "Training is off.";
-    // Before the first round it waits for enough answered animal photos instead. (An out-of-date
-    // service has no history, so whether it's the first round isn't known.)
-    const need = firstRound(rounds) && !outdated
-      ? `there are ${s?.min_first ?? MIN_FIRST} answered animal photos`
-      : `${s?.min_new} new photos are answered`;
-    const so = t.answered_new != null && !firstRound(rounds) ? ` (${t.answered_new} so far)` : "";
-    if (enabled && s && s.train_when === "count") when = `Next round: as soon as ${need}${so}.`;
-    else if (enabled && s) when = `Next round: ${dayList(s.train_days || [s.train_day])} from ${hourName(s.train_hour)}, once ${need}.`;
-    else if (enabled) when = t.schedule ? `Next round: ${cap(t.schedule)}.` : "";
-    if (!st.state) return when || "Training is on.";
-    const last = {
-      skipped: "Last round skipped", done: "Last round finished", error: "Last round failed", stopped: "Last round stopped",
-    }[st.state] || "Last round";
-    const at = st.finished || st.started;
-    const date = at ? " " + new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
-    const stage = st.stage && st.state !== "stopped" ? `: ${stageName(st.stage)}` : "";
-    return `${last}${date}${stage}.${when ? ` ${when}` : ""}`;
-  }
-
-  _progress(t) {
-    const st = t.status || {};
-    if (t.running && st.stage === "training" && st.epochs) return st.epoch / st.epochs;
-    if (t.running && st.stage === "labelling" && st.total) return st.done / st.total;
-    return null;
-  }
-
   _history(rounds) {
     if (!rounds) return "";
-    // up: more is better (named right); otherwise fewer is (misses, false alarms).
-    const cell = (b, a, key, up = false) => {
-      const x = b?.[key], y = a?.[key];
-      if (y === undefined) return esc(x ?? "—");
-      const better = up ? y > x : y < x, worse = up ? y < x : y > x;
-      return `${esc(x)} → <span class="${better ? "better" : worse ? "worse" : ""}">${esc(y)}</span>`;
-    };
-    const rows = rounds.length
-      ? rounds.slice().reverse().map((r) => {
-        const result = r.error ? `<span class="worse">Failed</span>` : r.stopped ? "Stopped"
-          : r.promoted ? (r.undone ? "Undone" : `<span class="better">New model</span>`) : "Kept the old one";
-        const date = r.time ? new Date(r.time).toLocaleDateString([], { dateStyle: "medium" }) : "—";
-        const mins = r.minutes != null ? `${Math.round(r.minutes)} min` : "—";
-        return `<tr><td>${esc(r.round)}</td><td>${date}</td><td>${esc(devName(r.device))}</td><td>${mins}</td>` +
-          `<td>${cell(r.before, r.after, "named_right", true)}</td><td>${cell(r.before, r.after, "misses")}</td><td>${cell(r.before, r.after, "false_alarms")}</td><td>${result}</td></tr>`;
-      }).join("")
-      : `<tr><td colspan="8" class="muted">No rounds yet.</td></tr>`;
     return `<section class="card"><h3>Past rounds</h3>
-      <div class="hint" style="margin: -6px 0 10px">A new model replaces the current one when it names more animals right without missing more, or when it misses fewer animals and makes at least 10% fewer mistakes in all.</div>
+      <div class="hint" style="margin: -6px 0 10px">${esc(PROMOTION_RULE)}</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Round</th><th>Date</th><th>Ran on</th><th>Time</th><th>Named right</th><th>Missed animals</th><th>False alarms</th><th>Result</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></section>`;
+        <thead>${HISTORY_HEAD}</thead>
+        <tbody>${historyRows(rounds)}</tbody></table></div></section>`;
   }
 
   _settings(s) {
@@ -1259,7 +1193,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
     let html = this._problem(d);
     if (!html) {
       const h = d.health, t = d.train;
-      const f = this._progress(t);
+      const f = progress(t);
       const chip = t.running ? ["Training", "warn"] : ["Ready", "good"];
       // The round Undo the last round would undo (the service only offers it with no round running).
       const undo = !t.running && t.undo?.round != null && !d.outdated ? t.undo.round : null;
@@ -1286,7 +1220,7 @@ class NeighborhoodWatchPanel extends HTMLElement {
               ? `<button class="btn danger" id="stop" ${this._busy || t.stopping ? "disabled" : ""}>Stop training</button>` : ""}
             <button class="btn" id="train" ${t.running || this._busy || !t.dataset ? "disabled" : ""}
               ${t.dataset ? "" : `aria-describedby="no-dataset"`}>Train now</button></div>
-          <div class="hint" style="margin-top: 0">${esc(this._stageText(t, d.history, d.outdated))}</div>
+          <div class="hint" style="margin-top: 0">${esc(stageText(t, d.history, d.outdated))}</div>
           ${t.dataset ? "" : `<div class="hint" id="no-dataset">${esc(NO_DATASET)}</div>`}
           ${f === null ? "" : `<div class="bar"><div style="width: ${Math.round(f * 100)}%"></div></div>`}
           ${this._message ? `<div class="error" role="alert">${esc(this._message)}</div>` : ""}
