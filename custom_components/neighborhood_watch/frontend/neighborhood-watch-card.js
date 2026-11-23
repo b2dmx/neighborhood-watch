@@ -472,6 +472,10 @@ class NeighborhoodWatchCard extends HTMLElement {
       tappable(el);
       el.addEventListener("click", () => this._more(el.dataset.more));
     });
+    one("[data-showmore]")?.addEventListener("click", () => {
+      this._extra = (this._extra || 0) + (this._config.review_limit || 6);
+      this._render(true);
+    });
     all("[data-toggle]").forEach((el) =>
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -1055,7 +1059,8 @@ class NeighborhoodWatchCard extends HTMLElement {
       names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("") +
       `<option value="${TYPE_IT}">Something else (type it)…</option>`;
     const suggest = `<datalist id="nw-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
-    const rows = items.slice(0, limit).map((it) => {
+    const shown = limit + (this._extra || 0); // "Show more" adds a page at a time
+    const rows = items.slice(0, shown).map((it) => {
       const sid = esc(it.id);
       const pick =
         this._typing === String(it.id)
@@ -1077,7 +1082,10 @@ class NeighborhoodWatchCard extends HTMLElement {
     // The sensor lists at most 40; its state is the full count.
     const total = Number.isFinite(Number(s.state)) ? Number(s.state) : items.length;
     const left = total - (listed.length - items.length);
-    const more = left > limit ? `<div class="muted">${left - limit} more after these.</div>` : "";
+    const more =
+      left > shown
+        ? `<div class="muted">${left - shown} more after these. <button class="chip" data-showmore>Show ${Math.min(limit, left - shown)} more</button></div>`
+        : "";
     return `<div class="section"><h2>To review · ${left}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}${suggest}</div>`;
   }
 
