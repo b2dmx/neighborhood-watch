@@ -1378,3 +1378,28 @@ def test_the_newest_confirmed_photo_prefers_camera_days_over_added_folders(tmp_p
     put("references", "r2", "Luna", "corrected", "2026-10-01T00:00:00+00:00")
     found = dataset.latest_confirmed(tmp_path, {"Milo", "Luna", "Nobody"})
     assert found == {"Milo": ("2026-10-10", "b", "2026-10-10T05:00:00+00:00"), "Luna": ("references", "r2", "2026-10-01T00:00:00+00:00")}
+
+
+async def test_a_photo_that_cant_be_saved_is_kept_and_saved_when_the_folder_is_back(hass, watch, caplog):
+    from custom_components.neighborhood_watch import dataset
+
+    real = dataset.save_sample
+    down = {"on": True}
+
+    def flaky(*args, **kwargs):
+        if down["on"]:
+            raise OSError("the share is away")
+        return real(*args, **kwargs)
+
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    with patch.object(dataset, "save_sample", flaky):
+        await trigger(hass, "yard")
+        await hass.async_block_till_done()
+        w = watch["entry"].runtime_data
+        assert not list(w.dataset_root.rglob("*.jpg")) and len(w._unsaved) == 1
+        assert caplog.text.count("Saved photos can't be written") == 1  # said once, at warning level
+        down["on"] = False
+        await w._flush_unsaved()
+    assert not w._unsaved
+    (photo,) = list(w.dataset_root.rglob("*.jpg"))
+    assert photo.with_suffix(".json").exists()

@@ -236,7 +236,7 @@ For your own automations, the Neighborhood Watch device has **Pest on camera** (
 
 The AI models never learn from your corrections, so the integration keeps what's needed to train a model that does:
 
-- **Saved photos.** Every checked frame is saved, downscaled to 1280 px (or at the camera's own size, up to 4K, with **Save photos at full size**: about 4 times the space, and the local detector then trains on animals as large as it sees them live), beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`; the folder is the media folder's `neighborhood_watch/dataset` unless you set another under **Saved photos**.
+- **Saved photos.** Photos are kept until the folder reaches the **Keep at most** size (5 GB by default), then the oldest unanswered ones go first; there is no age limit. If the folder can't be written (a network share that dropped), the photos wait in memory (the last 100), are tried again every minute and the log says so once; a sighting whose photo was never saved shows "No photo saved". Every checked frame is saved, downscaled to 1280 px (or at the camera's own size, up to 4K, with **Save photos at full size**: about 4 times the space, and the local detector then trains on animals as large as it sees them live), beside a file that records what the AI said. Files are stored under `<folder>/<date>/<sighting id>.jpg|json`; the folder is the media folder's `neighborhood_watch/dataset` unless you set another under **Saved photos**.
 - **Corrections.** A button on an alert, the `correct` action, or the card's ✓ / ? / It was… labels that frame. It also fixes tracking: the sighting, its photo and the last-seen time move to the right animal.
 - **Pruning.** When the folder reaches its size limit, the oldest unlabelled frames go first.
 
@@ -299,7 +299,7 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos)). Tap a photo to enlarge it; **Mark the animal** there lets you drag a box around it, which the local detector learns from before any other box (most useful on small or dark animals it missed);
+- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos)). Tap a photo to enlarge it; **Mark the animal** there lets you drag a box around it (the detector learns from it before any other box: most useful on small or dark animals it missed) and then asks what it was, so the box and the name are one answer; **Undo the mark** takes the box away;
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Its photo is its last real one: the newest sighting that was counted, or, when a wrong one is taken away, the newest photo you confirmed as it. Without a recent photo it shows the animal's pixel sprite (its own look, or the ready-made one nearest to its description);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ? buttons (It was… is in To review);
 - the critical-alert switches;

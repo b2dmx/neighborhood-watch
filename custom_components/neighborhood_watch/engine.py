@@ -135,6 +135,7 @@ from .const import (
     PHOTO_DIR,
     QUOTA_TZ,
     SIGHTING_DAYS,
+    UNSAVED_MAX,
     SIGHTING_MAX,
     SNAPSHOT_TIMEOUT,
     STORAGE_VERSION,
@@ -420,6 +421,8 @@ class WatchEngine:
         self.animals: dict[str, AnimalConfig] = {}  # by slug
         self.recipients: list[RecipientConfig] = []
         self._deterring: dict[str, Callable[[], None]] = {}
+        self._unsaved: list[tuple[str, str, bytes, dict[str, Any], bool]] = []  # photos waiting for the folder
+        self._flushing = False
         self._rev = 0  # goes up with every change that is saved
         self._summaries: dict[str, tuple[tuple[int, int], Any]] = {}
         self._stopped = False
@@ -690,6 +693,45 @@ class WatchEngine:
         return f"{base}/local/{WWW_SUBDIR}/{self._www_secret}/{slug}.jpg?t={int(at.timestamp())}"
 
     # --- state helpers ----------------------------------------------------------------
+
+    async def _save_sample(self, day: str, sid: str, frame: bytes, meta: dict[str, Any]) -> None:
+        """Save a checked photo with its record. When the photo folder can't be written (a
+        network share that dropped, a full disk) the photo is kept in memory and tried
+        again every minute, so a short outage doesn't leave sightings with no photo; and it
+        is said in the log, once, instead of failing quietly."""
+        full = bool(self.options.get(CONF_DATASET_FULL))
+        try:
+            await self.hass.async_add_executor_job(dataset.save_sample, self.dataset_root, day, sid, frame, meta, full)
+        except Exception as err:  # noqa: BLE001 - training data is best-effort
+            if not self._unsaved:
+                _LOGGER.warning(
+                    "Saved photos can't be written to %s (%s). Photos are kept in memory and tried again every minute.",
+                    self.dataset_root, err,
+                )
+            self._unsaved.append((day, sid, frame, meta, full))
+            del self._unsaved[:-UNSAVED_MAX]  # the oldest give way
+            return
+        if self._unsaved:
+            await self._flush_unsaved()
+
+    async def _flush_unsaved(self) -> None:
+        """Try the photos that couldn't be saved again, oldest first, until one still can't."""
+        if self._flushing or not self._unsaved:
+            return
+        self._flushing = True
+        try:
+            while self._unsaved:
+                day, sid, frame, meta, full = self._unsaved[0]
+                try:
+                    await self.hass.async_add_executor_job(
+                        dataset.save_sample, self.dataset_root, day, sid, frame, meta, full
+                    )
+                except Exception:  # noqa: BLE001 - still down: next minute
+                    return
+                self._unsaved.pop(0)
+            _LOGGER.info("Saved photos can be written again; every kept photo is saved.")
+        finally:
+            self._flushing = False
 
     async def _real_photo(self, subject: AnimalConfig) -> None:
         """Set the animal's photo to its last real one: the frame of its newest counted
@@ -1659,13 +1701,7 @@ class WatchEngine:
                 **({"named_by": "local"} if check.models.startswith("Local model") else {}),
                 **({"ai_box": [round(c, 4) for c in v.box]} if v.box else {}),
             }
-            try:
-                await self.hass.async_add_executor_job(
-                    dataset.save_sample, self.dataset_root, day, sid, check.frame, meta,
-                    bool(self.options.get(CONF_DATASET_FULL)),
-                )
-            except Exception as err:  # noqa: BLE001 - training data is best-effort
-                _LOGGER.debug("Training sample not saved: %s", err)
+            await self._save_sample(day, sid, check.frame, meta)
 
         animal = self.animal_by_name(v.animal)
         newest = animal is not None and not (self.last_seen(animal) or now) > now
@@ -1760,6 +1796,8 @@ class WatchEngine:
                     changed = True
         if changed:
             self._save()
+        if self._unsaved:
+            self.entry.async_create_background_task(self.hass, self._flush_unsaved(), f"{DOMAIN} unsaved photos")
         # Absent status and "tonight" can change with the clock alone.
         if changed or now.second < TICK.seconds:
             self._notify()
@@ -2457,13 +2495,7 @@ class WatchEngine:
                 **({"named_by": "local"} if models.startswith("Local model") else {}),
                 **({"ai_box": [round(c, 4) for c in verdict.box]} if verdict.box else {}),
             }
-            try:
-                await self.hass.async_add_executor_job(
-                    dataset.save_sample, self.dataset_root, day, row_id, frame, meta,
-                    bool(self.options.get(CONF_DATASET_FULL)),
-                )
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("Scan sample not saved: %s", err)
+            await self._save_sample(day, row_id, frame, meta)
         return {"animal": verdict.animal, "confidence": verdict.confidence, "sighting_id": row_id}
 
     async def _scan_done_alert(self, record: dict[str, Any]) -> None:

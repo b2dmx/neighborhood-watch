@@ -705,6 +705,14 @@ class NeighborhoodWatchCard extends HTMLElement {
         if (img.dataset.fallback && !img.dataset.fellBack) {
           img.dataset.fellBack = "1";
           img.src = img.dataset.fallback;
+        } else if (img.classList.contains("thumb")) {
+          // A photo that was never saved (the photo folder was away): say so, not a broken-image icon.
+          const gone = document.createElement("div");
+          gone.className = "thumb gone";
+          gone.setAttribute("role", "img");
+          gone.setAttribute("aria-label", "No photo was saved for this sighting");
+          gone.textContent = "No photo saved";
+          img.replaceWith(gone);
         } else img.classList.add("broken");
       };
       const since = this._broken.get(path);
@@ -768,7 +776,7 @@ class NeighborhoodWatchCard extends HTMLElement {
 
   _closeLightbox() {
     const from = this._zoom;
-    this._zoom = this._lb = this._marked = null;
+    this._zoom = this._lb = this._marked = this._markBox = null;
     this._marking = false;
     this._render(true);
     // Back to the picture it was opened from.
@@ -779,6 +787,22 @@ class NeighborhoodWatchCard extends HTMLElement {
     // The full frame, over everything. Tap the picture to zoom in where you tapped; scroll or
     // pinch to zoom, drag to move around.
     if (!this._zoom) return "";
+    const marked = this._marked === this._zoom;
+    // The box is the first half of an answer: right after it, say what the animal was.
+    let ask = "";
+    if (marked) {
+      const d = this._devices();
+      const sid = String(this._zoom);
+      const it = (this._state(d.hub?.keys.to_review)?.attributes?.items || []).find((x) => String(x.id) === sid);
+      const names = ["Nothing", ...this._names(d)];
+      ask = `<div class="lbask" role="group" aria-label="What was it?">
+          ${it && it.animal !== "No answer" ? `<button class="lbright" data-lb-right>✓ ${esc(it.animal)}</button>` : ""}
+          <select data-lb-name aria-label="It was"><option value="">${it ? "It was…" : "What was it?"}</option>${
+            names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")
+          }<option value="${TYPE_IT}">Something else (type it)…</option></select>
+          <button class="lbundo" data-lb-undo>Undo the mark</button>
+        </div>`;
+    }
     return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
         <button class="lbmark" aria-pressed="${this._marking ? "true" : "false"}" title="Drag a box around the animal: the detector learns from it">Mark the animal</button>
@@ -787,10 +811,10 @@ class NeighborhoodWatchCard extends HTMLElement {
         <div class="lbhint" role="status">${
           this._marking
             ? "Drag a box around the animal"
-            : this._marked === this._zoom
-              ? "Saved. The detector will learn from your box."
+            : marked
+              ? "Box saved. What was it?"
               : "Tap to zoom in · scroll, pinch or + and − to zoom · drag or arrows to move"
-        }</div>
+        }</div>${ask}
       </div>`;
   }
 
@@ -813,9 +837,58 @@ class NeighborhoodWatchCard extends HTMLElement {
     });
     const outline = box.querySelector(".lbbox");
     let from = null; // where the box being drawn started
+    // What was it? Answered right after the box: the same answers as in the list.
+    const leave = () => {
+      this._zoom = this._lb = this._marked = this._markBox = null;
+      this._marking = false;
+    };
+    box.querySelector("[data-lb-right]")?.addEventListener("click", () => {
+      const sid = String(this._zoom);
+      leave();
+      this._answer(sid, "right");
+    });
+    box.querySelector("[data-lb-name]")?.addEventListener("change", (ev) => {
+      const sid = String(this._zoom);
+      const value = ev.target.value;
+      if (!value) return;
+      leave();
+      if (value === TYPE_IT) {
+        // Not on the list: type it in the row of the list.
+        this._typing = sid;
+        this._typedText = "";
+        this._typedMsg = "";
+        this._render(true);
+        this.shadowRoot.querySelector("input[data-type-sid]")?.focus();
+        return;
+      }
+      this._answer(sid, value);
+    });
+    box.querySelector("[data-lb-undo]")?.addEventListener("click", () => {
+      const sid = this._zoom;
+      this._marked = this._markBox = null;
+      Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid }))
+        .catch((err) => alert(`Mark not undone: ${err.message || err}`))
+        .finally(() => this._zoom === sid && this._render(true));
+    });
     const img = box.querySelector(".lbimg");
     // Kept on the card, so a redraw while it's open (a new sighting) keeps the zoom.
     const v = (this._lb = this._lb || { s: 1, x: 0, y: 0 });
+    // The box that was just saved, shown over the picture (only while it isn't zoomed).
+    const placeSaved = () => {
+      if (from) return;
+      const saved = this._marked === this._zoom ? this._markBox : null;
+      const r = img.getBoundingClientRect();
+      if (!saved || v.s > 1 || !r.width) {
+        outline.hidden = true;
+        return;
+      }
+      const lb = box.getBoundingClientRect();
+      Object.assign(outline.style, {
+        left: `${r.left - lb.left + saved[0] * r.width}px`, top: `${r.top - lb.top + saved[1] * r.height}px`,
+        width: `${(saved[2] - saved[0]) * r.width}px`, height: `${(saved[3] - saved[1]) * r.height}px`,
+      });
+      outline.hidden = false;
+    };
     const apply = () => {
       if (v.s <= 1) Object.assign(v, { s: 1, x: 0, y: 0 });
       // Never further than the picture's own edge.
@@ -825,6 +898,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       v.y = Math.max(-my, Math.min(my, v.y));
       img.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`;
       img.style.cursor = v.s > 1 ? "grab" : "zoom-in";
+      placeSaved();
     };
     const zoomAt = (px, py, scale) => {
       const next = Math.max(1, Math.min(8, scale));
@@ -848,7 +922,10 @@ class NeighborhoodWatchCard extends HTMLElement {
     let moved = false;
     let pinch = 0;
     const drawBox = (ev) => {
-      const l = Math.min(from.x, ev.clientX), t = Math.min(from.y, ev.clientY);
+      // Relative to the lightbox: it may not start at the page's corner (a card inside a
+      // container shifts it), and its pointer coordinates are the page's.
+      const lb = box.getBoundingClientRect();
+      const l = Math.min(from.x, ev.clientX) - lb.left, t = Math.min(from.y, ev.clientY) - lb.top;
       Object.assign(outline.style, {
         left: `${l}px`, top: `${t}px`, width: `${Math.abs(ev.clientX - from.x)}px`, height: `${Math.abs(ev.clientY - from.y)}px`,
       });
@@ -907,8 +984,12 @@ class NeighborhoodWatchCard extends HTMLElement {
         if (ev.type === "pointercancel" || !r.width || !r.height || !(b[2] - b[0] >= 0.01) || !(b[3] - b[1] >= 0.01)) return;
         const sid = this._zoom;
         this._marking = false;
-        Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid, box: b.map((v) => Math.round(v * 10000) / 10000) }))
-          .then(() => (this._marked = sid))
+        const saved = b.map((v) => Math.round(v * 10000) / 10000);
+        Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid, box: saved }))
+          .then(() => {
+            this._marked = sid;
+            this._markBox = saved;
+          })
           .catch((err) => alert(`Box not saved: ${err.message || err}`))
           .finally(() => this._zoom === sid && this._render(true));
         return;
@@ -926,12 +1007,13 @@ class NeighborhoodWatchCard extends HTMLElement {
     img.addEventListener("pointercancel", up);
     // Keyboard: + and - zoom, the arrows move, Tab stays on Close (nothing behind it is reachable).
     box.addEventListener("keydown", (ev) => {
+      if (ev.target.matches?.("select") && ev.key !== "Tab") return; // the list keeps its own keys
       const r = img.getBoundingClientRect();
       const mid = [r.left + r.width / 2, r.top + r.height / 2];
       const move = { ArrowLeft: [60, 0], ArrowRight: [-60, 0], ArrowUp: [0, 60], ArrowDown: [0, -60] }[ev.key];
       if (ev.key === "Tab") {
         // Tab goes between the two buttons (nothing behind the picture is reachable).
-        const buttons = [...box.querySelectorAll("button")];
+        const buttons = [...box.querySelectorAll("button, select")];
         buttons[(buttons.indexOf(this.shadowRoot.activeElement) + 1) % buttons.length].focus();
       }
       else if (ev.key === "+" || ev.key === "=") zoomAt(mid[0], mid[1], v.s * 1.5);
@@ -1226,11 +1308,16 @@ const STYLE = `
   .section > h2, .whole > h2 { cursor: pointer; user-select: none; }
   .foldbtn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; border-radius: 4px; }
   img.broken { opacity: .3; }
+  .thumb.gone { display: flex; align-items: center; justify-content: center; font-size: .8em; color: var(--secondary-text-color); border: 1px dashed var(--divider-color); box-sizing: border-box; }
   .part { display: contents; }
   .lbmark { position: absolute; top: 12px; left: 14px; z-index: 1; min-height: 40px; padding: 0 16px; border-radius: 999px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
   .lbmark[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .lbmark:focus-visible, .lbclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-  .lbbox { position: fixed; z-index: 1; border: 2px solid var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); pointer-events: none; }
+  .lbask { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 94%; }
+  .lbask button, .lbask select { min-height: 40px; border-radius: 999px; padding: 0 16px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .lbask .lbright { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .lbask select { border: 1px solid var(--divider-color); }
+  .lbask button:focus-visible, .lbask select:focus-visible, .lbmark:focus-visible, .lbclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .lbbox { position: absolute; z-index: 1; border: 2px solid var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); pointer-events: none; }
   .lbbox[hidden] { display: none; }
   .section > h2::after { content: "▾"; margin-left: 6px; display: inline-block; transition: transform .15s; }
   .nofold .section > h2 { cursor: auto; user-select: auto; }
@@ -1249,6 +1336,18 @@ const STYLE = `
   .tile.is-live { border-color: var(--success-color, #43a047); }
   .tile.is-missing { border-color: var(--error-color, #db4437); }
   .pic { position: relative; height: __PH__px; cursor: pointer; }
+  /* Hover and keyboard focus: a faint layer of the text colour over what's tappable (the theme's
+     state layers: 8% on hover, 10% on focus). Cards never move or resize. */
+  .pic::after { content: ""; position: absolute; inset: 0; background: var(--primary-text-color); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .tile, .rev { transition: background-color .2s; }
+  .pic:focus-visible, [data-zoom]:focus-visible { outline: 2px solid var(--primary-color); outline-offset: -2px; }
+  .pic:focus-visible::after { opacity: .1; }
+  @media (hover: hover) {
+    .pic:hover::after { opacity: .08; }
+    .tile:hover, .rev:hover { background: color-mix(in srgb, var(--primary-text-color) 8%, var(--secondary-background-color)); }
+    img[data-zoom]:hover { filter: brightness(1.08); }
+  }
+  @media (prefers-reduced-motion: reduce) { .pic::after, .tile, .rev { transition: none; } }
   .pic img, .nophoto { display: block; width: 100%; height: 100%; object-fit: cover; }
   .nophoto { display: flex; align-items: center; justify-content: center; color: var(--disabled-text-color);
     background: linear-gradient(135deg, var(--secondary-background-color), var(--card-background-color)); }
