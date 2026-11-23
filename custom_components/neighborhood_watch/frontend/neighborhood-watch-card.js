@@ -399,7 +399,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           ${this._config.hide_title ? "" : `<h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>`}
           <div class="inner"></div>
         </div>
-      </ha-card><div class="lbhost"></div>`;
+      </ha-card><div class="allhost"></div><div class="lbhost"></div>`;
     let titles = [];
     if (this._frame !== frame || !sr.querySelector(".inner")) {
       this._stopSprites?.();
@@ -407,6 +407,10 @@ class NeighborhoodWatchCard extends HTMLElement {
       sr.innerHTML = frame;
       this._parts = null;
       this._lbHtml = "";
+      this._allKey = "";
+      sr.querySelector(".allhost").addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && this._all && !this._zoom) this._closeAll();
+      });
       titles = [...sr.querySelectorAll(".whole > h2")];
     }
     const inner = sr.querySelector(".inner");
@@ -437,6 +441,14 @@ class NeighborhoodWatchCard extends HTMLElement {
       });
     }
     this._parts = keys;
+    // The full-screen list is a holder of its own, outside the card, rebuilt only when it changes.
+    const allKey = (this._allHtml || "").replace(/(<span data-ago="[^"]*">)[^<]*/g, "$1");
+    if (allKey !== this._allKey) {
+      this._allKey = allKey;
+      const host = sr.querySelector(".allhost");
+      host.innerHTML = this._allHtml || "";
+      if (this._allHtml) changed.push(host);
+    }
     for (const holder of changed) holder._stop = NWSprites.mountSprites(holder);
     this._stopSprites = () => inner.querySelectorAll(".part").forEach((holder) => holder._stop?.());
     // Everything below wires up only what was just (re)built.
@@ -472,10 +484,16 @@ class NeighborhoodWatchCard extends HTMLElement {
       tappable(el);
       el.addEventListener("click", () => this._more(el.dataset.more));
     });
-    one("[data-showmore]")?.addEventListener("click", () => {
-      this._extra = (this._extra || 0) + (this._config.review_limit || 6);
+    one("[data-showall]")?.addEventListener("click", () => {
+      this._all = true;
+      this._focusAll = true;
       this._render(true);
     });
+    one("[data-allclose]")?.addEventListener("click", () => this._closeAll());
+    if (this._focusAll && one("[data-allclose]")) {
+      this._focusAll = false;
+      one("[data-allclose]").focus();
+    }
     all("[data-toggle]").forEach((el) =>
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -778,6 +796,12 @@ class NeighborhoodWatchCard extends HTMLElement {
       .catch(() => (giveUp ? giveUp() : img.classList.add("broken")));
   }
 
+  _closeAll() {
+    this._all = false;
+    this._render(true);
+    this.shadowRoot.querySelector("[data-showall]")?.focus({ preventScroll: true });
+  }
+
   _closeLightbox() {
     const from = this._zoom;
     this._zoom = this._lb = this._marked = this._markBox = null;
@@ -1032,6 +1056,7 @@ class NeighborhoodWatchCard extends HTMLElement {
   }
 
   _review(d) {
+    this._allHtml = "";
     const s = this._state(d.hub.keys.to_review);
     const listed = s?.attributes?.items || [];
     // Answered here but not yet gone from the sensor: hidden already. Forget the ones that
@@ -1051,6 +1076,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           ` <button class="chip" data-undo aria-label="Undo the last answer">Undo</button></div>`
         : "";
     // Nothing to review: no section at all (unless the note box or an undo is still offered).
+    if (!items.length) this._all = false;
     if (!items.length)
       return this._note || undo ? `<div class="section"><h2>To review</h2>${undo}${this._noteBox()}</div>` : "";
     const limit = this._config.review_limit || 6;
@@ -1059,8 +1085,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("") +
       `<option value="${TYPE_IT}">Something else (type it)…</option>`;
     const suggest = `<datalist id="nw-names">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>`;
-    const shown = limit + (this._extra || 0); // "Show more" adds a page at a time
-    const rows = items.slice(0, shown).map((it) => {
+    const rowHtml = (it) => {
       const sid = esc(it.id);
       const pick =
         this._typing === String(it.id)
@@ -1078,14 +1103,21 @@ class NeighborhoodWatchCard extends HTMLElement {
           <div class="acts">${pick}</div>
           ${this._typing === String(it.id) && this._typedMsg ? `<div class="muted small" role="alert">${esc(this._typedMsg)}</div>` : ""}
         </div>`;
-    });
+    };
+    // While the full-screen list is open, the rows are only there (one set of inputs at a time).
+    const rows = this._all ? [] : items.slice(0, limit).map(rowHtml);
     // The sensor lists at most 40; its state is the full count.
     const total = Number.isFinite(Number(s.state)) ? Number(s.state) : items.length;
     const left = total - (listed.length - items.length);
     const more =
-      left > shown
-        ? `<div class="muted">${left - shown} more after these. <button class="chip" data-showmore>Show ${Math.min(limit, left - shown)} more</button></div>`
+      left > limit
+        ? `<div class="muted">${left - limit} more after these. <button class="chip" data-showall>Show all ${left}</button></div>`
         : "";
+    if (this._all)
+      this._allHtml = `<div class="allpanel" role="dialog" aria-modal="true" aria-label="To review">
+          <div class="allhead"><h2>To review · ${left}</h2><button class="allclose" data-allclose title="Close" aria-label="Close">✕</button></div>
+          <div class="revgrid">${items.map(rowHtml).join("")}</div>
+        </div>`;
     return `<div class="section"><h2>To review · ${left}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}${suggest}</div>`;
   }
 
@@ -1406,6 +1438,11 @@ const STYLE = `
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .rev input.typed { flex: 1; min-width: 0; font: inherit; font-size: .85em; padding: 4px 10px; min-height: 32px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }
+  .allpanel { position: fixed; inset: 0; z-index: 9; overflow-y: auto; box-sizing: border-box; padding: 0 16px 16px; background: var(--primary-background-color); color: var(--primary-text-color); }
+  .allhead { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 12px 0; background: var(--primary-background-color); }
+  .allhead h2 { margin: 0; }
+  .allclose { font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--secondary-background-color); color: var(--primary-text-color); cursor: pointer; }
+  .allclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: color-mix(in srgb, var(--primary-background-color) 92%, transparent); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: center; }
   .lbhint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: var(--secondary-background-color); color: var(--primary-text-color); font-size: .8em; pointer-events: none; white-space: nowrap; }
