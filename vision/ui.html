@@ -104,6 +104,23 @@
   .better { color: var(--good); } .worse { color: var(--bad); }
   .empty { color: var(--muted); }
   .error { color: var(--bad); margin-top: 8px; font-size: 14px; }
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+  .ph { position: relative; padding: 0; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--chip); color: var(--text); text-align: left; display: block; }
+  .ph img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--bg); }
+  .ph .cap { display: flex; justify-content: space-between; gap: 6px; padding: 6px 10px; font-size: 13px; }
+  .ph .cap b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ph .cap span { color: var(--muted); white-space: nowrap; }
+  .ph .cap .ok { color: var(--good); } .ph .cap .need { color: var(--warn); }
+  .modal { position: fixed; inset: 0; z-index: 10; background: var(--bg); display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; overflow-y: auto; }
+  .mhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mhead span { font-weight: 500; }
+  .stage { position: relative; display: inline-block; line-height: 0; align-self: center; max-width: 100%; touch-action: none; }
+  .stage img { max-width: 100%; max-height: 68vh; border-radius: 8px; cursor: crosshair; user-select: none; -webkit-user-select: none; }
+  .mbox { position: absolute; border: 2px solid var(--accent); border-radius: 4px; pointer-events: none; box-shadow: 0 0 0 1px var(--bg); }
+  .mbox.ai { border-style: dashed; border-color: var(--warn); }
+  .mbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+  .mbar input[type=text] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 12px; min-height: 48px; }
+  .chk { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -136,6 +153,18 @@
     <div class="hint" id="train-state" style="margin-top: 10px">—</div>
     <div class="bar" id="bar" hidden><div></div></div>
     <div class="error" id="train-error" hidden></div>
+  </section>
+
+  <section class="card" id="photos-card">
+    <h2>Photos</h2>
+    <div class="hint" style="margin: -6px 0 6px">Draw a box around an animal and say what it is. A box you draw is what the detector learns from first. Boxes and names go to Home Assistant, which applies them like an answer in its own card (within a minute).</div>
+    <div class="row">
+      <select id="ph-name" aria-label="Show photos of"></select>
+      <label class="chk"><input type="checkbox" id="ph-need"> Only answered animal photos with no box</label>
+    </div>
+    <div class="photo-grid" id="ph-grid"></div>
+    <div class="row"><button class="quiet" id="ph-more" hidden>Show more</button><span class="hint" id="ph-count"></span></div>
+    <div class="error" id="ph-error" hidden></div>
   </section>
 
   <section class="card">
@@ -216,6 +245,20 @@
     </table></div>
   </section>
 </main>
+
+<div class="modal" id="m" hidden role="dialog" aria-modal="true" aria-label="Photo">
+  <div class="mhead"><span id="m-title"></span><button class="quiet" id="m-close">Close</button></div>
+  <div class="stage"><img id="m-img" alt="" draggable="false"><div class="mbox" id="m-box" hidden></div><div class="mbox ai" id="m-ai" hidden></div></div>
+  <div class="mbar">
+    <select id="m-name" aria-label="It was"></select>
+    <input type="text" id="m-type" placeholder="Name" aria-label="Name" hidden>
+    <button id="m-save" disabled>Save</button>
+    <button class="quiet" id="m-clear">Remove box</button>
+    <button class="quiet" id="m-prev">Previous</button>
+    <button class="quiet" id="m-next">Next</button>
+  </div>
+  <div class="hint" id="m-hint" role="status" style="text-align: center"></div>
+</div>
 
 <script type="module">
 // The wording shared with the Detector tab in Home Assistant.
@@ -358,6 +401,217 @@ $("stop").addEventListener("click", () => {
 $("undo").addEventListener("click", () => {
   if (undoRound != null && confirm(`Go back to the model from before round ${undoRound}?`)) trainAction("train/undo");
 });
+
+// ---- Photos: browse, draw a box, give a name ----------------------------------------------
+const TYPE_IT = "__type__";
+const ph = { items: [], total: 0, names: [], choices: [], reasons: [], i: -1, drawn: null, from: null };
+const photoUrl = (it, small) => `photo/${encodeURIComponent(it.day)}/${encodeURIComponent(it.id)}${small ? "?small=1" : ""}`;
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function tile(it, i) {
+  const w = it.waiting;
+  const state = w ? `<span>Sent</span>` : it.box ? `<span class="ok">Boxed</span>` : it.animal && it.answered ? `<span class="need">No box</span>` : "";
+  const name = w?.answer || it.name || "No answer";
+  return `<button class="ph" data-i="${i}" aria-label="${esc(name)}, open photo"><img loading="lazy" alt="" src="${photoUrl(it, true)}">` +
+    `<div class="cap"><b>${esc(name)}</b>${state}</div></button>`;
+}
+
+async function loadNames() {
+  try {
+    const d = await api("photos/names");
+    Object.assign(ph, { names: d.names, choices: d.choices, reasons: d.reasons });
+    const keep = $("ph-name").value;
+    $("ph-name").innerHTML = `<option value="">All photos</option><option value="(unanswered)">Not answered yet</option>` +
+      d.names.map((n) => `<option value="${esc(n.name)}">${esc(n.name)} · ${n.answered}${n.answered > n.boxed ? ` (${n.answered - n.boxed} need a box)` : ""}</option>`).join("");
+    $("ph-name").value = keep;
+  } catch (err) { /* the list below says it */ }
+}
+
+async function loadPhotos(more) {
+  $("ph-error").hidden = true;
+  const offset = more ? ph.items.length : 0;
+  try {
+    const q = new URLSearchParams({ name: $("ph-name").value, offset });
+    if ($("ph-need").checked) q.set("need_box", "1");
+    const d = await api(`photos?${q}`);
+    ph.items = more ? ph.items.concat(d.items) : d.items;
+    ph.total = d.total;
+    $("ph-grid").innerHTML = ph.items.map(tile).join("");
+    $("ph-count").textContent = ph.total ? `${ph.items.length} of ${ph.total}` : "No photos here.";
+    $("ph-more").hidden = ph.items.length >= ph.total;
+  } catch (err) {
+    $("ph-error").textContent = err.message;
+    $("ph-error").hidden = false;
+  }
+}
+
+$("ph-name").addEventListener("change", () => loadPhotos(false));
+$("ph-need").addEventListener("change", () => loadPhotos(false));
+$("ph-more").addEventListener("click", () => loadPhotos(true));
+$("ph-grid").addEventListener("click", (e) => {
+  const b = e.target.closest(".ph");
+  if (b) openPhoto(Number(b.dataset.i));
+});
+
+function nameOptions(current) {
+  const seen = new Set();
+  const opts = [`<option value="">${current ? `Keep: ${esc(current)}` : "It was…"}</option>`, `<option value="Nothing">Nothing</option>`];
+  for (const r of ph.reasons) opts.push(`<option value="${esc(r)}">${esc(r)}</option>`);
+  for (const n of ph.choices) if (!seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); opts.push(`<option value="${esc(n)}">${esc(n)}</option>`); }
+  opts.push(`<option value="${TYPE_IT}">Something else (type it)…</option>`);
+  return opts.join("");
+}
+
+function placeBox(el, box) {
+  if (!box) { el.hidden = true; return; }
+  const img = $("m-img"), r = img.getBoundingClientRect(), s = img.parentElement.getBoundingClientRect();
+  Object.assign(el.style, {
+    left: `${r.left - s.left + box[0] * r.width}px`, top: `${r.top - s.top + box[1] * r.height}px`,
+    width: `${(box[2] - box[0]) * r.width}px`, height: `${(box[3] - box[1]) * r.height}px`,
+  });
+  el.hidden = false;
+}
+
+function showBoxes() {
+  const it = ph.items[ph.i];
+  if (!it) return;
+  const w = it.waiting;
+  const mine = ph.drawn || (w?.clear_box ? null : w?.box) || it.box;
+  placeBox($("m-box"), mine);
+  placeBox($("m-ai"), mine ? null : it.ai_box);
+}
+
+function updateSave() {
+  const named = $("m-name").value && ($("m-name").value !== TYPE_IT || $("m-type").value.trim());
+  $("m-save").disabled = !(ph.drawn || named);
+}
+
+function openPhoto(i) {
+  const it = ph.items[i];
+  if (!it) return;
+  ph.i = i;
+  ph.drawn = null;
+  $("m").hidden = false;
+  $("m-title").textContent = `${it.name || "No answer"} · ${it.camera || ""} · ${it.time ? new Date(it.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""}`;
+  $("m-img").alt = it.name || "Photo";
+  $("m-img").onload = showBoxes;
+  $("m-img").src = photoUrl(it, false);
+  $("m-name").innerHTML = nameOptions(it.waiting?.answer || it.name);
+  $("m-type").hidden = true;
+  $("m-type").value = "";
+  $("m-clear").hidden = !(it.box || it.waiting?.box);
+  $("m-prev").disabled = i <= 0;
+  $("m-next").disabled = i >= ph.items.length - 1 && ph.items.length >= ph.total;
+  $("m-hint").textContent = it.waiting ? "Sent to Home Assistant; it applies it on its next check. Drawing again replaces it." : "Drag on the photo to draw a box around the animal.";
+  updateSave();
+  showBoxes();
+  $("m-close").focus();
+}
+
+function closePhoto() {
+  $("m").hidden = true;
+  ph.i = -1;
+  $("ph-grid").innerHTML = ph.items.map(tile).join("");
+}
+
+async function step(d) {
+  const i = ph.i + d;
+  if (i >= ph.items.length && ph.items.length < ph.total) await loadPhotos(true);
+  if (i >= 0 && i < ph.items.length) openPhoto(i);
+  else closePhoto();
+}
+
+$("m-close").addEventListener("click", closePhoto);
+$("m-prev").addEventListener("click", () => step(-1));
+$("m-next").addEventListener("click", () => step(1));
+$("m-name").addEventListener("change", () => {
+  $("m-type").hidden = $("m-name").value !== TYPE_IT;
+  if (!$("m-type").hidden) $("m-type").focus();
+  updateSave();
+});
+$("m-type").addEventListener("input", updateSave);
+addEventListener("keydown", (e) => {
+  if ($("m").hidden) return;
+  if (e.key === "Escape") closePhoto();
+  else if (e.target.matches?.("input, select")) return;
+  else if (e.key === "ArrowRight") step(1);
+  else if (e.key === "ArrowLeft") step(-1);
+});
+
+// Drawing a box: kept as fractions of the photo as it is shown.
+const mimg = $("m-img");
+mimg.addEventListener("pointerdown", (e) => {
+  try { mimg.setPointerCapture(e.pointerId); } catch { /* a very quick tap */ }
+  ph.from = { x: e.clientX, y: e.clientY, id: e.pointerId };
+});
+const frac = (e) => {
+  const r = mimg.getBoundingClientRect();
+  const f = (v, start, size) => Math.max(0, Math.min(1, (v - start) / size));
+  const a = [f(ph.from.x, r.left, r.width), f(ph.from.y, r.top, r.height)];
+  const b = [f(e.clientX, r.left, r.width), f(e.clientY, r.top, r.height)];
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+};
+mimg.addEventListener("pointermove", (e) => {
+  if (ph.from && e.pointerId === ph.from.id) { placeBox($("m-box"), frac(e)); $("m-ai").hidden = true; }
+});
+const endDraw = (e) => {
+  if (!ph.from || e.pointerId !== ph.from.id) return;
+  const b = frac(e);
+  ph.from = null;
+  if (e.type === "pointercancel" || b[2] - b[0] < 0.01 || b[3] - b[1] < 0.01) { showBoxes(); return; }  // a slip, not a box
+  ph.drawn = b.map((v) => Math.round(v * 10000) / 10000);
+  showBoxes();
+  updateSave();
+  $("m-hint").textContent = "Box drawn. Say what it is if it needs a name, then Save.";
+};
+mimg.addEventListener("pointerup", endDraw);
+mimg.addEventListener("pointercancel", endDraw);
+addEventListener("resize", () => { if (!$("m").hidden) showBoxes(); });
+
+async function send(body) {
+  const it = ph.items[ph.i];
+  const sent = await api("marks", { day: it.day, id: it.id, ...body });
+  it.waiting = { ...(it.waiting || {}), ...sent.waiting };
+  return it;
+}
+
+$("m-save").addEventListener("click", async () => {
+  const it = ph.items[ph.i];
+  if (!it) return;
+  const body = {};
+  if (ph.drawn) body.box = ph.drawn;
+  const v = $("m-name").value;
+  const answer = v === TYPE_IT ? $("m-type").value.trim() : v;
+  if (answer) body.answer = answer;
+  $("m-save").disabled = true;
+  try {
+    await send(body);
+    if (ph.drawn) it.box = ph.drawn;
+    if (answer) { it.name = answer; it.answered = true; }
+    loadNames();
+    step(1);
+  } catch (err) {
+    $("m-hint").textContent = err.message;
+    updateSave();
+  }
+});
+
+$("m-clear").addEventListener("click", async () => {
+  const it = ph.items[ph.i];
+  try {
+    await send({ clear_box: true });
+    it.box = null;
+    ph.drawn = null;
+    it.waiting = { ...it.waiting, clear_box: true, box: null };
+    showBoxes();
+    $("m-clear").hidden = true;
+    $("m-hint").textContent = "Box removed (Home Assistant applies it on its next check).";
+  } catch (err) {
+    $("m-hint").textContent = err.message;
+  }
+});
+
+loadNames().then(() => loadPhotos(false));
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 refresh();

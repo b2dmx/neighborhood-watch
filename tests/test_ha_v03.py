@@ -502,6 +502,7 @@ async def _with_detector(hass, watch, mode, aioclient_mock, animal=0.0):
     await hass.async_block_till_done()
     detections = [{"label": "animal", "confidence": animal, "box": [1, 2, 3, 4]}] if animal else []
     aioclient_mock.post("http://vision:8765/detect", json={"width": 64, "height": 48, "ms": 5, "device": "CPU", "detections": detections})
+    aioclient_mock.get("http://vision:8765/inbox", json={"items": []})  # nothing boxed or named on its page
 
 
 async def test_detector_shadow_records_and_scores(hass, watch, aioclient_mock):
@@ -917,6 +918,7 @@ async def test_detector_error_clears_and_an_odd_reply_is_no_answer(hass, watch, 
     assert "last_error" not in w.data["detector"]
     aioclient_mock.clear_requests()
     aioclient_mock.post("http://vision:8765/detect", json=[1, 2])
+    aioclient_mock.get("http://vision:8765/inbox", json={"items": []})
     freezer.tick(timedelta(minutes=4))
     await trigger(hass, "yard")
     assert w.data["detector"]["last_error"]
@@ -1326,6 +1328,43 @@ async def test_marking_the_animal_saves_the_box_with_the_photo(hass, watch):
         assert (await hass.services.async_call(DOMAIN, "mark_animal", data, blocking=True, return_response=True)) == {"marked": None}
     await hass.services.async_call(DOMAIN, "mark_animal", {"sighting_id": sid}, blocking=True)
     assert "user_box" not in json.loads(record.read_text())
+
+
+async def test_boxes_and_names_from_the_detectors_page_are_applied_and_acknowledged(hass, watch, aioclient_mock):
+    await _with_detector(hass, watch, "shadow", aioclient_mock)
+    watch["ai"].say(FIRST, "Milo|high|uniform|black|")
+    await trigger(hass, "yard")
+    await hass.async_block_till_done()
+    sid = watch["events"][0].data["sighting_id"]
+    w = watch["entry"].runtime_data
+    row = w.find_sighting(sid, None)
+    old = w.dataset_root / "2020-01-01" / "old1"  # a photo no sighting remembers any more
+    old.parent.mkdir(parents=True)
+    old.with_suffix(".jpg").write_bytes(b"x")
+    old.with_suffix(".json").write_text(json.dumps({"id": "old1", "label": "Nothing", "labelled_by": "right"}))
+    inbox = [
+        {"id": sid, "day": row["day"], "box": [0.2, 0.3, 0.6, 0.7], "answer": "Person", "time": 11.5},
+        {"id": "old1", "day": "2020-01-01", "box": [0.1, 0.1, 0.5, 0.5], "answer": "boshi", "time": 12.5},
+        {"id": "gone", "day": "2020-01-01", "box": [0.1, 0.1, 0.5, 0.5], "time": 13.5},  # no such photo: dropped
+    ]
+    aioclient_mock.clear_requests()  # the empty inbox the helper set up
+    aioclient_mock.get("http://vision:8765/inbox", json={"items": inbox})
+    aioclient_mock.post("http://vision:8765/inbox/ack", json={"done": 3})
+    await w._pull_marks()
+    mine = json.loads(next(w.dataset_root.glob(f"{row['day']}/{sid}.json")).read_text())
+    assert mine["user_box"] == [0.2, 0.3, 0.6, 0.7] and mine["label"] == "Nothing" and mine["empty_reason"] == "Person"
+    assert w.find_sighting(sid, None)["empty_reason"] == "Person"  # the sighting took it like an answer in the card
+    other = json.loads(old.with_suffix(".json").read_text())
+    assert other["user_box"] == [0.1, 0.1, 0.5, 0.5] and other["label"] in ("Boshi", "Boshi".title())
+    acks = [c for c in aioclient_mock.mock_calls if str(c[1]).endswith("/inbox/ack")]
+    assert sorted((i["id"], i["time"]) for i in acks[-1][2]["applied"]) == sorted([("gone", 13.5), ("old1", 12.5), (sid, 11.5)])
+
+
+async def test_an_inbox_that_cannot_be_fetched_changes_nothing(hass, watch, aioclient_mock):
+    await _with_detector(hass, watch, "shadow", aioclient_mock)
+    aioclient_mock.get("http://vision:8765/inbox", exc=TimeoutError)
+    await watch["entry"].runtime_data._pull_marks()
+    assert not any(str(c[1]).endswith("/inbox/ack") for c in aioclient_mock.mock_calls)
 
 
 async def test_a_nothing_the_detector_disagrees_with_waits_in_to_review(hass, watch, aioclient_mock):

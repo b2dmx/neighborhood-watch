@@ -84,6 +84,12 @@ DEFAULTS = {
 }
 STOP_GRACE = 20  # seconds a stopped round gets to tidy up before it is killed
 TRAIN_DIR = WORK / "train"
+# The Photos tool: the saved photos (read-only here), their small copies and the inbox of
+# boxes and names that Home Assistant has yet to apply.
+import photos  # noqa: E402 - needs DATASET and WORK above
+
+PHOTOS = photos.Photos(DATASET, WORK / "thumbs")
+INBOX = photos.Inbox(WORK / "inbox.json")
 CURRENT = WORK / "models" / "current.txt"
 SETTINGS_FILE = WORK / "settings.json"
 UI_DIR = Path(__file__).parent
@@ -690,6 +696,72 @@ async def settings_set(request: web.Request) -> web.Response:
     return web.json_response({"settings": conf})
 
 
+async def photos_names(_request: web.Request) -> web.Response:
+    """The names the Photos tool offers: the photos' own names (how many are answered and boxed),
+    the reasons a photo can have no animal, and what the detector can name."""
+    loop = asyncio.get_running_loop()
+    names = await loop.run_in_executor(None, PHOTOS.names)
+    known = {n["name"].lower() for n in names}
+    choices = [n["name"] for n in names] + [m for m in _det.info.get("names", []) if m.lower() not in known and m != "animal"]
+    return web.json_response({"names": names, "choices": choices, "reasons": list(photos.EMPTY_REASONS)})
+
+
+async def photos_list(request: web.Request) -> web.Response:
+    q = request.query
+    try:
+        offset = max(0, int(q.get("offset", 0)))
+    except ValueError:
+        offset = 0
+    page = await asyncio.get_running_loop().run_in_executor(
+        None, lambda: PHOTOS.page(q.get("name", ""), q.get("need_box") == "1", offset)
+    )
+    waiting = {i["id"]: i for i in INBOX.pending()}
+    for item in page["items"]:
+        mine = waiting.get(item["id"])
+        if mine:
+            item["waiting"] = {k: mine.get(k) for k in ("box", "clear_box", "answer")}
+    return web.json_response(page)
+
+
+async def photo_file(request: web.Request) -> web.StreamResponse:
+    day, sid = request.match_info["day"], request.match_info["id"]
+    small = request.query.get("small") == "1"
+    path = await asyncio.get_running_loop().run_in_executor(None, (PHOTOS.thumb if small else PHOTOS.jpg), day, sid)
+    if path is None:
+        return web.json_response({"error": "no such photo"}, status=404)
+    return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+async def marks_add(request: web.Request) -> web.Response:
+    """A box and/or a name for a photo, kept until Home Assistant has applied it."""
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("send an object")
+        item = INBOX.add(
+            str(body.get("day", "")), str(body.get("id", "")), body.get("box"),
+            bool(body.get("clear_box")), body.get("answer"),
+        )
+    except ValueError as err:
+        return web.json_response({"error": str(err)}, status=400)
+    return web.json_response({"waiting": item})
+
+
+async def inbox_get(_request: web.Request) -> web.Response:
+    return web.json_response({"items": INBOX.pending()})
+
+
+async def inbox_ack(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+        applied = [(str(i["id"]), float(i["time"])) for i in body.get("applied", [])]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return web.json_response({"error": "send applied: [{id, time}]"}, status=400)
+    done = INBOX.ack(applied)
+    PHOTOS.forget()  # Home Assistant just changed those photos' records
+    return web.json_response({"done": done})
+
+
 async def ui_page(_request: web.Request) -> web.Response:
     return web.FileResponse(UI_DIR / "ui.html", headers={"Cache-Control": "no-cache"})
 
@@ -834,6 +906,12 @@ def make_app() -> web.Application:
             web.post("/train/stop", train_stop),
             web.post("/train/undo", train_undo),
             web.get("/train/history", train_history),
+            web.get("/photos", photos_list),
+            web.get("/photos/names", photos_names),
+            web.get("/photo/{day}/{id}", photo_file),
+            web.post("/marks", marks_add),
+            web.get("/inbox", inbox_get),
+            web.post("/inbox/ack", inbox_ack),
             web.get("/settings", settings_get),
             web.post("/settings", settings_set),
             web.get("/", ui_page),

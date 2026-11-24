@@ -269,6 +269,12 @@ A new or changed address is checked when you save it: if the service doesn't ans
 
 **Where to see it:** the **Detector** tab of the [Neighborhood Watch page](#the-neighborhood-watch-page) shows the detector, its training and past rounds, and has the training settings. The service has the same page of its own at its address, for example `http://your-nas:8765/`.
 
+### Photos tool (the vision page)
+
+The vision service's own page has a **Photos** card: every saved photo as a thumbnail, filtered by name (with how many answered photos of each still need a box) or to the answered animal photos with no box. Open one, drag a box around the animal and say what it was (an animal, **Nothing**, or a reason such as **Person**, **Car**, **Leaves or wind**), then **Save**: it moves on to the next photo. A box you draw is what training uses before any other.
+
+The saved photos are mounted read-only in the vision container, on purpose, so nothing is written to them from there. What you box or name goes into the service's inbox, and Home Assistant fetches it on its next check (about a minute), applies it exactly like an answer given in its own card (the sighting, the animal's last seen and the photo's record all follow; a photo no sighting remembers any more only has its record changed) and then acknowledges it, which takes it out of the inbox. If Home Assistant or the photo folder is away, the inbox keeps everything and it is applied later. A photo shows **Sent** until then. `GET /inbox` shows what is waiting.
+
 ### Training the detector on your photos
 
 MegaDetector was trained on trail cameras, so it misses animals on some home cameras, for example at night in infrared or through a fisheye doorbell lens. The service can learn from your own labelled photos (the integration's [saved photos](#corrections-and-saved-photos)) and gets better every week:

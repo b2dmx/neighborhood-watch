@@ -424,6 +424,7 @@ class WatchEngine:
         self._deterring: dict[str, Callable[[], None]] = {}
         self._unsaved: list[tuple[str, str, bytes, dict[str, Any], bool]] = []  # photos waiting for the folder
         self._flushing = False
+        self._pulling = False  # fetching boxes and names from the detector's Photos tool
         self._rev = 0  # goes up with every change that is saved
         self._summaries: dict[str, tuple[tuple[int, int], Any]] = {}
         self._stopped = False
@@ -733,6 +734,84 @@ class WatchEngine:
             _LOGGER.info("Saved photos can be written again; every kept photo is saved.")
         finally:
             self._flushing = False
+
+    def _canon(self, answer: str) -> tuple[str, str | None]:
+        """What a typed or picked answer names: (the name a photo is labelled with, the reason
+        when it was "nothing" because of a person, a car, leaves...)."""
+        answer = answer.strip()
+        reason = next((r for r in EMPTY_REASONS if r.lower() == answer.lower()), None)
+        if reason or answer.lower() in ("nothing", "none"):
+            return logic.NOTHING, reason
+        if logic.is_unknown(answer):
+            return answer.title(), None
+        new = self.animal_by_name(answer)
+        if new is None:
+            # Any other animal (a groundhog, a heron): labelled for training, not tracked.
+            listed = {w.lower(): w for w in self.wildlife}
+            return listed.get(answer.lower()) or answer.title(), None
+        return new.name, None
+
+    async def _pull_marks(self) -> None:
+        """Boxes and names given on the detector's own page (its Photos tool): fetched from its
+        inbox, applied as if they were answers given here, and then acknowledged, which takes
+        them out of the inbox. The detector can't write to the saved photos itself."""
+        url = self._detector_url()
+        if not url or self._pulling:
+            return
+        self._pulling = True
+        try:
+            session = async_get_clientsession(self.hass)
+            async with asyncio.timeout(15):
+                async with session.get(f"{url}/inbox") as response:
+                    if response.status != 200:
+                        return
+                    body = await response.json()
+            items = body.get("items") if isinstance(body, dict) else None
+            applied = []
+            for item in items or []:
+                try:
+                    if await self._apply_mark(item):
+                        applied.append({"id": item["id"], "time": item.get("time", 0)})
+                except Exception as err:  # noqa: BLE001 - one bad item must not hold up the rest
+                    _LOGGER.debug("Photo mark from the detector not applied: %s", err)
+            if applied:
+                async with asyncio.timeout(15):
+                    await session.post(f"{url}/inbox/ack", json={"applied": applied})
+        except (TimeoutError, aiohttp.ClientError, ValueError):
+            return  # the detector is away: its inbox keeps everything for the next check
+        finally:
+            self._pulling = False
+
+    async def _apply_mark(self, item: dict[str, Any]) -> bool:
+        """One box and/or name from the detector's Photos tool. True when it is dealt with (also
+        when the photo is gone), False when it should be tried again (the photo folder is away)."""
+        sid, day = str(item.get("id") or ""), str(item.get("day") or "")
+        if not sid or not day:
+            return True
+        record = self.dataset_root / day / f"{sid}.json"
+        if not await self.hass.async_add_executor_job(record.is_file):
+            return True
+        row = self.find_sighting(sid, None)
+        if item.get("clear_box") or item.get("box"):
+            box = None if item.get("clear_box") else item.get("box")
+            if row is not None and row.get("day"):
+                await self.async_mark(sid, box)
+            else:
+                async with self._lock:
+                    if not await self.hass.async_add_executor_job(dataset.set_box, self.dataset_root, day, sid, box):
+                        return False
+        answer = str(item.get("answer") or "").strip()
+        if answer:
+            if row is not None:
+                await self.async_correct(sid, None, answer)
+            else:  # an old photo, or one added by hand: its record is all there is to answer
+                name, reason = self._canon(answer)
+                async with self._lock:
+                    if not await self.hass.async_add_executor_job(
+                        dataset.set_label, self.dataset_root, day, sid, name, "corrected", reason
+                    ):
+                        return False
+        return True
 
     async def _real_photo(self, subject: AnimalConfig) -> None:
         """Set the animal's photo to its last real one: the frame of its newest counted
@@ -1799,6 +1878,8 @@ class WatchEngine:
             self._save()
         if self._unsaved:
             self.entry.async_create_background_task(self.hass, self._flush_unsaved(), f"{DOMAIN} unsaved photos")
+        if self._detector_url() and not self._pulling:
+            self.entry.async_create_background_task(self.hass, self._pull_marks(), f"{DOMAIN} detector marks")
         # Absent status and "tonight" can change with the clock alone.
         if changed or now.second < TICK.seconds:
             self._notify()
@@ -1968,17 +2049,7 @@ class WatchEngine:
                 await self._recompute(old, row, removed=True)
         else:
             new = self.animal_by_name(answer)
-            reason = next((r for r in EMPTY_REASONS if r.lower() == answer.lower()), None)
-            if reason or answer.lower() in ("nothing", "none"):
-                name = logic.NOTHING
-            elif logic.is_unknown(answer):
-                name = answer.strip().title()
-            elif new is None:
-                # Any other animal (a groundhog, a heron): labelled for training, not tracked.
-                listed = {w.lower(): w for w in self.wildlife}
-                name = listed.get(answer.lower()) or answer.strip().title()
-            else:
-                name = new.name
+            name, reason = self._canon(answer)
             row.update(animal=name, label=name, user="corrected", counted=True, wrong=False)
             row["confidence"] = "confirmed"
             if reason:
