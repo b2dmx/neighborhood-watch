@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from . import WatchConfigEntry
+from .const import EMPTY_REASONS
 from .engine import WatchEngine, _dt
 from .entity import WatchEntity
 
@@ -276,6 +277,7 @@ class ToReview(WatchEntity, SensorEntity):
             "last_answer": {k: (self.watch.data.get("last_answer") or {}).get(k) for k in ("id", "at", "answer", "after", "where")}
             if self.watch.data.get("last_answer") else None,
             # What a sighting can be corrected to: your animals, then every wildlife kind.
+            "reasons": list(EMPTY_REASONS),
             "choices": list(
                 dict.fromkeys([*(a.name for a in self.watch.animals.values()), *self.watch.wildlife])
             ),

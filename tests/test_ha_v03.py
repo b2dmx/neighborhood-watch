@@ -365,6 +365,22 @@ async def test_correct_service_wrong_and_nothing(hass, watch):
     assert state(hass, "binary_sensor.neighborhood_watch_pest_on_camera").state == "off"
 
 
+async def test_a_reason_for_nothing_is_nothing_with_the_reason_kept_and_can_be_undone(hass, watch):
+    watch["ai"].say(FIRST, "Raccoon|high|na|na|")
+    await trigger(hass, "yard")
+    result = await hass.services.async_call(
+        DOMAIN, "correct", {"answer": "leaves or wind", "camera": "Yard"}, blocking=True, return_response=True
+    )
+    row = watch["watch"].sightings()[-1]
+    assert result["corrected"]["animal"] == "Nothing" and row["empty_reason"] == "Leaves or wind"
+    assert "Raccoon" not in kinds(hass)
+    assert "Leaves or wind" in state(hass, "sensor.neighborhood_watch_to_review").attributes["reasons"]
+    await hass.services.async_call(DOMAIN, "undo_last_answer", {}, blocking=True, return_response=True)
+    assert "empty_reason" not in watch["watch"].sightings()[-1]
+    await hass.services.async_call(DOMAIN, "correct", {"answer": "nothing", "camera": "Yard"}, blocking=True, return_response=True)
+    assert "empty_reason" not in watch["watch"].sightings()[-1]
+
+
 async def test_correct_accepts_any_animal_name(hass, watch):
     watch["ai"].say(FIRST, "Raccoon|high|na|na|")
     await trigger(hass, "yard")

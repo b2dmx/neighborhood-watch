@@ -439,7 +439,8 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
     for animal in (True, False):
         group = sorted((s for s in train if s.animal == animal), key=lambda s: s.id)
         rng.shuffle(group)
-        if not animal:
+        if not animal:  # photos you said show a person, a car, leaves... are kept before the rest
+            group.sort(key=lambda s: not s.meta.get("empty_reason"))
             group = group[: max(200, n_animals)]
         n_val = max(1, round(len(group) * 0.2)) if len(group) > 1 else 0
         visits: dict[tuple, list[Sample]] = {}
@@ -463,7 +464,7 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
                     wanted = [(t, label_lines(s, names, t)) for t in regions]
                     wanted = [(t, lines) for t, lines in wanted if lines]
                 else:  # every other empty photo also gives one tile
-                    wanted = [(rng.choice(regions), [])] if regions and n % 2 else []
+                    wanted = [(rng.choice(regions), [])] if regions and (n % 2 or s.meta.get("empty_reason")) else []
                 for k, (t, lines) in enumerate(wanted):
                     im.convert("RGB").crop(t).save(root / "images" / part / f"{s.id}_t{k}.jpg", "JPEG", quality=90)
                     (root / "labels" / part / f"{s.id}_t{k}.txt").write_text("\n".join(lines), encoding="utf-8")

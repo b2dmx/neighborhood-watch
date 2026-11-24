@@ -218,6 +218,9 @@ EVENT_ACTION = "mobile_app_notification_action"
 STORAGE_VERSION = 1
 SIGHTING_DAYS = 30
 SIGHTING_MAX = 4000
+# What a photo with no animal in it can show: an answer for "It was…". All of them mean "no
+# animal here"; the detector is shown them as extra not-an-animal examples.
+EMPTY_REASONS = ("Person", "Car", "Leaves or wind", "Bug or spider", "Light or shadow")
 UNSAVED_MAX = 100  # photos kept in memory while the photo folder can't be written (about 20 MB)
 AI_TIMEOUT = 30  # seconds per model call; a picture normally takes 5-15
 SNAPSHOT_TIMEOUT = 15

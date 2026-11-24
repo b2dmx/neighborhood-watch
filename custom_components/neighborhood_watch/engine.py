@@ -134,6 +134,7 @@ from .const import (
     MEDIA_SUBDIR,
     PHOTO_DIR,
     QUOTA_TZ,
+    EMPTY_REASONS,
     SIGHTING_DAYS,
     UNSAVED_MAX,
     SIGHTING_MAX,
@@ -275,7 +276,7 @@ def _iso(t: datetime | None) -> str | None:
 
 
 # What an answer changes on a sighting (and what undoing it puts back).
-_ANSWER_KEYS = ("animal", "label", "user", "counted", "wrong", "confidence", "log")
+_ANSWER_KEYS = ("animal", "label", "user", "counted", "wrong", "confidence", "log", "empty_reason")
 
 
 def _row_time(row: dict[str, Any]) -> str:
@@ -1912,7 +1913,8 @@ class WatchEngine:
             box = [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
             if box[2] - box[0] < 0.005 or box[3] - box[1] < 0.005:
                 return {"marked": None}
-        saved = await self.hass.async_add_executor_job(dataset.set_box, self.dataset_root, row["day"], row["id"], box)
+        async with self._lock:  # one rewrite of the photo's record at a time (an answer may follow at once)
+            saved = await self.hass.async_add_executor_job(dataset.set_box, self.dataset_root, row["day"], row["id"], box)
         if not saved:
             return {"marked": None}
         row["box"] = bool(box)
@@ -1966,7 +1968,8 @@ class WatchEngine:
                 await self._recompute(old, row, removed=True)
         else:
             new = self.animal_by_name(answer)
-            if answer.lower() in ("nothing", "none"):
+            reason = next((r for r in EMPTY_REASONS if r.lower() == answer.lower()), None)
+            if reason or answer.lower() in ("nothing", "none"):
                 name = logic.NOTHING
             elif logic.is_unknown(answer):
                 name = answer.strip().title()
@@ -1978,6 +1981,10 @@ class WatchEngine:
                 name = new.name
             row.update(animal=name, label=name, user="corrected", counted=True, wrong=False)
             row["confidence"] = "confirmed"
+            if reason:
+                row["empty_reason"] = reason
+            else:
+                row.pop("empty_reason", None)
             row["log"] = bool(
                 new
                 or logic.is_unknown(name)
@@ -1989,7 +1996,8 @@ class WatchEngine:
                 await self._recompute(new, row)
         if row.get("day"):
             await self.hass.async_add_executor_job(
-                dataset.set_label, self.dataset_root, row["day"], row["id"], row["label"], row["user"]
+                dataset.set_label, self.dataset_root, row["day"], row["id"], row["label"], row["user"],
+                row.get("empty_reason"),
             )
         undo["after"] = row.get("animal")
         undo["where"] = row.get("where")
@@ -2019,7 +2027,8 @@ class WatchEngine:
                 await self._recompute(subject, row, removed=not here)
         if row.get("day"):
             await self.hass.async_add_executor_job(
-                dataset.set_label, self.dataset_root, row["day"], row["id"], row.get("label"), row.get("user")
+                dataset.set_label, self.dataset_root, row["day"], row["id"], row.get("label"), row.get("user"),
+                row.get("empty_reason"),
             )
         self._save()
         self._notify()

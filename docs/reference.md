@@ -108,6 +108,7 @@ Removing asks first. These are the same settings as **Configure** and **Add anim
 - **First look** runs on every sighting. Its models are tried in order until one answers.
 - **Second opinion** looks again only when the first answer is unsure or unknown, names a priority or strict animal, names wildlife that can alert (a raccoon or a fox; not a bird or a deer), or came from a backup and names an animal. Its models are tried in order too, and must differ from the First look ones (a model rarely disagrees with itself).
 - **Paid models** always go last in each list, whatever order you put them in, and are never used to double-check a backup's answer. When no free model answers the first look, they're its last resort.
+- **What was in a photo with no animal**: besides **Nothing**, **It was…** offers **Person**, **Car**, **Leaves or wind**, **Bug or spider** and **Light or shadow**. Each counts as Nothing (no animal, nothing tracked); the reason is saved with the photo, and the detector's next round trains on those photos first as examples of what is not an animal.
 - **No answer**: when no model answers at all, the sighting says **No answer**, not Nothing. It waits in To review for you to say what it was.
 - **Save the first model for busy hours** (optional): outside these hours, the first model in First look waits behind the free backups, so its daily quota lasts through the busiest hours. Empty: it always goes first.
 

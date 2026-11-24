@@ -60,13 +60,17 @@ def _read_record(path: Path) -> dict[str, Any] | None:
     return meta if isinstance(meta, dict) else None
 
 
-def set_label(root: Path, day: str, sid: str, label: str | None, how: str) -> bool:
+def set_label(root: Path, day: str, sid: str, label: str | None, how: str, reason: str | None = None) -> bool:
     path = root / day / f"{sid}.json"
     meta = _read_record(path)
     if meta is None:
         return False
     meta["label"] = label
     meta["labelled_by"] = how
+    if reason:  # what was in a photo with no animal (a person, a car, leaves...)
+        meta["empty_reason"] = reason
+    else:
+        meta.pop("empty_reason", None)
     try:
         _write_record(path, meta)
     except OSError:  # the folder is away (a NAS that's off): the answer itself still stands

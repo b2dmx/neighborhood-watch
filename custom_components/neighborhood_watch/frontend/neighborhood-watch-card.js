@@ -233,6 +233,12 @@ class NeighborhoodWatchCard extends HTMLElement {
     return out;
   }
 
+  _reasons(d) {
+    // What a photo with no animal can show (Person, Car, ...): the hub lists them.
+    const r = d.hub?.keys.to_review ? this._state(d.hub.keys.to_review)?.attributes?.reasons : null;
+    return Array.isArray(r) ? r : [];
+  }
+
   _names(d) {
     // Everything a sighting can be: the hub lists your animals and every wildlife kind;
     // older versions fall back to the animals and the wildlife seen so far.
@@ -822,7 +828,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       const d = this._devices();
       const sid = String(this._zoom);
       const it = (this._state(d.hub?.keys.to_review)?.attributes?.items || []).find((x) => String(x.id) === sid);
-      const names = ["Nothing", ...this._names(d)];
+      const names = ["Nothing", ...this._reasons(d), ...this._names(d)];
       ask = `<div class="lbask" role="group" aria-label="What was it?">
           ${it && it.animal !== "No answer" ? `<button class="lbright" data-lb-right>✓ ${esc(it.animal)}</button>` : ""}
           <select data-lb-name aria-label="It was"><option value="">${it ? "It was…" : "What was it?"}</option>${
@@ -1013,13 +1019,16 @@ class NeighborhoodWatchCard extends HTMLElement {
         const sid = this._zoom;
         this._marking = false;
         const saved = b.map((v) => Math.round(v * 10000) / 10000);
-        Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid, box: saved }))
-          .then(() => {
-            this._marked = sid;
-            this._markBox = saved;
-          })
-          .catch((err) => alert(`Box not saved: ${err.message || err}`))
-          .finally(() => this._zoom === sid && this._render(true));
+        // Shown at once (the save to the photo folder can take a second or two): the box stays
+        // on the picture and it asks what it was; a failure takes it back.
+        this._marked = sid;
+        this._markBox = saved;
+        this._render(true);
+        Promise.resolve(this._hass.callService(DOMAIN, "mark_animal", { sighting_id: sid, box: saved })).catch((err) => {
+          if (this._marked === sid) this._marked = this._markBox = null;
+          alert(`Box not saved: ${err.message || err}`);
+          if (this._zoom === sid) this._render(true);
+        });
         return;
       }
       if (!down.delete(ev.pointerId)) return;
@@ -1080,7 +1089,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (!items.length)
       return this._note || undo ? `<div class="section"><h2>To review</h2>${undo}${this._noteBox()}</div>` : "";
     const limit = this._config.review_limit || 6;
-    const names = ["Nothing", ...this._names(d)];
+    const names = ["Nothing", ...this._reasons(d), ...this._names(d)];
     const options =
       names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("") +
       `<option value="${TYPE_IT}">Something else (type it)…</option>`;
