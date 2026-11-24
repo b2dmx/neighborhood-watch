@@ -1344,7 +1344,7 @@ async def test_boxes_and_names_from_the_detectors_page_are_applied_and_acknowled
     old.with_suffix(".json").write_text(json.dumps({"id": "old1", "label": "Nothing", "labelled_by": "right"}))
     inbox = [
         {"id": sid, "day": row["day"], "box": [0.2, 0.3, 0.6, 0.7], "answer": "Person", "time": 11.5},
-        {"id": "old1", "day": "2020-01-01", "box": [0.1, 0.1, 0.5, 0.5], "answer": "boshi", "time": 12.5},
+        {"id": "old1", "day": "2020-01-01", "box": [0.1, 0.1, 0.5, 0.5], "answer": "pepper", "time": 12.5},
         {"id": "gone", "day": "2020-01-01", "box": [0.1, 0.1, 0.5, 0.5], "time": 13.5},  # no such photo: dropped
     ]
     aioclient_mock.clear_requests()  # the empty inbox the helper set up
@@ -1355,7 +1355,7 @@ async def test_boxes_and_names_from_the_detectors_page_are_applied_and_acknowled
     assert mine["user_box"] == [0.2, 0.3, 0.6, 0.7] and mine["label"] == "Nothing" and mine["empty_reason"] == "Person"
     assert w.find_sighting(sid, None)["empty_reason"] == "Person"  # the sighting took it like an answer in the card
     other = json.loads(old.with_suffix(".json").read_text())
-    assert other["user_box"] == [0.1, 0.1, 0.5, 0.5] and other["label"] in ("Boshi", "Boshi".title())
+    assert other["user_box"] == [0.1, 0.1, 0.5, 0.5] and other["label"] in ("Pepper", "Pepper".title())
     acks = [c for c in aioclient_mock.mock_calls if str(c[1]).endswith("/inbox/ack")]
     assert sorted((i["id"], i["time"]) for i in acks[-1][2]["applied"]) == sorted([("gone", 13.5), ("old1", 12.5), (sid, 11.5)])
 
