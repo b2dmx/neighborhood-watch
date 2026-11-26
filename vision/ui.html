@@ -104,6 +104,8 @@
   .better { color: var(--good); } .worse { color: var(--bad); }
   .empty { color: var(--muted); }
   .error { color: var(--bad); margin-top: 8px; font-size: 14px; }
+  /* The rainbow under "vision", as in the logo. */
+  h1 .word { display: inline-block; padding-bottom: 5px; background: linear-gradient(90deg, #ad1f1f 0% 12.5%, #ad5a1f 12.5% 25%, #ad951f 25% 37.5%, #4eae1e 37.5% 50%, #1fae7f 50% 62.5%, #1f7fae 62.5% 75%, #371fae 75% 87.5%, #961fae 87.5% 100%) left bottom / 100% 4px no-repeat; }
   .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
   .ph { position: relative; padding: 0; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--chip); color: var(--text); text-align: left; display: block; }
   .ph img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--bg); }
@@ -127,7 +129,7 @@
 <body>
 <main>
   <header>
-    <h1>Neighborhood Watch vision</h1>
+    <h1>Neighborhood Watch <span class="word">vision</span></h1>
     <span class="chip" id="state"><span class="dot"></span><span>Connecting…</span></span>
   </header>
 
@@ -157,7 +159,7 @@
 
   <section class="card" id="photos-card">
     <h2>Photos</h2>
-    <div class="hint" style="margin: -6px 0 6px">Draw a box around an animal and say what it is. A box you draw is what the detector learns from first. Boxes and names go to Home Assistant, which applies them like an answer in its own card (within a minute).</div>
+    <div class="hint" style="margin: -6px 0 6px">Draw a box around what is there and say what it is. A box you draw is what the detector learns from first. Boxes and names go to Home Assistant, which applies them like an answer in its own card (within a minute).</div>
     <div class="row">
       <select id="ph-name" aria-label="Show photos of"></select>
       <label class="chk"><input type="checkbox" id="ph-need"> Only answered animal photos with no box</label>
@@ -252,10 +254,10 @@
   <div class="mbar">
     <select id="m-name" aria-label="It was"></select>
     <input type="text" id="m-type" placeholder="Name" aria-label="Name" hidden>
-    <button id="m-save" disabled>Save</button>
     <button class="quiet" id="m-clear">Remove box</button>
     <button class="quiet" id="m-prev">Previous</button>
     <button class="quiet" id="m-next">Next</button>
+    <button id="m-save" disabled>Save</button>
   </div>
   <div class="hint" id="m-hint" role="status" style="text-align: center"></div>
 </div>
@@ -502,7 +504,7 @@ function openPhoto(i) {
   $("m-clear").hidden = !(it.box || it.waiting?.box);
   $("m-prev").disabled = i <= 0;
   $("m-next").disabled = i >= ph.items.length - 1 && ph.items.length >= ph.total;
-  $("m-hint").textContent = it.waiting ? "Sent to Home Assistant; it applies it on its next check. Drawing again replaces it." : "Drag on the photo to draw a box around the animal.";
+  $("m-hint").textContent = it.waiting ? "Sent to Home Assistant; it applies it on its next check. Drawing again replaces it." : "Drag on the photo to draw a box around it.";
   updateSave();
   showBoxes();
   $("m-close").focus();

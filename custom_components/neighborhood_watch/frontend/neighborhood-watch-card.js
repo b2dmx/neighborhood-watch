@@ -405,7 +405,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           ${this._config.hide_title ? "" : `<h2 class="title">${esc(this._config.title || "Neighborhood Watch")}</h2>`}
           <div class="inner"></div>
         </div>
-      </ha-card><div class="allhost"></div><div class="lbhost"></div>`;
+      </ha-card><div class="allhost"></div><div class="notehost"></div><div class="lbhost"></div>`;
     let titles = [];
     if (this._frame !== frame || !sr.querySelector(".inner")) {
       this._stopSprites?.();
@@ -414,6 +414,7 @@ class NeighborhoodWatchCard extends HTMLElement {
       this._parts = null;
       this._lbHtml = "";
       this._allKey = "";
+      this._noteHtml = "";
       sr.querySelector(".allhost").addEventListener("keydown", (ev) => {
         if (ev.key === "Escape" && this._all && !this._zoom) this._closeAll();
       });
@@ -455,6 +456,15 @@ class NeighborhoodWatchCard extends HTMLElement {
       host.innerHTML = this._allHtml || "";
       if (this._allHtml) changed.push(host);
     }
+    // The note offer floats over the page (and over the full-screen list): nothing under it moves.
+    const note = this._noteBox();
+    if (note !== this._noteHtml) {
+      this._noteHtml = note;
+      const host = sr.querySelector(".notehost");
+      host.innerHTML = note;
+      changed.push(host);
+    }
+    sr.querySelector(".allpanel")?.classList.toggle("noted", !!note);
     for (const holder of changed) holder._stop = NWSprites.mountSprites(holder);
     this._stopSprites = () => inner.querySelectorAll(".part").forEach((holder) => holder._stop?.());
     // Everything below wires up only what was just (re)built.
@@ -607,6 +617,12 @@ class NeighborhoodWatchCard extends HTMLElement {
             alert(`Note not saved: ${err.message || err}`);
           });
       });
+    one("[data-note-open]")?.addEventListener("click", () => {
+      if (!this._note) return;
+      this._note.open = true;
+      this._render(true);
+      this.shadowRoot.querySelector("[data-note-text]")?.focus();
+    });
     const noteSkip = one("[data-note-skip]");
     if (noteSkip)
       noteSkip.addEventListener("click", () => {
@@ -682,7 +698,8 @@ class NeighborhoodWatchCard extends HTMLElement {
     if (it) this._hidden.set(sid, listedAs(it));
     // Answered while the list is that long: keep only the newest few hundred.
     for (const old of this._answered) if (this._answered.size > 200) this._answered.delete(old);
-    this._note = this._noteFor(d, it, answer) || this._note;
+    // A note being written stays as it is; otherwise the offer follows the latest correction.
+    if (!this._note?.open) this._note = this._noteFor(d, it, answer) || this._note;
     this._render(true);
     Promise.resolve(this._hass.callService(DOMAIN, "correct", { answer, sighting_id: sid })).catch((err) => {
       this._answered.delete(sid);
@@ -708,6 +725,9 @@ class NeighborhoodWatchCard extends HTMLElement {
   _noteBox() {
     const n = this._note;
     if (!n) return "";
+    if (!n.open)
+      return `<div class="note slim" role="status"><span>Add a note so it doesn't happen again?</span>
+        <button class="mini" data-note-skip title="No thanks" aria-label="No thanks">✕</button><button class="chip" data-note-open>Add note</button></div>`;
     const opts = n.about
       .map(([k, name, label]) => {
         const sel = n.pick === `${k}|${name}` ? " selected" : "";
@@ -718,7 +738,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         <div><b>Add a note so it doesn't happen again?</b> <span class="muted">The AI said ${esc(n.said)}; it was ${esc(n.was)}.</span></div>
         <select data-note-about>${opts}</select>
         <textarea data-note-text rows="2" placeholder="e.g. looks very bright under strong infrared">${esc(n.text || "")}</textarea>
-        <div class="acts"><button class="chip" data-note-save>Save note</button><button class="chip" data-note-skip>No thanks</button></div>
+        <div class="acts end"><button class="chip" data-note-skip>No thanks</button><button class="chip" data-note-save>Save note</button></div>
       </div>`;
   }
 
@@ -822,29 +842,33 @@ class NeighborhoodWatchCard extends HTMLElement {
     // pinch to zoom, drag to move around.
     if (!this._zoom) return "";
     const marked = this._marked === this._zoom;
-    // The box is the first half of an answer: right after it, say what the animal was.
+    // The answers stay on the enlarged photo for anything still waiting in To review, and right
+    // after a box is drawn (the box is the first half of an answer).
     let ask = "";
-    if (marked) {
-      const d = this._devices();
-      const sid = String(this._zoom);
-      const it = (this._state(d.hub?.keys.to_review)?.attributes?.items || []).find((x) => String(x.id) === sid);
+    const d = this._devices();
+    const sid = String(this._zoom);
+    const it = this._hidden.has(sid)
+      ? undefined
+      : (this._state(d.hub?.keys.to_review)?.attributes?.items || []).find((x) => String(x.id) === sid);
+    if (marked || it) {
       const names = ["Nothing", ...this._reasons(d), ...this._names(d)];
       ask = `<div class="lbask" role="group" aria-label="What was it?">
-          ${it && it.animal !== "No answer" ? `<button class="lbright" data-lb-right>✓ ${esc(it.animal)}</button>` : ""}
+          ${marked ? `<button class="lbundo" data-lb-undo>Remove box</button>` : ""}
           <select data-lb-name aria-label="It was"><option value="">${it ? "It was…" : "What was it?"}</option>${
             names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("")
           }<option value="${TYPE_IT}">Something else (type it)…</option></select>
-          <button class="lbundo" data-lb-undo>Undo the mark</button>
+          ${it ? `<button data-lb-unsure>? Not sure</button>` : ""}
+          ${it && it.animal !== "No answer" ? `<button class="lbright" data-lb-right>✓ ${esc(it.animal)}</button>` : ""}
         </div>`;
     }
-    return `<div class="lightbox" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
+    return `<div class="lightbox${ask ? " asking" : ""}" role="dialog" aria-modal="true" aria-label="${esc(this._zoomAlt || "Sighting")}">
         <button class="lbclose" title="Close" aria-label="Close">✕</button>
-        <button class="lbmark" aria-pressed="${this._marking ? "true" : "false"}" title="Drag a box around the animal: the detector learns from it">Mark the animal</button>
+        <button class="lbmark" aria-pressed="${this._marking ? "true" : "false"}" title="Drag a box around what's in the photo: an animal, a person, a car…">Draw a box</button>
         <div class="lbbox" hidden></div>
         <img class="lbimg" data-frame="${esc(this._zoom)}" alt="${esc(this._zoomAlt || "Sighting")}" draggable="false">
         <div class="lbhint" role="status">${
           this._marking
-            ? "Drag a box around the animal"
+            ? "Drag a box around it"
             : marked
               ? "Box saved. What was it?"
               : "Tap to zoom in · scroll, pinch or + and − to zoom · drag or arrows to move"
@@ -859,7 +883,7 @@ class NeighborhoodWatchCard extends HTMLElement {
     // Tapping around the picture (or ✕) closes it; the picture itself zooms and moves.
     box.addEventListener("click", (ev) => {
       if (ev.target.closest(".lbmark")) {
-        // Mark the animal: the next drag on the picture draws a box instead of moving it.
+        // Draw a box: the next drag on the picture draws a box instead of moving it.
         this._marking = !this._marking;
         this._marked = null;
         this._render(true);
@@ -881,6 +905,11 @@ class NeighborhoodWatchCard extends HTMLElement {
       leave();
       this._answer(sid, "right");
     });
+    box.querySelector("[data-lb-unsure]")?.addEventListener("click", () => {
+      const sid = String(this._zoom);
+      leave();
+      this._answer(sid, "unsure");
+    });
     box.querySelector("[data-lb-name]")?.addEventListener("change", (ev) => {
       const sid = String(this._zoom);
       const value = ev.target.value;
@@ -892,6 +921,11 @@ class NeighborhoodWatchCard extends HTMLElement {
         this._typedText = "";
         this._typedMsg = "";
         this._render(true);
+        if (!this.shadowRoot.querySelector("input[data-type-sid]")) {
+          // Its row isn't among the first few: show them all.
+          this._all = true;
+          this._render(true);
+        }
         this.shadowRoot.querySelector("input[data-type-sid]")?.focus();
         return;
       }
@@ -925,11 +959,14 @@ class NeighborhoodWatchCard extends HTMLElement {
     };
     const apply = () => {
       if (v.s <= 1) Object.assign(v, { s: 1, x: 0, y: 0 });
-      // Never further than the picture's own edge.
-      const mx = (img.offsetWidth * (v.s - 1)) / 2;
-      const my = (img.offsetHeight * (v.s - 1)) / 2;
-      v.x = Math.max(-mx, Math.min(mx, v.x));
-      v.y = Math.max(-my, Math.min(my, v.y));
+      // Never further than the picture's own edge. (Not before it has a size: after a redraw
+      // that would throw away where you had moved to.)
+      if (img.offsetWidth) {
+        const mx = (img.offsetWidth * (v.s - 1)) / 2;
+        const my = (img.offsetHeight * (v.s - 1)) / 2;
+        v.x = Math.max(-mx, Math.min(mx, v.x));
+        v.y = Math.max(-my, Math.min(my, v.y));
+      }
       img.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`;
       img.style.cursor = v.s > 1 ? "grab" : "zoom-in";
       placeSaved();
@@ -1084,10 +1121,10 @@ class NeighborhoodWatchCard extends HTMLElement {
         ? `<div class="undo muted">Last answer: ${esc(la.where || "")} · ${esc(said[String(la.answer).toLowerCase()] || la.answer)}` +
           ` <button class="chip" data-undo aria-label="Undo the last answer">Undo</button></div>`
         : "";
-    // Nothing to review: no section at all (unless the note box or an undo is still offered).
+    // Nothing to review: no section at all (unless an undo is still offered).
     if (!items.length) this._all = false;
     if (!items.length)
-      return this._note || undo ? `<div class="section"><h2>To review</h2>${undo}${this._noteBox()}</div>` : "";
+      return undo ? `<div class="section"><h2>To review</h2>${undo}</div>` : "";
     const limit = this._config.review_limit || 6;
     const names = ["Nothing", ...this._reasons(d), ...this._names(d)];
     const options =
@@ -1099,12 +1136,12 @@ class NeighborhoodWatchCard extends HTMLElement {
       const pick =
         this._typing === String(it.id)
           ? `<input class="typed" data-type-sid="${sid}" list="nw-names" placeholder="What was it?" aria-label="What was it?">` +
-            `<button class="mini" data-type-ok title="Save" aria-label="Save">✓</button>` +
-            `<button class="mini" data-type-cancel title="Cancel" aria-label="Cancel">✕</button>`
+            `<button class="mini" data-type-cancel title="Cancel" aria-label="Cancel">✕</button>` +
+            `<button class="mini" data-type-ok title="Save" aria-label="Save">✓</button>`
           : // "No answer" (no AI could look): nothing to agree with, only what it was.
-            `${it.animal === "No answer" ? "" : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>`}
+            `<select data-sid="${sid}" aria-label="It was"><option value="">It was…</option>${options}</select>
             <button class="mini" data-answer="unsure" data-sid="${sid}" title="Not sure" aria-label="Not sure">?</button>
-            <select data-sid="${sid}" aria-label="It was"><option value="">It was…</option>${options}</select>`;
+            ${it.animal === "No answer" ? "" : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>`}`;
       return `<div class="rev">
           <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
           <div class="revname"${it.disagree ? ` title="The AI said nothing is there, but the detector saw an animal. Which is it?"` : ""}><b>${esc(it.animal)}</b> <span class="muted">${it.disagree ? "· detector saw an animal" : esc(it.confidence)}</span></div>
@@ -1127,7 +1164,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           <div class="allhead"><h2>To review · ${left}</h2><button class="allclose" data-allclose title="Close" aria-label="Close">✕</button></div>
           <div class="revgrid">${items.map(rowHtml).join("")}</div>
         </div>`;
-    return `<div class="section"><h2>To review · ${left}</h2>${undo}${this._noteBox()}<div class="revgrid">${rows.join("")}</div>${more}${suggest}</div>`;
+    return `<div class="section"><h2>To review · ${left}</h2>${undo}<div class="revgrid">${rows.join("")}</div>${more}${suggest}</div>`;
   }
 
   _scan(hub) {
@@ -1321,7 +1358,7 @@ class NeighborhoodWatchCard extends HTMLElement {
         const off = this._answered.has(String(sid)) ? " disabled" : "";
         const buttons =
           sid && !nothing
-            ? `<button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button><button class="mini" data-answer="unsure" data-sid="${esc(sid)}" title="Not sure" aria-label="Not sure"${off}>?</button>`
+            ? `<button class="mini" data-answer="unsure" data-sid="${esc(sid)}" title="Not sure" aria-label="Not sure"${off}>?</button><button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button>`
             : "";
         return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
       });
@@ -1359,9 +1396,9 @@ const STYLE = `
   img.broken { opacity: .3; }
   .thumb.gone { display: flex; align-items: center; justify-content: center; font-size: .8em; color: var(--secondary-text-color); border: 1px dashed var(--divider-color); box-sizing: border-box; }
   .part { display: contents; }
-  .lbmark { position: absolute; top: 12px; left: 14px; z-index: 1; min-height: 40px; padding: 0 16px; border-radius: 999px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
+  .lbmark { position: absolute; top: 12px; left: 14px; z-index: 2; min-height: 40px; padding: 0 16px; border-radius: 999px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
   .lbmark[aria-pressed="true"] { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .lbask { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 1; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 94%; }
+  .lbask { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 2; width: max-content; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; max-width: 94%; }
   .lbask button, .lbask select { min-height: 40px; border-radius: 999px; padding: 0 16px; border: none; font: inherit; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
   .lbask .lbright { background: var(--primary-color); color: var(--text-primary-color, #fff); }
   .lbask select { border: 1px solid var(--divider-color); }
@@ -1436,8 +1473,12 @@ const STYLE = `
   .mini { font: inherit; width: 36px; height: 36px; flex: none; border-radius: 50%; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); cursor: pointer; }
   .mini:disabled { opacity: .4; }
   .empty { color: var(--secondary-text-color); }
-  .note { display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 8px; border-radius: 12px; background: var(--secondary-background-color); }
-  .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
+  .note { position: fixed; z-index: 9; bottom: 16px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 24px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 16px; background: var(--card-background-color); color: var(--primary-text-color); border: 1px solid var(--divider-color); box-shadow: 0 4px 16px rgba(0, 0, 0, .35); }
+  .note.slim { flex-direction: row; align-items: center; gap: 10px; padding: 8px 10px 8px 16px; }
+  .note.slim span { flex: 1; font-size: .9em; }
+  .allpanel.noted { padding-bottom: 96px; }
+  .note .acts.end { justify-content: flex-end; }
+  .note select, .note textarea { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
   .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
   .undo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
   .rev { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 14px; background: var(--secondary-background-color); min-width: 0; }
@@ -1454,13 +1495,15 @@ const STYLE = `
   .allclose:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
   .lightbox { position: fixed; inset: 0; z-index: 10; background: color-mix(in srgb, var(--primary-background-color) 92%, transparent); display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .lbimg { max-width: 96vw; max-height: 92vh; border-radius: 8px; cursor: zoom-in; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: center; }
-  .lbhint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: var(--secondary-background-color); color: var(--primary-text-color); font-size: .8em; pointer-events: none; white-space: nowrap; }
-  .lbclose { position: absolute; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--secondary-background-color); color: var(--primary-text-color); cursor: pointer; }
+  .lightbox.asking .lbimg { max-height: calc(100vh - 220px); max-height: calc(100dvh - 220px); }
+  .lbhint { position: absolute; z-index: 2; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: var(--secondary-background-color); color: var(--primary-text-color); font-size: .8em; pointer-events: none; width: max-content; max-width: calc(100% - 24px); box-sizing: border-box; text-align: center; }
+  .lbclose { position: absolute; z-index: 2; top: 12px; right: 14px; font-size: 22px; width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--secondary-background-color); color: var(--primary-text-color); cursor: pointer; }
   .thumb.broken { opacity: .3; }
   .acts { display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   input[data-folder] { flex: 1; min-width: 180px; font: inherit; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); }
   select { font: inherit; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; min-height: 32px; }
   select option { background-color: var(--primary-background-color, #111); color: var(--primary-text-color); }
+  @media (max-width: 500px) { .lbask { width: calc(100% - 24px); max-width: none; bottom: 60px; } .lbask select { flex: 1 1 100%; } }
   @container (max-width: 500px) { .grid { grid-template-columns: repeat(__SMALLCOLS__, minmax(0, 1fr)); } }
 `;
 

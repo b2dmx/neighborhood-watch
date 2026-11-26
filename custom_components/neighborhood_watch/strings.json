@@ -1080,8 +1080,8 @@
       }
     },
     "mark_animal": {
-      "name": "Mark the animal",
-      "description": "Saves where the animal is in a sighting's photo (the card does this when you drag a box on the enlarged photo). The local detector's training uses your box before any other, and the zoomed-in photo is cut around it.",
+      "name": "Draw a box",
+      "description": "Saves a box around what is in a sighting's photo (the card does this when you drag one on the enlarged photo). The local detector's training uses your box before any other, and the zoomed-in photo is cut around it.",
       "fields": {
         "sighting_id": {
           "name": "Sighting",

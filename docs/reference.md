@@ -271,7 +271,7 @@ A new or changed address is checked when you save it: if the service doesn't ans
 
 ### Photos tool (the vision page)
 
-The vision service's own page has a **Photos** card: every saved photo as a thumbnail, filtered by name (with how many answered photos of each still need a box) or to the answered animal photos with no box. Open one, drag a box around the animal and say what it was (an animal, **Nothing**, or a reason such as **Person**, **Car**, **Leaves or wind**), then **Save**: it moves on to the next photo. A box you draw is what training uses before any other.
+The vision service's own page has a **Photos** card: every saved photo as a thumbnail, filtered by name (with how many answered photos of each still need a box) or to the answered animal photos with no box. Open one, drag a box around what is there and say what it was (an animal, **Nothing**, or a reason such as **Person**, **Car**, **Leaves or wind**), then **Save**: it moves on to the next photo. A box you draw is what training uses before any other.
 
 The saved photos are mounted read-only in the vision container, on purpose, so nothing is written to them from there. What you box or name goes into the service's inbox, and Home Assistant fetches it on its next check (about a minute), applies it exactly like an answer given in its own card (the sighting, the animal's last seen and the photo's record all follow; a photo no sighting remembers any more only has its record changed) and then acknowledges it, which takes it out of the inbox. If Home Assistant or the photo folder is away, the inbox keeps everything and it is applied later. A photo shows **Sent** until then. `GET /inbox` shows what is waiting.
 
@@ -306,7 +306,7 @@ Got a trail-cam card, a phone video or old recordings? Put them in the detector'
 
 The integration installs a **Neighborhood Watch** card, so there's no resource to add. It finds your devices on its own and shows:
 
-- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos)). Tap a photo to enlarge it; **Mark the animal** there lets you drag a box around it (the detector learns from it before any other box: most useful on small or dark animals it missed) and then asks what it was, so the box and the name are one answer; **Undo the mark** takes the box away;
+- **To review**: sightings waiting for a ✓, ? or It was… (see [Corrections](#corrections-and-saved-photos)). Tap a photo to enlarge it: the answers stay on screen there, also while zoomed in. **Draw a box** lets you drag a box around what is there (for an animal the detector learns from it before any other box: most useful on small or dark ones it missed; boxes around people or cars are kept with the photo but not learned from yet), then say what it was; **Remove box** takes it away. After a correction a small bar offers to add a note;
 - each animal's photo, where and when it was last seen, whether it's on camera now, and its Alerts, Critical and Missing mode switches. Its photo is its last real one: the newest sighting that was counted, or, when a wrong one is taken away, the newest photo you confirmed as it. Without a recent photo it shows the animal's pixel sprite (its own look, or the ready-made one nearest to its description);
 - wildlife, last night's summary, and each camera's last detection with ✓ / ? buttons (It was… is in To review);
 - the critical-alert switches;
@@ -353,7 +353,7 @@ size: 96
 | `neighborhood_watch.identify` | Checks a camera now (ignoring its cooldown) and returns the result |
 | `neighborhood_watch.test_sighting` | Fires a fake sighting event marked `test: yes` and sends the alerts a real one would, titled `TEST · …`; tracking is never changed |
 | `neighborhood_watch.correct` | Right, wrong, or what it really was, for a sighting (by id, by camera, or the latest) |
-| `neighborhood_watch.mark_animal` | Saves where the animal is in a sighting's photo (what the card's **Mark the animal** does); no box takes the mark away |
+| `neighborhood_watch.mark_animal` | Saves where the animal is in a sighting's photo (what the card's **Draw a box** does); no box takes it away |
 | `neighborhood_watch.undo_last_answer` | Takes back the last Right / Not sure / Other / It was… answer: the sighting goes back to To review, and tracking and the photo follow |
 | `neighborhood_watch.mark_wrong` | Removes an animal's latest counted sighting from tracking, e.g. when it was really another animal |
 | `neighborhood_watch.set_reference_photo` | Uses an animal's last photo, or a fresh snapshot, as its reference photo |
