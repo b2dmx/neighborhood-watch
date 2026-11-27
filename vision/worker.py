@@ -58,7 +58,7 @@ def main() -> None:
                     "dir": str(model.dir),
                     "size": model.size,
                     "labels": sorted(set(model.labels.values())),
-                    "names": sorted(set(model.labels.values()) - {"animal"}) if model.named else [],
+                    "names": sorted(set(model.labels.values()) - {"animal", "person", "vehicle"}) if model.named else [],
                     "sure": model.id_info.get("sure", {}),
                     "device": model.device,
                     "available": core.available_devices,

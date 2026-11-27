@@ -4,9 +4,10 @@ train.py), with letterboxing, overlapping tiles for wide frames, and NMS.
 Input size and class names come from the export itself (metadata.yaml, else the model's
 input shape and output width), never from constants. A model trained with the owner's
 animals as classes (each named animal, Raccoon, ... plus "animal" for the rest) both finds and names:
-every box is an "animal" with the name it most likely is (`name`, and the best few in
-`names`), and how sure the trainer found each name can be on the held-back photos
-(id.json beside the export). Used by the web app and by the trainer
+an animal's box is an "animal" with the name it most likely is (`name`, and the best few
+in `names`), and how sure the trainer found each name can be on the held-back photos
+(id.json beside the export). Its "person" and "vehicle" classes, once it has them, are not
+animals: their boxes carry that label, as MegaDetector's do. Used by the web app and by the trainer
 (which scores the served model and a candidate the same way).
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ import openvino as ov
 from PIL import Image
 
 MEGADETECTOR_LABELS = {0: "animal", 1: "person", 2: "vehicle"}
+OTHER_LABELS = ("person", "vehicle")  # classes of a trained model that are not animals
 COMPILE_CONFIG = {"PERFORMANCE_HINT": "LATENCY", "NUM_STREAMS": "1"}  # one request at a time
 # On the GPU: full precision. Its default half precision scored the same photos far lower
 # than the CPU did (animals the CPU found at 0.9 came out under the line), so a model that
@@ -210,11 +212,10 @@ class Detector:
             raw = compiled(tensor)[output][0]
         raw = raw.T
         scores_all = raw[:, 4:]
-        cls = scores_all.argmax(1)
-        # A model that names animals: "is an animal there" is all its names' scores together
-        # (a cat it can't tell apart splits its score between two names and would otherwise
-        # fall under the line as a miss). Which one it is stays the best single name.
-        conf = np.minimum(scores_all.sum(1), 1.0) if self.named else scores_all.max(1)
+        if self.named:
+            cls, conf = self.classify(scores_all)
+        else:
+            cls, conf = scores_all.argmax(1), scores_all.max(1)
         mask = conf >= self.min_conf
         raw, cls, conf = raw[mask], cls[mask], conf[mask]
         cx, cy, bw, bh = raw[:, 0], raw[:, 1], raw[:, 2], raw[:, 3]
@@ -222,6 +223,25 @@ class Detector:
         boxes[:, [0, 2]] = (boxes[:, [0, 2]] - left) / scale + dx
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - top) / scale + dy
         return boxes, conf, cls, raw[:, 4:]
+
+    def classify(self, scores: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Each box's class and confidence, for a model that names animals. "Is an animal
+        there" is all its names' scores together (a cat it can't tell apart splits its score
+        between two names and would otherwise fall under the line as a miss); which one it is
+        stays the best single name. A box that is more a person or a vehicle than any animal
+        is that instead."""
+        animals = [i for i in range(scores.shape[1]) if self.labels.get(i) not in OTHER_LABELS]
+        others = [i for i in range(scores.shape[1]) if i not in animals]
+        total = np.minimum(scores[:, animals].sum(1), 1.0)
+        cls = np.asarray(animals)[scores[:, animals].argmax(1)]
+        if not others:
+            return cls, total
+        best = scores[:, others].max(1)
+        other = best > total
+        return (
+            np.where(other, np.asarray(others)[scores[:, others].argmax(1)], cls),
+            np.where(other, best, total),
+        )
 
     def detect(self, img: Image.Image) -> list[dict]:
         found = [self.candidates(img)]
@@ -239,8 +259,23 @@ class Detector:
         if self.named:
             # One box per animal whatever it's named (two names for one cat are one cat).
             out = []
-            for i in nms(boxes, conf):
-                ranked = every[i].argsort()[::-1][:3]
+            kind = np.array([self.labels.get(int(c), "") for c in cls])
+            animal = np.where(~np.isin(kind, OTHER_LABELS))[0]
+            mine = [c for c in range(every.shape[1]) if self.labels.get(c) not in OTHER_LABELS]
+            for label in OTHER_LABELS:
+                idx = np.where(kind == label)[0]
+                for k in nms(boxes[idx], conf[idx]):
+                    i = idx[k]
+                    out.append(
+                        {
+                            "label": label,
+                            "confidence": round(float(conf[i]), 3),
+                            "box": [round(float(v)) for v in boxes[i]],
+                        }
+                    )
+            for k in nms(boxes[animal], conf[animal]):
+                i = animal[k]
+                ranked = sorted(mine, key=lambda c: -every[i][c])[:3]
                 out.append(
                     {
                         "label": "animal",

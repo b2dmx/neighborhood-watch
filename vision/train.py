@@ -10,6 +10,9 @@ the Home Assistant integration saves (NW_DATASET/<date>/<id>.jpg + <id>.json).
    Each animal photo's main box is named after what it was (your answer, or the AI's when it
    was sure and nobody has answered): the animals with at least MIN_PER_NAME answered photos
    are classes of their own, everything else is "animal". So one model finds and names.
+   People and vehicles are boxed on every photo by the COCO teacher (and by your own box on
+   a photo you answered Person or Car). With at least MIN_PER_NAME photos of one, it is a
+   class too, so the model finds it and doesn't take it for an animal or for nothing.
 2. Split by time: the confirmed photos from the most recent ~20% of dates are the
    evaluation set and are never trained on. So are confirmed animal photos that no teacher
    could box (they can't be trained on, but they're the misses that matter most).
@@ -55,6 +58,10 @@ MIN_PER_NAME = int(os.environ.get("NW_TRAIN_MIN_PER_NAME", "12"))
 SURE_PRECISION = float(os.environ.get("NW_TRAIN_SURE_PRECISION", "0.95"))
 # A name is trusted only after this many right answers above the line (5 in a row proves little).
 SURE_MIN_COUNT = int(os.environ.get("NW_TRAIN_SURE_MIN", "15"))
+OTHERS = ("person", "vehicle")  # classes that aren't animals
+COCO_OTHERS = {0: "person", 2: "vehicle", 3: "vehicle", 5: "vehicle", 7: "vehicle"}  # car motorcycle bus truck
+REASON_KIND = {"person": "person", "car": "vehicle"}  # what an answer says is there
+OTHER_CONF = float(os.environ.get("NW_TRAIN_OTHER_CONF", "0.5"))  # teacher's, for people and vehicles
 RESCUE = "megadetector+yolo11m@1"  # how unboxed answered photos get a best-guess box
 MAX_TILES = int(os.environ.get("NW_TILES", "8"))
 COCO_ANIMALS = list(range(14, 24))  # bird cat dog horse sheep cow elephant bear zebra giraffe
@@ -116,6 +123,17 @@ class Sample:
     name: str = ""  # what the animal is (your answer, else the AI's), title case
     main: int = -1  # which box is that animal (the others are just "animal")
     rescued: bool = False  # its only box is a best guess (rescue_boxes)
+    others: list = field(default_factory=list)  # people and vehicles: [x1, y1, x2, y2, kind]
+
+    @property
+    def answered_kind(self) -> str | None:
+        """"person" or "vehicle" when you answered that is what the photo shows."""
+        if self.animal or self.trust != "confirmed":
+            return None
+        return REASON_KIND.get(str(self.meta.get("empty_reason") or "").lower())
+
+    def has(self, kind: str) -> bool:
+        return any(b[4] == kind for b in self.others)
 
     @property
     def empty_ok(self) -> bool:
@@ -235,6 +253,81 @@ def teacher_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, st
                 s.boxes = [list(b) for b in (cache.get(s.id) or {}).get("rescue_boxes", [])]
                 s.rescued = bool(s.boxes)
             s.main = main_box(s, *sizes[s.id])
+
+
+def other_boxes(samples: list[Sample], work: Path, imgsz: int, device: str, status) -> None:
+    """Fill s.others on every photo: the COCO teacher's people and vehicles (cached per id).
+    On a photo you answered Person or Car, a box you drew comes first. On an animal photo,
+    anything lying over the animal itself is dropped: you said an animal is there."""
+    from PIL import Image  # noqa: PLC0415
+
+    cache_path = work / "train" / "labels-cache.json"
+    cache = read_json(cache_path, {})
+    key = f"yolo11m@{imgsz}>{OTHER_CONF}"
+    todo = [s for s in samples if (cache.get(s.id) or {}).get("others_by") != key]
+    if todo:
+        from ultralytics import YOLO  # noqa: PLC0415
+
+        teacher = YOLO(weights(work, "yolo11m.pt"))
+        for i, s in enumerate(todo):
+            if i % 20 == 0:
+                status(stage="labelling people and vehicles", done=i, total=len(todo))
+                if i:
+                    write_json(cache_path, cache)  # a stopped round keeps what it looked at
+            try:
+                r = teacher.predict(str(s.jpg), imgsz=imgsz, conf=OTHER_CONF, classes=list(COCO_OTHERS),
+                                    device=device, verbose=False)[0]
+            except OSError as err:  # one unreadable photo doesn't end the round
+                print(f"No people or vehicle boxes for {s.id}: {err}", flush=True)
+                continue
+            entry = cache.setdefault(s.id, {})
+            entry["others_by"] = key
+            entry["others"] = [[round(v, 1) for v in b] + [COCO_OTHERS[int(c)]]
+                               for b, c in zip(r.boxes.xyxy.tolist(), r.boxes.cls.tolist())]
+        write_json(cache_path, cache)
+    for s in samples:
+        found = [list(b) for b in (cache.get(s.id) or {}).get("others", [])]
+        kind = s.answered_kind
+        if kind and s.meta.get("user_box"):
+            with Image.open(s.jpg) as im:
+                mine = user_box(s, *im.size)
+            if mine:
+                drawn = mine[0][:4]
+                found = [[*drawn, kind]] + [b for b in found if _iou(b, drawn) < 0.5]
+        if s.animal and 0 <= s.main < len(s.boxes):
+            found = [b for b in found if _iou(b, s.boxes[s.main]) < 0.5]
+        s.others = found
+
+
+def pick_others(samples: list[Sample]) -> list[str]:
+    """People and vehicles with enough photos to be classes of their own."""
+    return [k for k in OTHERS if sum(s.has(k) for s in samples) >= MIN_PER_NAME]
+
+
+def unfound(s: Sample, names: list[str]) -> bool:
+    """You said a person (or car) is there and nothing boxed it: training on it would teach
+    that nothing is."""
+    return s.answered_kind in names and not s.has(s.answered_kind)
+
+
+def others_score(found: list[list[dict]], evals: list[Sample], kinds: list[str], threshold: float) -> dict:
+    """People and vehicles on the held-back photos: of those showing one (your answer, or
+    the teacher's box), how many the model found; and on how many others it reported one."""
+    out = {}
+    for kind in kinds:
+        photos = hits = extra = 0
+        for f, s in zip(found, evals):
+            there = s.has(kind) or s.answered_kind == kind
+            said = any(d["label"] == kind and d["confidence"] >= threshold for d in f)
+            photos += there
+            hits += there and said
+            extra += said and not there
+        out[kind] = {"photos": photos, "found": hits, "extra": extra}
+    return out
+
+
+def animals_only(found: list[list[dict]]) -> list[list[dict]]:
+    return [[d for d in f if d["label"] == "animal"] for f in found]
 
 
 def rescue_boxes(todo: list[Sample], work: Path, megadetector: Path, imgsz: int, device: str,
@@ -399,7 +492,6 @@ def label_lines(s: Sample, names: list[str], region: tuple[int, int, int, int]) 
     """YOLO label lines for the boxes inside region (x0, y0, x1, y1 of the photo): a box
     counts when at least half of it is inside, and is clipped to the region."""
     x0, y0, x1, y1 = region
-    rw, rh = x1 - x0, y1 - y0
     main, generic = class_of(s, names), names.index(GENERIC)
     lines = []
     for i, (bx1, by1, bx2, by2, _c) in enumerate(s.boxes):
@@ -409,11 +501,22 @@ def label_lines(s: Sample, names: list[str], region: tuple[int, int, int, int]) 
             continue
         if (cx2 - cx1) * (cy2 - cy1) < 0.5 * max(1.0, (bx2 - bx1) * (by2 - by1)):
             continue
-        k = main if i == s.main else generic
-        lines.append(
-            f"{k} {((cx1 + cx2) / 2 - x0) / rw:.6f} {((cy1 + cy2) / 2 - y0) / rh:.6f} {(cx2 - cx1) / rw:.6f} {(cy2 - cy1) / rh:.6f}"
-        )
+        lines.append(_line(main if i == s.main else generic, (cx1, cy1, cx2, cy2), region))
+    for bx1, by1, bx2, by2, kind in s.others:
+        cx1, cy1 = max(float(x0), bx1), max(float(y0), by1)
+        cx2, cy2 = min(float(x1), bx2), min(float(y1), by2)
+        if kind not in names or cx2 - cx1 < 2 or cy2 - cy1 < 2:
+            continue
+        if (cx2 - cx1) * (cy2 - cy1) < 0.5 * max(1.0, (bx2 - bx1) * (by2 - by1)):
+            continue
+        lines.append(_line(names.index(kind), (cx1, cy1, cx2, cy2), region))
     return lines
+
+
+def _line(k: int, box: tuple, region: tuple) -> str:
+    (cx1, cy1, cx2, cy2), (x0, y0, x1, y1) = box, region
+    rw, rh = x1 - x0, y1 - y0
+    return f"{k} {((cx1 + cx2) / 2 - x0) / rw:.6f} {((cy1 + cy2) / 2 - y0) / rh:.6f} {(cx2 - cx1) / rw:.6f} {(cy2 - cy1) / rh:.6f}"
 
 
 def burst(s: Sample) -> tuple:
@@ -440,7 +543,7 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
         group = sorted((s for s in train if s.animal == animal), key=lambda s: s.id)
         rng.shuffle(group)
         if not animal:  # photos you said show a person, a car, leaves... are kept before the rest
-            group.sort(key=lambda s: not s.meta.get("empty_reason"))
+            group.sort(key=lambda s: not (s.meta.get("empty_reason") or ("person" in names and s.has("person"))))
             group = group[: max(200, n_animals)]
         n_val = max(1, round(len(group) * 0.2)) if len(group) > 1 else 0
         visits: dict[tuple, list[Sample]] = {}
@@ -463,8 +566,12 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
                 if s.animal:
                     wanted = [(t, label_lines(s, names, t)) for t in regions]
                     wanted = [(t, lines) for t, lines in wanted if lines]
-                else:  # every other empty photo also gives one tile
-                    wanted = [(rng.choice(regions), [])] if regions and (n % 2 or s.meta.get("empty_reason")) else []
+                else:  # up to two tiles holding a person or vehicle, else every other photo gives one
+                    wanted = [(t, label_lines(s, names, t)) for t in regions]
+                    wanted = [(t, lines) for t, lines in wanted if lines][:2]
+                    if not wanted and regions and (n % 2 or s.meta.get("empty_reason")):
+                        t = rng.choice(regions)
+                        wanted = [(t, label_lines(s, names, t))]
                 for k, (t, lines) in enumerate(wanted):
                     im.convert("RGB").crop(t).save(root / "images" / part / f"{s.id}_t{k}.jpg", "JPEG", quality=90)
                     (root / "labels" / part / f"{s.id}_t{k}.txt").write_text("\n".join(lines), encoding="utf-8")
@@ -473,7 +580,7 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
                 dest.symlink_to(s.jpg.resolve())
             else:
                 shutil.copyfile(s.jpg, dest)
-            lines = label_lines(s, names, (0, 0, w, h)) if s.animal else []
+            lines = label_lines(s, names, (0, 0, w, h))
             (root / "labels" / part / f"{s.id}.txt").write_text("\n".join(lines), encoding="utf-8")
     yaml_path = root / "data.yaml"
     listed = "".join(f"  {i}: {json.dumps(n)}\n" for i, n in enumerate(names))
@@ -486,7 +593,7 @@ def build_yolo_dataset(train: list[Sample], root: Path, names: list[str], imgsz:
 
 # ---- evaluation -------------------------------------------------------------------------
 def run_model(model_dir: Path, evals: list[Sample], work: Path) -> list[list[dict]]:
-    """Every animal detection per photo, run exactly as the service runs the model."""
+    """Every detection per photo, run exactly as the service runs the model."""
     from PIL import Image  # noqa: PLC0415
 
     import detector as det  # noqa: PLC0415
@@ -496,7 +603,7 @@ def run_model(model_dir: Path, evals: list[Sample], work: Path) -> list[list[dic
     out = []
     for s in evals:
         with Image.open(s.jpg) as im:
-            out.append([d for d in model.detect(im.convert("RGB")) if d["label"] == "animal"])
+            out.append(model.detect(im.convert("RGB")))
     return out
 
 
@@ -512,7 +619,7 @@ def naming(found: list[list[dict]], evals: list[Sample], names: list[str], thres
     animals, an animal with no name of its own (a lookalike), or an empty photo."""
     guesses: dict[str, list[tuple[float, bool]]] = {}
     right = total = 0
-    per: dict[str, dict] = {n: {"photos": 0, "right": 0} for n in names if n != GENERIC}
+    per: dict[str, dict] = {n: {"photos": 0, "right": 0} for n in names if n not in (GENERIC, *OTHERS)}
     for f, s in zip(found, evals):
         top = max(f, key=lambda d: d["confidence"], default=None)
         said = top.get("name") if top and top["confidence"] >= threshold else None
@@ -699,10 +806,12 @@ def run(args: argparse.Namespace) -> int:
         settings.update({"sync": False, "weights_dir": str(tdir / "weights"), "runs_dir": str(tdir / "runs")})
 
         teacher_boxes(samples, work, args.teacher_imgsz, device, status, args.megadetector)
-        names = pick_names(samples)
+        other_boxes(samples, work, args.teacher_imgsz, device, status)
+        kinds = pick_others(samples)
+        names = pick_names(samples) + kinds
         entry["names"] = names
         train, evals = split(samples)
-        train = [s for s in train if not s.animal or class_of(s, names) is not None]
+        train = [s for s in train if not unfound(s, names) and (not s.animal or class_of(s, names) is not None)]
         boxed = [s for s in train if s.animal]
         unboxed = [s for s in evals if s.animal and s.trust == "confirmed" and not s.boxes]
         entry["samples"] = {
@@ -714,7 +823,10 @@ def run(args: argparse.Namespace) -> int:
             "best_guess_boxes": sum(s.rescued for s in boxed),
             "eval_animals": sum(s.animal for s in evals),
             "eval_empty": sum(not s.animal for s in evals),
-            "per_name": {n: sum(1 for s in boxed if class_of(s, names) == i) for i, n in enumerate(names)},
+            "per_name": {
+                n: sum(s.has(n) for s in train) if n in kinds else sum(1 for s in boxed if class_of(s, names) == i)
+                for i, n in enumerate(names)
+            },
         }
         print("Samples:", entry["samples"], flush=True)
         if len(boxed) < 10 or not any(s.animal for s in evals):
@@ -728,11 +840,13 @@ def run(args: argparse.Namespace) -> int:
         if args.baseline == "stored":
             before_scores, before_name, before_found = stored_scores(evals), "stored detector scores", None
         else:
-            before_found = run_model(current_dir, evals, work)
+            everything = run_model(current_dir, evals, work)
+            before_found = animals_only(everything)
             before_scores, before_name = best_scores(before_found), current_dir.name
         entry["before"] = {"model": before_name, **metrics(before_scores, evals, args.threshold)}
         if before_found is not None:
             entry["before"].update(naming(before_found, evals, names, args.threshold))
+            entry["before"]["others"] = others_score(everything, evals, kinds, args.threshold)
         print("Before:", entry["before"], flush=True)
 
         # Train.
@@ -786,13 +900,16 @@ def run(args: argparse.Namespace) -> int:
         status(stage="exporting")
         candidate = export_openvino(best, args.imgsz, work / "models" / f"candidate-{n}")
         status(stage="scoring the new model")
-        after_found = run_model(candidate, evals, work)
+        everything = run_model(candidate, evals, work)
+        after_found = animals_only(everything)
         entry["after"] = {
             "model": f"trained-{n}",
             **metrics(best_scores(after_found), evals, args.threshold),
             **naming(after_found, evals, names, args.threshold),
+            "others": others_score(everything, evals, kinds, args.threshold),
         }
-        write_json(candidate / "id.json", {"names": names[:-1], "sure": entry["after"]["sure"],
+        animal_names = [x for x in names if x not in (GENERIC, *OTHERS)]
+        write_json(candidate / "id.json", {"names": animal_names, "sure": entry["after"]["sure"],
                                            "per_name": entry["after"]["names"], "round": n})
         print("After:", entry["after"], flush=True)
 
