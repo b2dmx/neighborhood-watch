@@ -350,7 +350,7 @@
         "data_description": {
           "detector_url": "e.g. {example}. Leave empty to turn it off.",
           "detector_min": "Below this the photo counts as empty. Lower catches more animals but skips fewer empty frames. 0.2 is a good start; lower it if the Detector agreement sensor shows misses.",
-          "local_naming": "Trust it first: a name it has proved it gets right (95% of the time on photos it didn't train on) is used without asking the AI. Priority, always-strict, long-absent and missing animals still go to the AI. The Detector tab shows which names it can be trusted with."
+          "local_naming": "Trust it first: a name it has proved it gets right (95% of the time on photos it didn't train on) is used without asking the AI. A photo where it has proved there is only a person or a car, with no animal, is not sent to the AI either. Priority, always-strict, long-absent and missing animals still go to the AI. The Detector tab shows which names it can be trusted with."
         }
       },
       "catch_alls": {

@@ -609,6 +609,8 @@ async def health(_request: web.Request) -> web.Response:
             # The animals it can name, and the confidence from which each name can be trusted.
             "names": info.get("names", []),
             "sure": info.get("sure", {}),
+            # People and vehicles: from which score a photo with no animal found really had none.
+            "clear": info.get("clear", {}),
             "loaded": _det.loaded,  # the detector process is running (it stops when idle)
             "training": training_running(),
             "available": info.get("available", []),  # what OpenVINO can use here (CPU, GPU, NPU)

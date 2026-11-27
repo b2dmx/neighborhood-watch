@@ -62,6 +62,7 @@ OTHERS = ("person", "vehicle")  # classes that aren't animals
 COCO_OTHERS = {0: "person", 2: "vehicle", 3: "vehicle", 5: "vehicle", 7: "vehicle"}  # car motorcycle bus truck
 REASON_KIND = {"person": "person", "car": "vehicle"}  # what an answer says is there
 OTHER_CONF = float(os.environ.get("NW_TRAIN_OTHER_CONF", "0.5"))  # teacher's, for people and vehicles
+CLEAR_FLOOR = 0.5  # a person or vehicle scored below this never clears a photo of animals
 RESCUE = "megadetector+yolo11m@1"  # how unboxed answered photos get a best-guess box
 MAX_TILES = int(os.environ.get("NW_TILES", "8"))
 COCO_ANIMALS = list(range(14, 24))  # bird cat dog horse sheep cow elephant bear zebra giraffe
@@ -142,6 +143,7 @@ class Sample:
             return False
         return self.trust == "confirmed" or (
             self.trust == "ai" and str(self.meta.get("ai_confidence") or "").lower() == "high"
+            and self.meta.get("named_by") != "local"
         )
 
 
@@ -324,6 +326,26 @@ def others_score(found: list[list[dict]], evals: list[Sample], kinds: list[str],
             extra += said and not there
         out[kind] = {"photos": photos, "found": hits, "extra": extra}
     return out
+
+
+def clear_lines(found: list[list[dict]], evals: list[Sample], kinds: list[str], threshold: float) -> dict:
+    """Per person / vehicle: the lowest score from which every held-back photo where the model
+    reported it, and no animal, really had no animal. From there up a check needs no AI. One
+    wrongly cleared animal ends the line above it, and it takes SURE_MIN_COUNT photos."""
+    lines = {}
+    for kind in kinds:
+        rows = []
+        for f, s in zip(found, evals):
+            if any(d["label"] == "animal" and d["confidence"] >= threshold for d in f):
+                continue  # an animal was found too: the AI looks anyway
+            score = max((d["confidence"] for d in f if d["label"] == kind), default=0.0)
+            if score >= CLEAR_FLOOR:
+                rows.append((score, s.animal))
+        highest_wrong = max((score for score, animal in rows if animal), default=0.0)
+        above = [score for score, _animal in rows if score > highest_wrong]
+        if len(above) >= SURE_MIN_COUNT:
+            lines[kind] = round(min(above) + 0.0005, 3)  # never rounded down onto a wrong one
+    return lines
 
 
 def animals_only(found: list[list[dict]]) -> list[list[dict]]:
@@ -907,10 +929,12 @@ def run(args: argparse.Namespace) -> int:
             **metrics(best_scores(after_found), evals, args.threshold),
             **naming(after_found, evals, names, args.threshold),
             "others": others_score(everything, evals, kinds, args.threshold),
+            "clear": clear_lines(everything, evals, kinds, args.threshold),
         }
         animal_names = [x for x in names if x not in (GENERIC, *OTHERS)]
         write_json(candidate / "id.json", {"names": animal_names, "sure": entry["after"]["sure"],
-                                           "per_name": entry["after"]["names"], "round": n})
+                                           "per_name": entry["after"]["names"],
+                                           "clear": entry["after"]["clear"], "round": n})
         print("After:", entry["after"], flush=True)
 
         _stop["hold"] = True  # from here a stop waits: the round finishes and is recorded as it is

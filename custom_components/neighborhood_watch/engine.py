@@ -65,6 +65,8 @@ from .const import (
     LOCAL_FIRST,
     DISAGREE_MIN,
     LOCAL_INFO_SECONDS,
+    CLEAR_ANIMAL_MAX,
+    SEEN_MIN,
     LOCAL_OFF,
     CONF_DETECTOR_URL,
     DETECTOR_SKIP,
@@ -1278,6 +1280,9 @@ class WatchEngine:
             local = self._local_verdict(detector, sure_only=True)
             if local is not None:
                 return local, label
+            if kinds := self._only_others(detector):
+                verdict = logic.Verdict(logic.NOTHING, logic.HIGH, "na", "", "", "", "")
+                return verdict, f"{label}: {' and '.join(kinds)}, no animal"
         verdict, models = await self._identify_capped(cam, free_only=free_only)
         if verdict.animal == logic.NO_ANSWER and naming != LOCAL_OFF:
             fill = self._local_verdict(detector, sure_only=False)
@@ -1314,6 +1319,10 @@ class WatchEngine:
                 "size": [body.get("width"), body.get("height")],
             }
             top = result["boxes"][0] if result["boxes"] else {}
+            if result["person"] or result["vehicle"]:
+                info = await self._local_info(url)
+                if info.get("clear"):
+                    result.update(clear_from=info["clear"], model=info.get("model"))
             if top.get("name"):  # a model trained on your animals: it names what it found
                 info = await self._local_info(url)
                 result.update(
@@ -1344,12 +1353,35 @@ class WatchEngine:
                 body = await response.json()
             if not isinstance(body, dict):
                 raise ValueError("not an object")
-            info = {"model": body.get("model"), "names": body.get("names") or [], "sure": body.get("sure") or {}}
+            info = {
+                "model": body.get("model"),
+                "names": body.get("names") or [],
+                "sure": body.get("sure") or {},
+                "clear": body.get("clear") or {},
+            }
             self._local_cache = (time.monotonic() + LOCAL_INFO_SECONDS, info, url)
         except Exception:  # noqa: BLE001 - one hiccup: what was known stands, asked again in 30 s
             info = known
             self._local_cache = (time.monotonic() + 30, info, url)
         return info
+
+    def _only_others(self, det: dict[str, Any] | None) -> list[str]:
+        """"person" / "vehicle" when the trained model has proved that what it sees is only
+        that: scored at or above that kind's line, and no animal found. Otherwise empty."""
+        if not det or det["animal"] >= min(CLEAR_ANIMAL_MAX, float(self.options.get(CONF_DETECTOR_MIN, 0.2))):
+            return []
+        lines = det.get("clear_from") or {}
+        return [
+            kind
+            for kind in ("person", "vehicle")
+            if lines.get(kind) is not None and det[kind] >= float(lines[kind])
+        ]
+
+    def _seen(self, det: dict[str, Any] | None, v: logic.Verdict) -> list[str]:
+        """People and vehicles the detector saw where no animal was named."""
+        if not det or v.animal != logic.NOTHING:
+            return []
+        return [kind for kind in ("person", "vehicle") if det.get(kind, 0.0) >= SEEN_MIN]
 
     def _local_verdict(self, det: dict[str, Any] | None, *, sure_only: bool) -> logic.Verdict | None:
         """The trained model's answer as a verdict. sure_only: only a name it has proved it
@@ -1735,6 +1767,9 @@ class WatchEngine:
             cam_state["current"] = v.animal
             cam_state["current_until"] = _iso(until)
 
+        seen = self._seen(check.detector, v)
+        if seen:
+            cam_state["last"]["seen"] = seen
         sid = uuid4().hex[:10]
         day = dt_util.as_local(now).date().isoformat()
         cam_state["last"]["id"] = sid
@@ -1757,6 +1792,7 @@ class WatchEngine:
                 or (wild and v.animal.lower() not in logic.HARMLESS),
                 "possible": wild and v.confidence == logic.LOW,
                 **({"disagree": True} if self._detector_disagrees(check) else {}),
+                **({"seen": seen} if seen else {}),
                 # An unknown animal keeps what its coat looked like, so the card can draw it.
                 **(
                     {"pattern": v.pattern, "base": v.base, "description": v.description}

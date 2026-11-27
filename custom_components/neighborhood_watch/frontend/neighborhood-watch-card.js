@@ -1144,7 +1144,7 @@ class NeighborhoodWatchCard extends HTMLElement {
             ${it.animal === "No answer" ? "" : `<button class="mini" data-answer="right" data-sid="${sid}" title="Right" aria-label="Right">✓</button>`}`;
       return `<div class="rev">
           <img class="thumb" data-frame="${sid}" data-crop="1" data-zoom="${sid}" alt="Sighting: ${esc(it.animal)} at ${esc(it.where)}" title="Tap to enlarge">
-          <div class="revname"${it.disagree ? ` title="The AI said nothing is there, but the detector saw an animal. Which is it?"` : ""}><b>${esc(it.animal)}</b> <span class="muted">${it.disagree ? "· detector saw an animal" : esc(it.confidence)}</span></div>
+          <div class="revname"${it.disagree ? ` title="The AI said nothing is there, but the detector saw an animal. Which is it?"` : ""}><b>${esc(it.animal)}</b> <span class="muted">${it.disagree ? "· detector saw an animal" : esc(it.confidence)}${seenText(it)}</span></div>
           <div class="muted small">${esc(it.where)} · ${clock(it.time)} · <span data-ago="${esc(it.time)}">${ago(it.time)}</span></div>
           <div class="acts">${pick}</div>
           ${this._typing === String(it.id) && this._typedMsg ? `<div class="muted small" role="alert">${esc(this._typedMsg)}</div>` : ""}
@@ -1360,7 +1360,7 @@ class NeighborhoodWatchCard extends HTMLElement {
           sid && !nothing
             ? `<button class="mini" data-answer="unsure" data-sid="${esc(sid)}" title="Not sure" aria-label="Not sure"${off}>?</button><button class="mini" data-answer="right" data-sid="${esc(sid)}" title="Right" aria-label="Right"${off}>✓</button>`
             : "";
-        return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
+        return `<div class="row"><span class="rname" data-more="${esc(c.keys.last_frame || "")}">${esc(c.name)}</span><span class="rinfo">${esc(s.state)}${seenText(a)}</span><span class="rcount">${clock(a.time)}</span>${buttons}</div>`;
       });
     return `<div class="section"><h2>Recent detections</h2>${rows.join("") || `<div class="muted">Nothing yet — checks run when a camera sees motion.</div>`}</div>`;
   }
@@ -1383,6 +1383,11 @@ class NeighborhoodWatchCard extends HTMLElement {
 }
 
 const FOLD_KEY = "neighborhood-watch-card-folded";
+// "Nothing" with a person or a car in the picture says so.
+const seenText = (it) => {
+  const words = ((it?.animal === "Nothing" && it.seen) || []).map((k) => ({ person: "person", vehicle: "car" })[k]).filter(Boolean);
+  return words.length ? ` · ${words.join(" and ")} seen` : "";
+};
 const TYPE_IT = "__type__"; // the "It was…" choice that opens a box to type an answer
 // How a sighting is listed in To review: a change means it's waiting again after an answer.
 const listedAs = (it) => `${it.animal}|${it.confidence}`;
@@ -1482,9 +1487,10 @@ const STYLE = `
   .revgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
   .undo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 8px; }
   .rev { display: flex; flex-direction: column; gap: 3px; padding: 6px; border-radius: 14px; background: var(--secondary-background-color); min-width: 0; }
-  .revname { font-size: .95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .revname { font-size: .95em; overflow-wrap: anywhere; }
   .small { font-size: .8em; }
   .rev .acts { gap: 4px; }
+  .rev .acts { margin-top: auto; }  /* answers line up when one title wraps */
   .rev select { flex: 1; min-width: 0; font-size: .85em; }
   .rev input.typed { flex: 1; min-width: 0; font: inherit; font-size: .85em; padding: 4px 10px; min-height: 32px; border-radius: 999px; border: 1px solid var(--divider-color); background: transparent; color: var(--primary-text-color); color-scheme: light dark; }
   .thumb { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--card-background-color); cursor: zoom-in; display: block; }

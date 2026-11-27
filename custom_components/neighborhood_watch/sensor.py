@@ -270,6 +270,7 @@ class ToReview(WatchEntity, SensorEntity):
                 {
                     **{k: s.get(k) for k in ("id", "time", "where", "animal", "confidence")},
                     **({"disagree": True} if s.get("disagree") else {}),
+                    **({"seen": s["seen"]} if s.get("seen") else {}),
                 }
                 for s in self._queue[:40]
             ],

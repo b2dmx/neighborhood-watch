@@ -159,3 +159,29 @@ def test_a_model_without_those_classes_works_as_before():
     d = _named_detector(["Pepper", "animal"], [([0, 0, 100, 100], [0.4, 0.3])])
     [found] = d.detect(Image.new("RGB", (1000, 1000)))
     assert (found["label"], found["name"], found["confidence"], found["name_confidence"]) == ("animal", "Pepper", 0.7, 0.4)
+
+
+def test_the_clear_line_stops_above_any_photo_that_had_an_animal(tmp_path):
+    def found(score, animal=0.0):
+        rows = [{"label": "person", "confidence": score}]
+        return rows + ([{"label": "animal", "confidence": animal}] if animal else [])
+
+    empties = [_sample(tmp_path, f"e{i}", False) for i in range(train.SURE_MIN_COUNT)]
+    scores = [found(0.8 + i / 1000) for i in range(len(empties))]
+    line = train.clear_lines(scores, empties, ["person"], 0.2)["person"]
+    assert 0.8 <= line <= 0.801
+    # A cat the model took for a person, scored among them: too few photos are left above it.
+    cat = _sample(tmp_path, "c", True)
+    assert train.clear_lines([*scores, found(0.807)], [*empties, cat], ["person"], 0.2) == {}
+    # Scored below them, or with the animal found too, it doesn't matter.
+    assert train.clear_lines([*scores, found(0.6)], [*empties, cat], ["person"], 0.2)["person"] == line
+    assert train.clear_lines([*scores, found(0.99, animal=0.5)], [*empties, cat], ["person"], 0.2)["person"] == line
+    assert train.clear_lines(scores[:-1], empties[:-1], ["person"], 0.2) == {}
+
+
+def test_a_nothing_the_model_decided_itself_is_not_proof_of_an_empty_photo(tmp_path):
+    s = _sample(tmp_path, "a", False, ai_confidence="high")
+    s.trust = "ai"
+    assert s.empty_ok
+    s.meta["named_by"] = "local"
+    assert not s.empty_ok

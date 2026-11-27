@@ -63,6 +63,8 @@ LOCAL_OFF = "off"  # never use its names
 LOCAL_FILL = "fill_in"  # only when no AI model answers
 LOCAL_FIRST = "first"  # a name it has proved it gets right is used without asking the AI
 LOCAL_NAMING_MODES = [LOCAL_FIRST, LOCAL_FILL, LOCAL_OFF]
+SEEN_MIN = 0.5  # a person or vehicle scored at least this is mentioned with a "nothing"
+CLEAR_ANIMAL_MAX = 0.2  # "only a person / car" needs every animal score below this (as measured in training)
 LOCAL_INFO_SECONDS = 600  # how long what the detector can name is remembered
 # The AI said nothing is there, but the detector saw an animal at least this surely: the
 # photo waits in To review. Your answer is a real empty scene to learn from, or a missed animal.

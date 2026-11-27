@@ -60,6 +60,7 @@ def main() -> None:
                     "labels": sorted(set(model.labels.values())),
                     "names": sorted(set(model.labels.values()) - {"animal", "person", "vehicle"}) if model.named else [],
                     "sure": model.id_info.get("sure", {}),
+                    "clear": model.id_info.get("clear", {}),
                     "device": model.device,
                     "available": core.available_devices,
                 }

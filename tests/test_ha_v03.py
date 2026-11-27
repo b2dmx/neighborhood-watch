@@ -1458,3 +1458,39 @@ async def test_a_photo_that_cant_be_saved_is_kept_and_saved_when_the_folder_is_b
     assert not w._unsaved
     (photo,) = list(w.dataset_root.rglob("*.jpg"))
     assert photo.with_suffix(".json").exists()
+
+
+async def _with_people_detector(hass, watch, aioclient_mock, person, animal=0.0, clear=None):
+    await _with_naming_detector(hass, watch, aioclient_mock, "Milo", animal, {})
+    aioclient_mock.clear_requests()
+    found = [{"label": "person", "confidence": person, "box": [1, 2, 30, 40]}]
+    if animal:
+        found.append({"label": "animal", "confidence": animal, "box": [8, 6, 32, 24]})
+    aioclient_mock.post("http://vision:8765/detect", json={"width": 64, "height": 48, "detections": found})
+    aioclient_mock.get(
+        "http://vision:8765/health", json={"ok": True, "model": "trained-8", "clear": clear or {}}
+    )
+    aioclient_mock.get("http://vision:8765/inbox", json={"items": []})
+
+
+async def test_a_photo_proved_to_hold_only_a_person_skips_the_ai(hass, watch, aioclient_mock):
+    await _with_people_detector(hass, watch, aioclient_mock, 0.9, clear={"person": 0.7})
+    await trigger(hass, "yard")
+    assert watch["ai"].calls == []
+    (event,) = watch["events"]
+    assert (event.data["animal"], event.data["confidence"]) == ("Nothing", "high")
+    assert event.data["models_used"] == "Local model (trained-8): person, no animal"
+    row = watch["entry"].runtime_data.sightings()[-1]
+    assert row["seen"] == ["person"]
+
+
+@pytest.mark.parametrize(
+    ("person", "animal", "clear"),
+    [(0.6, 0.0, {"person": 0.7}), (0.9, 0.3, {"person": 0.7}), (0.9, 0.0, {})],
+)
+async def test_the_ai_still_looks_without_that_proof_or_with_an_animal(
+    hass, watch, aioclient_mock, person, animal, clear
+):
+    await _with_people_detector(hass, watch, aioclient_mock, person, animal, clear)
+    await trigger(hass, "yard")
+    assert watch["ai"].calls[:1] == [FIRST]
